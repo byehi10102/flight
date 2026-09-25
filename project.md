@@ -379,6 +379,30 @@ Every change to the project, and why. Newest last.
     a decisive 2.5 m of clearance. Caught by the acceptance test only after the
     test dwells were shortened — a longer test had been passing on timing
     luck.
+29. **Buildings are now lit, not flat-coloured.** The massing used
+    `PerInstanceColorAppearance({ flat: true })`, which means no normals and no
+    sun: every face of every building got an identical colour, so a city looked
+    like coloured cardboard no matter how correct the footprints and heights
+    were. Switched to `flat: false` for per-vertex lighting against the real
+    sun direction. Measured over 11 239 buildings in Midtown, mean scene
+    luminance now tracks the sun — 78.9 / 65.0 / 57.2 as the light is swung from
+    high to raking to back-lit, with the tonal spread narrowing from 15/16 to
+    9/16 bands. That response is what makes massing read as solid geometry.
+    Restored `allowPicking: false` at the same time; the lighting edit had
+    briefly dropped it.
+30. **HUD relabelled from `FT MSL` to `ALT FT`.** The DEM is ellipsoidal
+    (EGM2008-referenced), so calling the reading MSL was a label the number
+    could not support — at Manhattan it was showing ~45 m where a published MSL
+    figure is ~2 m. Re:Earth does serve a `/cesium-mesh/geoid` endpoint, and it
+    looks like exactly what was needed, so it was tested: sampled at 12 airports
+    across five continents, the "geoid" value came back **identical to the
+    ellipsoid terrain value every time** (KJFK −32.7/−32.7, LFPG 44.5/44.5,
+    YSSY 22.2/22.2). Both endpoints serve the same EGM2008-blended dataset, and
+    the conversion produced errors up to 464 m. No keyless source offers a
+    separate geoid grid, so the conversion was not shipped and the label now
+    says what the number is. `AGL` is unchanged and is genuinely height above
+    the rendered surface, which is the figure that matters for terrain
+    clearance.
 
 ---
 
@@ -417,9 +441,13 @@ world streams as you fly.
 
 ## 10. Honest limitations
 
-- Buildings are **untextured massing geometry**. Correct footprints and correct
-  heights, plain facades. Photogrammetric detail is not available without a
-  paid imagery key, and this project deliberately has none.
+- Buildings are **untextured massing geometry**. Correct footprints, correct
+  heights, and correctly lit by the real sun, but plain facades with no windows
+  or surface detail. Photogrammetric detail is not available without a paid
+  imagery key, and this project deliberately has none.
+- Altitude is **ellipsoidal**, not orthometric MSL. No keyless source publishes
+  a geoid grid that matches the DEM, so the HUD says `ALT` rather than claiming
+  a datum it cannot deliver (§ change log, item 30).
 - Terrain is ~90 m class at z14. Fine rock and vegetation relief is smoothed.
 - No terminals, towers, taxiways, bridges or street furniture.
 - One aircraft type.

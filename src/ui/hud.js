@@ -53,11 +53,18 @@ export class Hud {
     this.speedValue = el("div", "pfd-value", pfd);
     el("div", "pfd-label", pfd).textContent = "KIAS";
     this.altValue = el("div", "pfd-value", pfd);
-    el("div", "pfd-label", pfd).textContent = "FT MSL";
+    // Deliberately not "FT MSL". The DEM is ellipsoidal (EGM2008-referenced),
+    // which is what every 3D globe uses and what the terrain is actually
+    // rendered from. Re:Earth's `/geoid` and `/ellipsoid` endpoints serve the
+    // same blended dataset, so no keyless source gives a separate geoid grid to
+    // convert with — claiming MSL would be a label the number cannot support.
+    el("div", "pfd-label", pfd).textContent = "ALT FT";
     this.vsValue = el("div", "pfd-value", pfd);
     el("div", "pfd-label", pfd).textContent = "VS F/M";
     this.headingValue = el("div", "pfd-value", pfd);
     el("div", "pfd-label", pfd).textContent = "HDG";
+    // Height above the rendered terrain surface. This one is genuinely AGL, and
+    // it is the number that matters for terrain clearance.
     this.aglValue = el("div", "pfd-value", pfd);
     el("div", "pfd-label", pfd).textContent = "AGL FT";
 

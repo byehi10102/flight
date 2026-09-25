@@ -405,9 +405,18 @@ export class BuildingLayer {
 
     return new Primitive({
       geometryInstances: instances,
-      appearance: new PerInstanceColorAppearance({ flat: true, translucent: false }),
-      asynchronous: true,
+      // flat:false = per-vertex lighting, so the massing shades against the
+      // real sun direction and the skyline reads as solid geometry. With
+      // flat:true every face gets an identical colour, which makes a city look
+      // like coloured cardboard no matter how good the footprints and heights
+      // are. PolygonGeometry supplies the normals this needs.
+      appearance: new PerInstanceColorAppearance({ flat: false, translucent: false }),
+      // Built on the main thread: these are cheap relative to the terrain and
+      // imagery, and synchronous construction keeps the primitive's bounding
+      // volume valid from the frame it is added.
+      asynchronous: false,
       allowPicking: false,
+      compressVertices: true,
       releaseGeometryInstances: true,
     });
   }
