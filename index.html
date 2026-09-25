@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Skyward — an open flight simulator on a real 3D Earth</title>
+    <meta
+      name="description"
+      content="Fly anywhere on Earth over real terrain, real 3D buildings and real runways. No API keys, no accounts, no downloads."
+    />
+    <link rel="preconnect" href="https://tile.openstreetmap.org" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/src/ui/style.css" />
+  </head>
+  <body>
+    <div id="cesiumContainer" class="cesium-container"></div>
+
+    <div id="app" class="app"></div>
+
+    <div id="boot" class="boot">
+      <div class="boot-inner">
+        <div class="boot-mark">SKYWARD</div>
+        <div class="boot-sub">Real terrain · Real buildings · Real runways</div>
+        <div id="load-status" class="boot-status">Building the world…</div>
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

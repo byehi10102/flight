@@ -1,0 +1,14 @@
+node_modules/
+dist/
+.env
+.env.local
+.DS_Store
+*.log
+.vite/
+
+.cache/
+
+# test artefacts
+shot-*.png
+verify-*.png
+diag*.png

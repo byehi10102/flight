@@ -1,0 +1,490 @@
+/* Skyward — HUD and control panel styling.
+   Dark, high-contrast, instrument-panel feel. Everything sits above the globe
+   with pointer-events disabled except the controls themselves, so dragging
+   over the HUD never blocks the camera. */
+
+:root {
+  --bg: #070b11;
+  --panel: rgba(10, 16, 24, 0.82);
+  --panel-solid: #0b1119;
+  --line: rgba(120, 190, 230, 0.22);
+  --text: #dce9f4;
+  --muted: #7f95a8;
+  --accent: #5fd0ff;
+  --warn: #ffb648;
+  --danger: #ff5a5a;
+  --good: #6ee7a8;
+  --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  --sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+.cesium-container {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  display: block;
+  touch-action: none;
+}
+
+.app {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 10;
+}
+
+body.hide-ui .app {
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+body.paused .hud-status::after {
+  content: " · PAUSED";
+  color: var(--warn);
+}
+
+/* ── Boot splash ─────────────────────────────────────────────────────────── */
+.boot {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  background: radial-gradient(circle at 50% 40%, #0e1a26 0%, #05080d 70%);
+  transition: opacity 0.5s ease, visibility 0.5s ease;
+}
+body.ready .boot {
+  opacity: 0;
+  visibility: hidden;
+}
+.boot-inner {
+  text-align: center;
+}
+.boot-mark {
+  font-family: var(--mono);
+  font-size: clamp(2.2rem, 7vw, 4.2rem);
+  letter-spacing: 0.34em;
+  font-weight: 600;
+  color: var(--accent);
+  text-shadow: 0 0 32px rgba(95, 208, 255, 0.35);
+}
+.boot-sub {
+  margin-top: 0.9rem;
+  color: var(--muted);
+  font-size: 0.86rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+.boot-status {
+  margin-top: 1.6rem;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 0.78rem;
+}
+
+/* ── HUD ─────────────────────────────────────────────────────────────────── */
+.hud {
+  position: absolute;
+  inset: 0;
+  font-family: var(--mono);
+  pointer-events: none;
+}
+
+.hud-block {
+  position: absolute;
+  padding: 0.65rem 0.9rem;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  backdrop-filter: blur(9px);
+}
+.hud-tl {
+  top: 1rem;
+  left: 1rem;
+}
+.hud-tr {
+  top: 1rem;
+  right: 1rem;
+  text-align: right;
+}
+.hud-readout {
+  font-size: 0.92rem;
+  color: var(--text);
+}
+.hud-sub {
+  margin-top: 0.25rem;
+  font-size: 0.7rem;
+  color: var(--muted);
+  letter-spacing: 0.05em;
+  max-width: 34ch;
+}
+
+.hud-status {
+  position: absolute;
+  top: 1rem;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 0.4rem 1.1rem;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 0.72rem;
+  letter-spacing: 0.22em;
+  color: var(--good);
+}
+.hud-stall {
+  position: absolute;
+  top: 3.6rem;
+  left: 50%;
+  transform: translateX(-50%);
+  color: var(--danger);
+  font-size: 0.9rem;
+  letter-spacing: 0.3em;
+  opacity: 0;
+  transition: opacity 0.12s linear;
+  animation: blink 0.55s steps(2, end) infinite;
+}
+@keyframes blink {
+  50% {
+    opacity: 0.15;
+  }
+}
+
+/* Primary flight display */
+.hud-pfd {
+  position: absolute;
+  bottom: 1.1rem;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 1.6rem;
+  padding: 0.7rem 1.5rem;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  backdrop-filter: blur(9px);
+}
+.pfd-value {
+  font-size: 1.32rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent);
+  text-align: center;
+  min-width: 4.6ch;
+}
+.pfd-label {
+  margin-top: 0.15rem;
+  font-size: 0.56rem;
+  letter-spacing: 0.16em;
+  color: var(--muted);
+  text-align: center;
+}
+
+/* Attitude indicator */
+.hud-horizon {
+  position: absolute;
+  bottom: 6.4rem;
+  left: 1rem;
+  width: 148px;
+  height: 148px;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  overflow: hidden;
+  backdrop-filter: blur(9px);
+}
+.hud-horizon-clip {
+  position: absolute;
+  inset: -40%;
+  transform-origin: 50% 50%;
+}
+.hud-horizon-sky,
+.hud-horizon-ground {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 200%;
+}
+.hud-horizon-sky {
+  top: -100%;
+  background: linear-gradient(#2a6f9e, #4d9fd0);
+}
+.hud-horizon-ground {
+  top: 100%;
+  background: linear-gradient(#6b5334, #40301c);
+}
+.hud-horizon-line {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.85);
+}
+.hud-bank-pointer {
+  position: absolute;
+  top: 5px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0;
+  height: 0;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 7px solid var(--warn);
+}
+.hud-pitch-ladder {
+  position: absolute;
+  inset: 0;
+}
+.hud-ladder-rung {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 0.56rem;
+  color: rgba(255, 255, 255, 0.7);
+  background: var(--panel-solid);
+  padding: 0 3px;
+  border-radius: 3px;
+}
+
+/* Throttle */
+.hud-throttle {
+  position: absolute;
+  bottom: 6.4rem;
+  right: 1rem;
+  width: 34px;
+  height: 148px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  display: flex;
+  align-items: flex-end;
+  padding: 3px;
+  backdrop-filter: blur(9px);
+}
+.hud-throttle-fill {
+  width: 100%;
+  background: linear-gradient(#5fd0ff, #2b8fbf);
+  border-radius: 5px;
+  transition: height 0.08s linear;
+}
+.hud-throttle-label {
+  position: absolute;
+  bottom: -1.05rem;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 0.54rem;
+  color: var(--muted);
+  letter-spacing: 0.12em;
+}
+
+/* ── Control panel ───────────────────────────────────────────────────────── */
+.panel {
+  position: absolute;
+  top: 5.2rem;
+  left: 1rem;
+  width: 20rem;
+  max-height: calc(100vh - 14rem);
+  overflow-y: auto;
+  padding: 0.9rem;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  backdrop-filter: blur(11px);
+  pointer-events: auto;
+  scrollbar-width: thin;
+}
+.panel-title {
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.24em;
+  color: var(--accent);
+  margin-bottom: 0.7rem;
+}
+.panel-input {
+  width: 100%;
+  padding: 0.55rem 0.7rem;
+  font-family: var(--sans);
+  font-size: 0.86rem;
+  color: var(--text);
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  outline: none;
+}
+.panel-input:focus {
+  border-color: var(--accent);
+}
+.panel-section {
+  margin: 0.9rem 0 0.4rem;
+  font-family: var(--mono);
+  font-size: 0.58rem;
+  letter-spacing: 0.2em;
+  color: var(--muted);
+}
+.panel-results {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.panel-row {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 0.42rem 0.55rem;
+  text-align: left;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid transparent;
+  border-radius: 7px;
+  color: var(--text);
+  cursor: pointer;
+  font-family: inherit;
+}
+.panel-row:hover {
+  background: rgba(95, 208, 255, 0.1);
+  border-color: var(--line);
+}
+.row-title {
+  font-size: 0.78rem;
+}
+.row-detail {
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  color: var(--muted);
+}
+.panel-empty {
+  padding: 0.4rem 0.55rem;
+  font-size: 0.74rem;
+  color: var(--muted);
+}
+.panel-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.preset {
+  padding: 0.32rem 0.55rem;
+  font-family: var(--sans);
+  font-size: 0.72rem;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  cursor: pointer;
+}
+.preset:hover {
+  background: rgba(95, 208, 255, 0.14);
+}
+.panel-help {
+  margin-top: 0.9rem;
+  padding-top: 0.7rem;
+  border-top: 1px solid var(--line);
+  font-size: 0.68rem;
+  line-height: 1.65;
+  color: var(--muted);
+}
+.panel-help b {
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* Preset bar */
+.preset-bar {
+  position: absolute;
+  top: 1rem;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 4px;
+  padding: 0.3rem;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  backdrop-filter: blur(9px);
+  pointer-events: auto;
+  max-width: min(46rem, calc(100vw - 2rem));
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.preset-bar::-webkit-scrollbar {
+  display: none;
+}
+.preset-bar .preset {
+  white-space: nowrap;
+}
+
+/* Time control */
+.time-control {
+  position: absolute;
+  top: 4.3rem;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.3rem 0.7rem;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  backdrop-filter: blur(9px);
+  pointer-events: auto;
+  font-family: var(--mono);
+  font-size: 0.58rem;
+  letter-spacing: 0.14em;
+  color: var(--muted);
+}
+.time-control input[type="range"] {
+  width: 8rem;
+  accent-color: var(--accent);
+}
+#time-readout {
+  color: var(--accent);
+  min-width: 4ch;
+}
+
+/* Cesium widget chrome — keep it dark so it doesn't fight the HUD. */
+.cesium-widget-credits {
+  font-size: 10px;
+  opacity: 0.75;
+}
+.cesium-viewer-bottom {
+  display: none;
+}
+
+@media (max-width: 720px) {
+  .panel {
+    width: calc(100vw - 2rem);
+    max-height: 34vh;
+  }
+  .hud-pfd {
+    gap: 0.9rem;
+    padding: 0.5rem 0.8rem;
+  }
+  .pfd-value {
+    font-size: 1.05rem;
+  }
+  .hud-horizon,
+  .hud-throttle {
+    display: none;
+  }
+  .time-control {
+    top: auto;
+    bottom: 5.4rem;
+  }
+}
