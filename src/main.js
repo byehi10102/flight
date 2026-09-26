@@ -8,6 +8,7 @@ import { PlanePhysics } from "./plane/planePhysics.js";
 import { PlaneController } from "./plane/planeController.js";
 import { PlaneModel } from "./plane/planeModel.js";
 import { Hud } from "./ui/hud.js";
+import { reverseGeocode, calculateDistance } from "./utils/geo.js";
 
 const States = {
   MENU: "MENU",
@@ -42,6 +43,10 @@ let spawnMarker = null;
 let initialCameraView = null;
 let flightStartTime = 0;
 let lastCrashCheck = 0;
+let minimapUpdateTimer = 0;
+let geocodeTimer = 0;
+let lastGeocodePos = { lon: 0, lat: 0 };
+let currentRegionName = null;
 
 // ── DOM refs ─────────────────────────────────────────────────────────────────
 const mainMenu = document.getElementById("mainMenu");
@@ -53,6 +58,9 @@ const startBtn = document.getElementById("startBtn");
 const loadingIndicator = document.getElementById("loadingIndicator");
 const loadingText = document.getElementById("loadingText");
 const vignette = document.getElementById("transition-vignette");
+const locationSearch = document.getElementById("locationSearch");
+const searchResults = document.getElementById("search-results");
+const instructionText = document.getElementById("instruction-text");
 
 const loadingStatus = { model: false, cesium: false, globe: false, failed: false };
 
@@ -89,7 +97,6 @@ updateLoadingUI();
 
 groundSampler = new GroundSampler(viewer);
 
-// Globe surface loading tracker
 let globeLoadingStarted = false;
 const unregisterGlobeTracker = viewer.scene.postRender.addEventListener(() => {
   const tilesLoaded = viewer.scene.globe.tilesLoaded;
@@ -122,7 +129,7 @@ function initThree() {
   scene = new THREE.Scene();
   camera = new THREE.PerspectiveCamera(CONFIG.camera.fov, window.innerWidth / window.innerHeight, CONFIG.camera.near, CONFIG.camera.far);
 
-  renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+  renderer = new THREE.WebGLRenderer({ alpha: true, antialiasing: true });
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.setPixelRatio(window.devicePixelRatio);
   renderer.setClearColor(0x000000, 0);
@@ -162,14 +169,38 @@ function movePosition(lon, lat, alt, heading, pitch, distance) {
   };
 }
 
-// ── Camera ───────────────────────────────────────────────────────────────────
-function setCameraToPlane(lon, lat, alt, heading, pitch, roll) {
+// ── Camera: behind and above the airplane ───────────────────────────────────
+function updateChaseCamera(heading, pitch, roll, cameraYaw, cameraPitch) {
+  const planeHPR = new Cesium.HeadingPitchRoll(
+    Cesium.Math.toRadians(heading),
+    Cesium.Math.toRadians(pitch),
+    Cesium.Math.toRadians(roll)
+  );
+  const planeQuat = Cesium.Quaternion.fromHeadingPitchRoll(planeHPR);
+
+  const orbitHPR = new Cesium.HeadingPitchRoll(
+    Cesium.Math.toRadians(cameraYaw),
+    Cesium.Math.toRadians(-cameraPitch),
+    0
+  );
+  const orbitQuat = Cesium.Quaternion.fromHeadingPitchRoll(orbitHPR);
+
+  const finalQuat = Cesium.Quaternion.multiply(planeQuat, orbitQuat, new Cesium.Quaternion());
+  const finalHPR = Cesium.HeadingPitchRoll.fromQuaternion(finalQuat);
+
+  // Position camera behind and above the airplane
+  const planeCartesian = Cesium.Cartesian3.fromDegrees(state.lon, state.lat, state.alt);
+  const offset = new Cesium.Cartesian3(0, -60, 20); // behind 60m, above 20m
+
+  constenuMatrix = Cesium.Transforms.eastNorthUpToFixedFrame(planeCartesian);
+  const rotatedOffset = Cesium.Matrix4.multiplyByPoint(enuMatrix, offset, new Cesium.Cartesian3());
+
   viewer.camera.setView({
-    destination: Cesium.Cartesian3.fromDegrees(lon, lat, alt),
+    destination: rotatedOffset,
     orientation: {
-      heading: Cesium.Math.toRadians(heading),
-      pitch: Cesium.Math.toRadians(pitch),
-      roll: Cesium.Math.toRadians(roll),
+      heading: finalHPR.heading,
+      pitch: Cesium.Math.toRadians(-5), // slightly above looking down at plane
+      roll: finalHPR.roll,
     },
   });
   viewer.scene.requestRender();
@@ -186,14 +217,14 @@ function enterSpawnPicking(useVignette = true) {
     if (uiContainer) uiContainer.classList.add("hidden");
     currentState = States.PICK_SPAWN;
     if (confirmSpawnBtn) confirmSpawnBtn.classList.add("hidden");
+    if (searchResults) searchResults.style.display = "none";
+    if (locationSearch) locationSearch.value = "";
 
-    const instructionText = document.getElementById("instruction-text");
     if (instructionText) {
       instructionText.style.display = "block";
-      instructionText.textContent = "CLICK ANYWHERE ON THE MAP TO CHOOSE SPAWN POINT";
+      instructionText.textContent = "CLICK ANYWHERE ON THE MAP OR SEARCH FOR A LOCATION";
     }
 
-    // Enable camera controls for picking
     const ctrl = viewer.scene.screenSpaceCameraController;
     ctrl.enableRotate = true;
     ctrl.enableTranslate = true;
@@ -223,7 +254,6 @@ function exitSpawnPicking() {
   currentState = States.MENU;
   loadingIndicator.classList.add("hidden");
 
-  // Disable camera controls
   const ctrl = viewer.scene.screenSpaceCameraController;
   ctrl.enableRotate = false;
   ctrl.enableTranslate = false;
@@ -242,12 +272,111 @@ function exitSpawnPicking() {
   });
 }
 
+// ── Search ───────────────────────────────────────────────────────────────────
+let searchDebounce = null;
+
+function setupSearch() {
+  if (!locationSearch) return;
+
+  locationSearch.addEventListener("input", () => {
+    clearTimeout(searchDebounce);
+    const query = locationSearch.value.trim();
+    if (query.length < 3) {
+      searchResults.style.display = "none";
+      return;
+    }
+    searchDebounce = setTimeout(() => performSearch(query), 500);
+  });
+
+  locationSearch.addEventListener("keydown", (e) => {
+    e.stopPropagation();
+    if (e.key === "Enter") {
+      const query = locationSearch.value.trim();
+      if (query.length >= 3) performSearch(query);
+    }
+  });
+
+  // Hide search results when clicking outside
+  document.addEventListener("click", (e) => {
+    if (!locationSearch.contains(e.target) && !searchResults.contains(e.target)) {
+      searchResults.style.display = "none";
+    }
+  });
+}
+
+async function performSearch(query) {
+  try {
+    searchResults.style.display = "block";
+    searchResults.innerHTML = '<div class="search-result-item">Searching...</div>';
+
+    const response = await fetch(
+      `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=5`
+    );
+    const data = await response.json();
+
+    searchResults.innerHTML = "";
+    if (data.length === 0) {
+      searchResults.innerHTML = '<div class="search-result-item">No results found</div>';
+      return;
+    }
+
+    data.forEach((item) => {
+      const div = document.createElement("div");
+      div.className = "search-result-item";
+      div.textContent = item.display_name;
+      div.addEventListener("click", () => selectSearchResult(parseFloat(item.lon), parseFloat(item.lat), item.display_name));
+      searchResults.appendChild(div);
+    });
+  } catch (error) {
+    console.error("Search error:", error);
+    searchResults.innerHTML = '<div class="search-result-item">Search unavailable</div>';
+  }
+}
+
+function selectSearchResult(lon, lat, name) {
+  state.lon = lon;
+  state.lat = lat;
+  state.alt = 1500;
+
+  if (instructionText) instructionText.textContent = name.split(",")[0].toUpperCase();
+
+  // Sample terrain
+  groundSampler.seed([[lat, lon]]).then(() => {
+    const ground = groundSampler.get(lat, lon, 0);
+    state.alt = ground + 1500;
+  }).catch(() => {});
+
+  // Fly camera to location
+  viewer.camera.flyTo({
+    destination: Cesium.Cartesian3.fromDegrees(lon, lat, 5000),
+    duration: 1.5,
+  });
+
+  // Place marker
+  if (spawnMarker) viewer.entities.remove(spawnMarker);
+  spawnMarker = viewer.entities.add({
+    position: Cesium.Cartesian3.fromDegrees(lon, lat),
+    point: {
+      pixelSize: 15,
+      color: Cesium.Color.RED,
+      outlineColor: Cesium.Color.WHITE,
+      outlineWidth: 2,
+      disableDepthTestDistance: Number.POSITIVE_INFINITY,
+    },
+  });
+
+  if (confirmSpawnBtn) confirmSpawnBtn.classList.remove("hidden");
+  if (searchResults) searchResults.style.display = "none";
+  if (locationSearch) locationSearch.value = name;
+}
+
 function setupSpawnPicker() {
   const handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
-  const instructionText = document.getElementById("instruction-text");
 
   handler.setInputAction((click) => {
     if (currentState !== States.PICK_SPAWN) return;
+    // Don't trigger if clicking on search UI
+    if (click.position.x < 0 || click.position.y < 0) return;
 
     const ray = viewer.camera.getPickRay(click.position);
     const cartesian = viewer.scene.globe.pick(ray, viewer.scene);
@@ -263,25 +392,14 @@ function setupSpawnPicker() {
 
       if (instructionText) instructionText.textContent = "FETCHING LOCATION INFO...";
 
-      // Sample terrain for accurate altitude
       groundSampler.seed([[lat, lon]]).then(() => {
         const ground = groundSampler.get(lat, lon, cartographic.height || 0);
         state.alt = ground + 1500;
       }).catch(() => {});
 
-      // Reverse geocode for region name
-      fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=5&addressdetails=1`)
-        .then((r) => r.json())
-        .then((data) => {
-          if (data && data.address && currentState === States.PICK_SPAWN) {
-            const addr = data.address;
-            const region = addr.state || addr.region || addr.province;
-            const country = addr.country;
-            const name = region && country ? `${region}, ${country}`.toUpperCase() : (country || "").toUpperCase();
-            if (name && instructionText) instructionText.textContent = name;
-          }
-        })
-        .catch(() => {});
+      reverseGeocode(lon, lat).then((name) => {
+        if (name && instructionText) instructionText.textContent = name;
+      }).catch(() => {});
 
       if (spawnMarker) viewer.entities.remove(spawnMarker);
       spawnMarker = viewer.entities.add({
@@ -300,8 +418,9 @@ function setupSpawnPicker() {
   }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
 }
 
-// ── Confirm spawn ────────────────────────────────────────────────────────────
+// ── Confirm spawn with transition animation ──────────────────────────────────
 function confirmSpawn() {
+  // Step 1: Fade to black
   if (vignette) vignette.style.opacity = "1";
 
   setTimeout(() => {
@@ -322,7 +441,6 @@ function confirmSpawn() {
     state.pitch = 0;
     state.roll = 0;
 
-    // Use camera heading as spawn heading
     try {
       const cam = viewer.camera;
       if (cam && typeof cam.heading === "number") {
@@ -343,22 +461,25 @@ function confirmSpawn() {
 
     currentState = States.TRANSITIONING;
 
-    // Fly camera to spawn point
+    // Step 2: Pan down to spawn location (the animation from reference)
     viewer.camera.flyTo({
-      destination: Cesium.Cartesian3.fromDegrees(state.lon, state.lat, state.alt),
+      destination: Cesium.Cartesian3.fromDegrees(state.lon, state.lat, state.alt + 500),
       orientation: {
         heading: Cesium.Math.toRadians(state.heading),
-        pitch: Cesium.Math.toRadians(state.pitch),
-        roll: Cesium.Math.toRadians(state.roll),
+        pitch: Cesium.Math.toRadians(-30), // start looking down
+        roll: 0,
       },
       duration: 2.0,
       easingFunction: Cesium.EasingFunction.QUADRATIC_IN_OUT,
       complete: () => {
-        flightStartTime = Date.now();
-        if (uiContainer) uiContainer.classList.remove("hidden");
-        if (threeContainer) threeContainer.classList.remove("hidden");
-        currentState = States.FLYING;
-        if (vignette) vignette.style.opacity = "0";
+        // Step 3: Transition to chase camera behind airplane
+        setTimeout(() => {
+          flightStartTime = Date.now();
+          if (uiContainer) uiContainer.classList.remove("hidden");
+          if (threeContainer) threeContainer.classList.remove("hidden");
+          currentState = States.FLYING;
+          if (vignette) vignette.style.opacity = "0";
+        }, 500);
       },
     });
   }, 500);
@@ -386,30 +507,11 @@ function update(dt) {
   // Check crash
   checkCrash();
 
-  // Update camera behind the airplane
-  const planeHPR = new Cesium.HeadingPitchRoll(
-    Cesium.Math.toRadians(state.heading),
-    Cesium.Math.toRadians(state.pitch),
-    Cesium.Math.toRadians(state.roll)
-  );
-  const planeQuat = Cesium.Quaternion.fromHeadingPitchRoll(planeHPR);
+  // Check GPWS
+  checkGPWS();
 
-  const orbitHPR = new Cesium.HeadingPitchRoll(
-    Cesium.Math.toRadians(input.cameraYaw),
-    Cesium.Math.toRadians(-input.cameraPitch),
-    0
-  );
-  const orbitQuat = Cesium.Quaternion.fromHeadingPitchRoll(orbitHPR);
-
-  const finalQuat = Cesium.Quaternion.multiply(planeQuat, orbitQuat, new Cesium.Quaternion());
-  const finalHPR = Cesium.HeadingPitchRoll.fromQuaternion(finalQuat);
-
-  setCameraToPlane(
-    state.lon, state.lat, state.alt,
-    Cesium.Math.toDegrees(finalHPR.heading),
-    Cesium.Math.toDegrees(finalHPR.pitch),
-    Cesium.Math.toDegrees(finalHPR.roll)
-  );
+  // Update chase camera (behind and above)
+  updateChaseCamera(state.heading, state.pitch, state.roll, input.cameraYaw, input.cameraPitch);
 
   // Update Three.js plane model
   planeModel.update(
@@ -418,6 +520,40 @@ function update(dt) {
     dt,
     physicsResult.isBoosting
   );
+
+  // Update region name
+  const now = Date.now();
+  const distFromLast = calculateDistance(state.lon, state.lat, lastGeocodePos.lon, lastGeocodePos.lat);
+  if (now - geocodeTimer > 10000 || distFromLast > 1000) {
+    geocodeTimer = now;
+    lastGeocodePos = { lon: state.lon, lat: state.lat };
+    reverseGeocode(state.lon, state.lat).then((name) => {
+      if (name && name !== currentRegionName) {
+        currentRegionName = name;
+        hud.showRegion(name);
+      }
+    });
+  }
+}
+
+function checkGPWS() {
+  if (currentState !== States.FLYING) return;
+  const cartographic = Cesium.Cartographic.fromDegrees(state.lon, state.lat);
+  const terrainHeight = viewer.scene.globe.getHeight(cartographic);
+  if (terrainHeight === undefined) return;
+
+  const agl = state.alt - terrainHeight;
+  const pitchRad = Cesium.Math.toRadians(state.pitch);
+  const verticalSpeed = state.speed * Math.sin(pitchRad);
+
+  let showWarning = false;
+  if (state.pitch < -1) {
+    if (agl < 450) {
+      if (agl < 150) showWarning = true;
+      if (verticalSpeed < -20) showWarning = true;
+    }
+  }
+  hud.setPullUpWarning(showWarning);
 }
 
 function checkCrash() {
@@ -444,7 +580,6 @@ function animate() {
   const now = performance.now();
 
   if (currentState === States.FLYING || currentState === States.PAUSED || currentState === States.TRANSITIONING) {
-    // Sync Three.js camera with Cesium camera
     if (viewer && viewer.camera) {
       const cesiumCamera = viewer.camera;
       const fov = Cesium.Math.toDegrees(cesiumCamera.frustum.fovy);
@@ -452,7 +587,6 @@ function animate() {
       camera.aspect = window.innerWidth / window.innerHeight;
       camera.updateProjectionMatrix();
 
-      // Copy position and orientation from Cesium camera
       camera.position.set(
         cesiumCamera.position.x,
         cesiumCamera.position.y,
@@ -469,8 +603,14 @@ function animate() {
       update(dt);
     }
 
-    // Update HUD
     if (hud) hud.update(state, now);
+
+    // Update minimap at 10 Hz
+    minimapUpdateTimer += dt;
+    if (minimapUpdateTimer > 0.1) {
+      minimapUpdateTimer = 0;
+      hud.updateMinimap(state);
+    }
 
     renderer.autoClear = false;
     renderer.clear();
@@ -548,6 +688,7 @@ initialCameraView = {
 
 initThree();
 setupSpawnPicker();
+setupSearch();
 attachTerrain(viewer).catch(() => {});
 setSunForTime(viewer, 12);
 

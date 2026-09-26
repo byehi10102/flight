@@ -12,6 +12,7 @@
     <div id="cesiumContainer"></div>
     <div id="threeContainer"></div>
 
+    <!-- Main Menu -->
     <div id="mainMenu" class="overlay">
       <div class="menu-container">
         <div class="menu-content">
@@ -22,38 +23,92 @@
           <p class="menu-desc">Fly anywhere on Earth over real 3D terrain. No API keys, no accounts.</p>
           <button id="startBtn" class="menu-btn">START FLIGHT</button>
           <div class="controls-help">
-            <b>Controls:</b> W/S Throttle · Arrow Keys Pitch/Roll · A/D Yaw · Space Boost · Mouse Drag Look Around
+            <b>Controls:</b><br/>
+            W/S — Throttle · Arrows — Pitch/Roll<br/>
+            A/D — Yaw · Space — Boost<br/>
+            Mouse Drag — Look Around
           </div>
         </div>
       </div>
     </div>
 
+    <!-- Loading -->
     <div id="loadingIndicator" class="loading-container">
       <div class="spinner"></div>
       <div id="loadingText" class="loading-text">Loading...</div>
     </div>
 
+    <!-- Spawn Picker -->
     <div id="spawnInstruction" class="hidden">
       <div id="spawn-top-ui" class="spawn-hud-top">
-        <div id="instruction-text">CLICK ANYWHERE ON THE MAP TO CHOOSE SPAWN POINT</div>
+        <div id="spawn-instruction">
+          <span id="instruction-text">CLICK ANYWHERE ON THE MAP OR SEARCH FOR A LOCATION</span>
+          <input type="text" id="locationSearch" placeholder="Search city, zipcode, or location..." />
+          <div id="search-results"></div>
+        </div>
       </div>
-      <button id="confirmSpawnBtn" class="menu-btn hidden">CONFIRM SPAWN POINT</button>
+      <button id="confirmSpawnBtn" class="menu-btn hidden spawn-confirm-btn">SPAWN HERE</button>
     </div>
 
+    <!-- HUD -->
     <div id="uiContainer" class="hidden">
-      <div id="hud-top-left">
-        SPD <span id="speed">0</span> KT<br/>
-        ALT <span id="altitude">0</span> FT<br/>
-        HDG <span id="heading">000</span>&deg;
+      <!-- Compass -->
+      <div id="compass-container">
+        <div id="compass-center-marker"></div>
+        <div id="compass-tape"></div>
       </div>
+      <div id="heading-display">000</div>
+
+      <!-- Top-left: Time + Score -->
+      <div id="hud-top-left">
+        TIME <span id="time">00:00:00</span><br/>
+        SCORE <span id="score">000000</span>
+      </div>
+
+      <!-- Top-right: FPS + Date -->
       <div id="hud-top-right">
-        THR <span id="throttle">0</span>%<br/>
-        <span id="coords">0.0000, 0.0000</span>
+        FPS <span id="fps">60</span><br/>
+        <span id="local-datetime">01 JAN 26 | 00:00:00</span>
+      </div>
+
+      <!-- Speed box -->
+      <div id="hud-speed-box">
+        <div class="label">SPEED</div>
+        <div class="value-box">
+          <span id="speed">0</span>
+        </div>
+      </div>
+
+      <!-- Altitude box -->
+      <div id="hud-alt-box">
+        <div class="label">ALT</div>
+        <div class="value-box">
+          <span id="altitude">0</span>
+        </div>
+      </div>
+
+      <!-- Coordinates -->
+      <div id="coords">0.0000, 0.0000</div>
+
+      <!-- Region notification -->
+      <div id="region-notification" class="hidden">
+        <div class="region-label">ENTERING AREA</div>
+        <div id="region-name">REGION NAME</div>
+      </div>
+
+      <!-- Pull up warning -->
+      <div id="pull-up-warning" class="hidden">PULL UP</div>
+
+      <!-- Minimap -->
+      <div id="minimap-container">
+        <canvas id="minimap"></canvas>
       </div>
     </div>
 
+    <!-- Transition vignette -->
     <div id="transition-vignette"></div>
 
+    <!-- Pause Menu -->
     <div id="pauseMenu" class="overlay hidden">
       <div class="pause-content">
         <h2>PAUSED</h2>
