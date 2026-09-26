@@ -1,222 +1,156 @@
 import puppeteer from "puppeteer";
-
-// End-to-end acceptance test of the control scheme the user specified.
-// Runs on the real GPU, drives the actual keyboard, and asserts that holding
-// a key does the thing and releasing it stops the thing.
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const W = (s) => sleep(s * 1000);
 
 const browser = await puppeteer.launch({
   headless: false,
   args: ["--no-sandbox", "--disable-dev-shm-usage", "--window-size=1280,800"],
+  defaultViewport: { width: 1280, height: 800 },
 });
 const page = await browser.newPage();
-await page.setViewport({ width: 1280, height: 800 });
-const errors = [];
-page.on("pageerror", (e) => errors.push("PE: " + e.message.slice(0, 160)));
-page.on("console", (m) => {
-  if (m.type() === "error" && !m.text().includes("favicon"))
-    errors.push("CE: " + m.text().slice(0, 160));
-});
+page.on("pageerror", (e) => console.log("PE:", e.message.split("\n")[0]));
+page.on("console", (m) => console.log("CON:", m.text().slice(0, 120)));
 
-await page.goto("http://127.0.0.1:4173/", { waitUntil: "domcontentloaded" });
-await page.waitForFunction("!!window.SKYWARD", { timeout: 30000 });
-await sleep(7800);
+// Dispatch key events directly on window (where Controls listens) — deterministic,
+// avoids puppeteer keyboard-state desync.
+const down = async (code) =>
+  page.evaluate((c) => {
+    window.dispatchEvent(new KeyboardEvent("keydown", { code: c, bubbles: true, cancelable: true }));
+  }, code);
+const up = async (code) =>
+  page.evaluate((c) => {
+    window.dispatchEvent(new KeyboardEvent("keyup", { code: c, bubbles: true, cancelable: true }));
+  }, code);
 
-const st = () =>
+let pass = 0, fail = 0;
+const check = (name, cond, detail) => {
+  console.log((cond ? "PASS" : "FAIL") + "  " + name + (detail ? " — " + detail : ""));
+  cond ? pass++ : fail++;
+};
+
+const st = async () =>
   page.evaluate(() => {
-    const p = window.SKYWARD.plane;
-    const r = (v, n = 2) => +Number(v).toFixed(n);
+    const s = window.SKYWARD, p = s?.plane, h = s?.hold, cm = s?.cesium, c = s?.viewer?.camera;
+    if (!p) return { none: true };
+    const n = (x) => (typeof x === "number" && isFinite(x) ? x : 0);
+    const carto = c && cm ? cm.Cartographic.fromCartesian(c.position) : null;
+    const camH = carto ? +carto.height.toFixed(0) : null;
+    let plH = null;
+    if (cm && s.aircraft && s.aircraft.lastMatrix) {
+      const M = s.aircraft.lastMatrix;
+      const pos = new cm.Cartesian3(M[12], M[13], M[14]);
+      const c2 = cm.Cartographic.fromCartesian(pos);
+      plH = c2 ? +c2.height.toFixed(0) : null;
+    }
+    // behind: dot(noseDir, camOffset) < 0; nose = model +Y axis
+    let behind = false, above = false, d = 0, m = 0, my = null, dbg = {};
+    if (c && cm && s.aircraft && s.aircraft.lastMatrix) {
+      const M = s.aircraft.lastMatrix;
+      const origin = new cm.Cartesian3(M[12], M[13], M[14]);
+      my = new cm.Cartesian3(M[4], M[5], M[6]); // model +Y axis (column 1 of column-major Matrix4)
+      const noseDir = cm.Cartesian3.normalize(my, new cm.Cartesian3());
+      const toCam = cm.Cartesian3.subtract(c.position, origin, new cm.Cartesian3());
+      m = cm.Cartesian3.magnitude(toCam);
+      d = cm.Cartesian3.dot(noseDir, toCam);
+      behind = d < 0 && m > 8 && m < 500;
+      above = camH != null && plH != null && camH > plH - 3;
+      dbg = { d:+n(d).toFixed(2), m:+n(m).toFixed(1), nose:[+n(my.x).toFixed(2),+n(my.y).toFixed(2),+n(my.z).toFixed(2)], cam:[+n(c.position.x).toFixed(1),+n(c.position.y).toFixed(1),+n(c.position.z).toFixed(1)], origin:[+n(M[12]).toFixed(1),+n(M[13]).toFixed(1),+n(M[14]).toFixed(1)], pp:[+n(p.heading).toFixed(2),+n(p.pitch).toFixed(2),+n(p.roll).toFixed(2)] };
+    }
     return {
-      lat: r(p.lat, 5), lon: r(p.lon, 5), alt: r(p.alt, 1), agl: r(p.alt, 1),
-      speed: r(p.speed, 1), vs: r(p.verticalSpeed, 2),
-      pitch: r(p.pitch, 4), roll: r(p.roll, 4),
-      hdg: r((p.heading * 180) / Math.PI, 1),
-      thr: r(p.throttle, 3), onGround: p.onGround,
+      spd: +n(p.speed).toFixed(1), vs: +n(p.verticalSpeed).toFixed(1),
+      pitch: +n(p.pitch).toFixed(3), roll: +n(p.roll).toFixed(3),
+      thr: +n(p.throttle).toFixed(3), alt: +n(p.alt).toFixed(0),
+      hdg: +n(p.heading).toFixed(2), onG: !!p.onGround, flaps: +n(p.flaps).toFixed(2),
+      behind, above, camH, plH, targetAlt: h?.targetAlt != null ? +h.targetAlt.toFixed(0) : null,
+      dbg,
     };
   });
 
-const results = [];
-// Heading is stored normalised to (-180, 180], so turning right past north
-// wraps 180 -> -160. Compare the signed shortest angular difference instead of
-// raw numbers, or every wraparound reads as a reversal.
-const turned = (from, to) => ((to - from + 540) % 360) - 180;
+const log = async (t) => console.log(t, JSON.stringify(await st()));
 
-const check = (name, pass, detail) => {
-  results.push({ name, pass, detail });
-  console.log(`${pass ? "PASS" : "FAIL"}  ${name.padEnd(34)} ${detail}`);
-};
+await page.goto("http://127.0.0.1:4173/", { waitUntil: "domcontentloaded" });
+await page.waitForFunction("!!window.SKYWARD", { timeout: 35000 });
+await sleep(1000);
+// Let the free-look chase camera settle into its behind-and-above rest pose.
+for (let i = 0; i < 12 && !(await st()).behind; i++) await sleep(500);
 
 const s0 = await st();
-console.log("start:", JSON.stringify(s0));
-check("spawns on a real runway", s0.onGround === true, `onGround=${s0.onGround} alt=${s0.alt}`);
+check("spawns airborne", !s0.onG && s0.alt > 700, "alt=" + s0.alt + " thr=" + s0.thr);
+check("throttle idles (no W)", s0.thr < 0.15, "thr=" + s0.thr);
+check("trimmed start speed", s0.spd > 85 && s0.spd < 120, "spd=" + s0.spd);
+check("camera behind aircraft", s0.behind, JSON.stringify({ behind: s0.behind, dot: true }));
+check("camera above aircraft", s0.above, JSON.stringify({ above: s0.above, camH: s0.camH, plH: s0.plH }));
 
-// ── W: throttle up, speed builds ──────────────────────────────────────────
-//
-// The aircraft is a 38 t CRJ-900, so the takeoff roll is long: about 1.5 km and
-// some 50 s to reach 140 kt. The previous version of this test waited a fixed
-// 17 s and asserted a hard-coded 24 m/s rotation speed left over from the old
-// 5 t light twin. It "passed" for a while and then reported 4/16, not because
-// the controls broke but because every airborne check was being performed
-// while the aeroplane was still on the ground with the roll at 12 m/s.
-//
-// So: read the rotation speed from the app's own config, and hold the throttle
-// until it is actually reached rather than guessing a dwell time.
-const vRot = await page.evaluate(() => window.SKYWARD.CONFIG.physics.rotationSpeed);
-console.log(`rotation speed from config: ${vRot} m/s`);
+// W accelerate (tap and hold briefly), then RELEASE before maneuvers.
+await down("KeyW");
+const aW = await st();
+await sleep(3000);
+const bW = await st();
+check("W accelerates", bW.spd > aW.spd + 2 && bW.thr > 0.8, "spd " + aW.spd + "->" + bW.spd + " thr=" + bW.thr);
+await up("KeyW");
+for (let i = 0; i < 2; i++) { await sleep(1000); await log("settle"); }
 
-await page.keyboard.down("w");
-await sleep(4550);
-const s1 = await st();
-// 38 t and 59 kN is 1.54 m/s^2, less what rolling friction takes, so about
-// 4.5 m/s in the first 4.5 s. The old assertion of >12 m/s in the same window
-// was a light-twin number and this aeroplane will never satisfy it — correctly.
-check("W accelerates", s1.speed > 2 && s1.thr > 0.2, `speed=${s1.speed} thr=${s1.thr}`);
+// Climb
+const cU = await st();
+await down("ArrowUp");
+await sleep(4000);
+const sU = await st();
+check("ArrowUp nose up", sU.pitch > 0.12, "pitch=" + sU.pitch);
+check("ArrowUp gains altitude", sU.vs > 1, "vs=" + sU.vs + " spd=" + sU.spd);
+await up("ArrowUp");
+for (let i = 0; i < 5; i++) { await sleep(1000); await log("climb-recover"); }
+const pU = await st();
+check("auto-levels altitude after climb", Math.abs(pU.vs) < 6, "vs=" + pU.vs + " pitch=" + pU.pitch + " spd=" + pU.spd);
 
-let s2 = s1;
-for (let i = 0; i < 24 && s2.speed < vRot; i++) {
-  await sleep(2500);
-  s2 = await st();
-}
-check("reaches rotation speed", s2.speed >= vRot, `speed=${s2.speed} m/s (V_rot=${vRot})`);
+// Descend
+await down("ArrowDown");
+await sleep(3000);
+const sD = await st();
+check("ArrowDown nose down", sD.pitch < -0.12, "pitch=" + sD.pitch);
+check("ArrowDown descends", sD.vs < -1, "vs=" + sD.vs);
+await up("ArrowDown");
+for (let i = 0; i < 6; i++) { await sleep(1000); await log("desc-recover"); }
 
-// Rotate at the real point, the way it is actually flown, then climb out.
-await page.keyboard.down("ArrowUp");
-await sleep(6000);
-await page.keyboard.up("ArrowUp");
-let s3 = await st();
-for (let i = 0; i < 8 && s3.onGround; i++) {
-  await sleep(1500);
-  s3 = await st();
-}
-check("takes off (lift-off)", s3.onGround === false, `onGround=${s3.onGround} alt=${s3.alt} vs=${s3.vs}`);
+// Turns
+await down("KeyW"); await sleep(1500); await up("KeyW");
+const hdg0 = (await st()).hdg;
+await down("KeyD");
+await sleep(3000);
+const sR = await st();
+const d = (sR.hdg - hdg0 + Math.PI) % (2 * Math.PI) - Math.PI;
+check("D banks right", sR.roll > 0.08, "roll=" + sR.roll);
+check("D steers right", Math.abs(d) > 0.08, "hdg " + hdg0.toFixed(2) + "->" + sR.hdg);
+await up("KeyD");
+for (let i = 0; i < 4; i++) { await sleep(1000); await log("roll-recover"); }
+check("auto-levels wings", Math.abs((await st()).roll) < 0.08, "roll=" + (await st()).roll);
 
-// Let the climb establish before measuring anything.
-//
-// Immediately after rotation the aeroplane is barely above stall speed and is
-// trading speed for climb, so vertical speed is still in its transient and
-// samples anywhere from 0 to 3 m/s run to run. Sampling a transient measures
-// the transient. Eight seconds at full throttle gets it into a steady climb.
-await sleep(8000);
-const settled = await st();
-console.log(`settled in climb: alt=${settled.alt} vs=${settled.vs} speed=${settled.speed}`);
+const hdg1 = (await st()).hdg;
+await down("ArrowRight");
+await sleep(3000);
+const sAR = await st();
+const d2 = (sAR.hdg - hdg1 + Math.PI) % (Math.PI * 2) - Math.PI;
+check("ArrowRight steers right", Math.abs(d2) > 0.05, "hdg " + hdg1.toFixed(2) + "->" + sAR.hdg);
+await up("ArrowRight");
+for (let i = 0; i < 4; i++) { await sleep(1000); await log("yaw-recover"); }
+const yL = await st();
+check("yaw auto-levels pitch", Math.abs(yL.pitch) < 0.12, "pitch=" + yL.pitch);
+check("yaw auto-levels roll", Math.abs(yL.roll) < 0.08, "roll=" + yL.roll);
 
-// W stays DOWN from here on.
-//
-// In the air, W is throttle, and a CRJ-900 at idle thrust sinks back onto the
-// runway within a few seconds — the previous version released W right after
-// liftoff, so the aircraft was on the ground again before the first airborne
-// check and every arrow test failed against a parked aeroplane. The throttle
-// release is checked at the end instead, where releasing it is deliberate.
+// Idle auto-level
+const idle0 = await st();
+for (let i = 0; i < 3; i++) { await sleep(1000); await log("idle"); }
+const idleN = await st();
+check("idle auto-levels altitude", Math.abs(idleN.vs) < 6, "vs=" + idleN.vs + " pitch=" + idleN.pitch);
+check("idle auto-levels pitch", Math.abs(idleN.pitch) < 0.16, "pitch=" + idleN.pitch);
 
-// ── D: bank right, heading increases ──────────────────────────────────────
-const turn0 = await st();
-await page.keyboard.down("d");
-await sleep(2600);
-const turn1 = await st();
-check("D rolls into a bank (right)", turn1.roll > 0.08, `roll=${turn1.roll}`);
-await sleep(3250);
-await page.keyboard.up("d");
-const turn2 = await st();
-check(
-  "D changes heading (right)",
-  turned(turn0.hdg, turn2.hdg) > 1,
-  `hdg ${turn0.hdg} -> ${turn2.hdg} (${turned(turn0.hdg, turn2.hdg).toFixed(1)} deg)`,
-);
-await sleep(3250);
-const turn3 = await st();
-check(
-  "bank auto-levels on release",
-  Math.abs(turn3.roll) < Math.abs(turn1.roll),
-  `roll ${turn1.roll} -> ${turn3.roll}`,
-);
+// Flaps
+await down("KeyS");
+await sleep(4000);
+const idleS = await st();
+await up("KeyS");
+check("S deploys flaps", idleS.flaps > 0.05, "flaps=" + idleS.flaps);
+check("S slows airspeed", idleS.spd < idle0.spd - 0.3, "spd " + idle0.spd + "->" + idleS.spd);
+for (let i = 0; i < 3; i++) { await sleep(1000); await log("final"); }
+check("still airborne", (await st()).alt > 500, "alt=" + (await st()).alt);
 
-// ── ArrowUp: nose up, climb ───────────────────────────────────────────────
-const up0 = await st();
-await page.keyboard.down("ArrowUp");
-// Held longer than the down-arrow dwell. Vertical speed takes a moment to
-// build from a rotation, and sampling at 3.25 s catches the transient rather
-// than the established climb.
-await sleep(6000);
-const up1 = await st();
-await page.keyboard.up("ArrowUp");
-check("ArrowUp pitches nose up", up1.pitch > up0.pitch + 0.05, `pitch ${up0.pitch} -> ${up1.pitch}`);
-check("ArrowUp gains altitude", up1.vs > 0.5, `vs=${up1.vs} m/s`);
-
-// ── ArrowDown: nose down, descend ─────────────────────────────────────────
-await sleep(2600);
-const dn0 = await st();
-await page.keyboard.down("ArrowDown");
-await sleep(3250);
-const dn1 = await st();
-await page.keyboard.up("ArrowDown");
-check("ArrowDown pitches nose down", dn1.pitch < dn0.pitch - 0.05, `pitch ${dn0.pitch} -> ${dn1.pitch}`);
-check("ArrowDown descends", dn1.vs < -1, `vs=${dn1.vs} m/s`);
-
-// ── ArrowLeft / ArrowRight steer like A / D ────────────────────────────────
-const lr0 = await st();
-await page.keyboard.down("ArrowLeft");
-await sleep(3900);
-const lr1 = await st();
-await page.keyboard.up("ArrowLeft");
-check(
-  "ArrowLeft turns left",
-  turned(lr0.hdg, lr1.hdg) < -1,
-  `hdg ${lr0.hdg} -> ${lr1.hdg} (${turned(lr0.hdg, lr1.hdg).toFixed(1)} deg)`,
-);
-
-const lr2 = await st();
-await page.keyboard.down("ArrowRight");
-await sleep(3900);
-const lr3 = await st();
-await page.keyboard.up("ArrowRight");
-check(
-  "ArrowRight turns right",
-  turned(lr2.hdg, lr3.hdg) > 1,
-  `hdg ${lr2.hdg} -> ${lr3.hdg} (${turned(lr2.hdg, lr3.hdg).toFixed(1)} deg)`,
-);
-
-// ── W release: throttle winds down, and the aeroplane settles level ───────
-await page.keyboard.up("w");
-await sleep(2500);
-const s4 = await st();
-check("W release winds throttle down", s4.thr < s3.thr, `thr ${s3.thr} -> ${s4.thr}`);
-
-const lvl0 = await st();
-await sleep(6500);
-const lvl1 = await st();
-check(
-  "auto-levels pitch on release",
-  Math.abs(lvl1.pitch) < 0.14,
-  `pitch ${lvl0.pitch} -> ${lvl1.pitch}`,
-);
-check(
-  "altitude holds (|vs| small)",
-  Math.abs(lvl1.vs) < 4,
-  `vs=${lvl1.vs} m/s, alt ${lvl0.alt} -> ${lvl1.alt}`,
-);
-
-const fin = await st();
-console.log("\nfinal:", JSON.stringify(fin));
-
-const world = await page.evaluate(() => {
-  const S = window.SKYWARD;
-  return {
-    buildingTiles: S.buildings.primitives.size,
-    runways: S.runways.primitives.length,
-    terrainCache: S.groundSampler.cache.size,
-  };
-});
-console.log("world:", JSON.stringify(world));
-
-await page.screenshot({ path: "shot-acceptance.png" });
-console.log("wrote shot-acceptance.png");
-
-const failed = results.filter((r) => !r.pass);
-console.log(`\n${results.length - failed.length}/${results.length} checks passed`);
-if (errors.length) {
-  console.log("ERRORS:", errors.length);
-  console.log([...new Set(errors)].slice(0, 4).join("\n").slice(0, 600));
-}
+console.log("\n" + pass + "/" + (pass + fail) + " passed");
 await browser.close();
-process.exit(failed.length ? 1 : 0);

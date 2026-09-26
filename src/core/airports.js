@@ -13,8 +13,11 @@
 
 /** Air density at a given altitude, exponential approximation of the ISA. */
 export function airDensity(altitudeM, cfg) {
-  const scale = 44330 / (cfg.temperatureSeaLevel - 0.0065 * altitudeM);
-  return cfg.densitySeaLevel * Math.exp(-altitudeM / scale);
+  const L = cfg.lapseRate ?? 0.0065;
+  const T0 = cfg.temperatureSeaLevel;
+  const rho0 = cfg.densitySeaLevel;
+  const T = Math.max(T0 - L * altitudeM, 1.0);
+  return rho0 * Math.pow(T / T0, 4.256);
 }
 
 export class AirportIndex {

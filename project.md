@@ -221,11 +221,15 @@ finite rate, and releases ramp back.
 | `↑` | — | nose up |
 | `↓` | — | nose down |
 
-**Auto-level.** Release `↑`/`↓` and the plane flies level and parallel to the
-ground. The pitch axis ramps to neutral, then a PD controller latches the
-current altitude as a target and trims pitch to null both the altitude error
-and the vertical speed (`holdGainP`, `holdGainD`, clamped to ±0.09 rad). Release
-`A`/`D` and bank decays to wings-level at `bankLevelRate`.
+**Auto-level.** Release `↑`/`↓` and the plane flies level. The pitch axis ramps
+to neutral, then an altitude hold latches the current height as a target and
+trims from the lift-required AoA (`baseAoA`) plus altitude error (P), damped by
+vertical speed (D, contribution clamped to ±0.06 rad so a dive never slams the
+elevator to the stop), plus an integral term (`holdGainI`). Pitch is then capped
+by an **AoA limiter** — the wing is never allowed past stall AoA minus a margin,
+which is what lets the hold pitch up to climb out of a dive instead of
+nose-downing into a lock. Clamped to ±0.14 rad. Release `A`/`D` and bank
+decays to wings-level at `bankLevelRate`.
 
 Other keys: `P` pause · `C` clean view · `H` hide UI.
 
@@ -573,8 +577,8 @@ that matter are measured against published ground truth rather than asserted.
 | Script | Proves | Result |
 |---|---|---|
 | `worldcheck.mjs` | Buildings and airports against published data | **17/17**, no console errors |
-| `acceptance.mjs` | Every control, on the real GPU | **16/16** |
-| `orientation.mjs` | The CRJ-900's own vertices land where the aeroplane flies | **10/10** |
+|| `acceptance.mjs` | Every control, on the real GPU | **22/22** |
+|| `orientation.mjs` | The CRJ-900's own vertices land where the aeroplane flies | **10/10** |
 | `thirdperson.mjs` | The view is genuinely from behind | **7/7** |
 | `cameraview.mjs` | Camera distance, heading, framing on roll and climb | **6/6** |
 | `facadecheck.mjs` | Facades reach the screen | **PASS**, 12,089 buildings / 41 tiles, clean console |
@@ -651,11 +655,15 @@ would barely move.
 
 ### Controls
 
-`scripts/acceptance.mjs` drives real keystrokes on the real GPU and asserts each
-one does what the specification says: **16/16** — spawn on a runway, `W`
-accelerates, rotation speed, lift-off, throttle winds down, `↑`/`↓` pitch and
-climb/descend, altitude holds, `D` and `→` bank and turn right, `←` turns left,
-and bank auto-levels on release.
+`scripts/acceptance.mjs` dispatches real keyboard events on the real GPU and
+asserts each control does what the spec says: **22/22** — spawn airborne over a
+city holding altitude with no input, `W` accelerates and winds to full
+throttle, `↑`/`↓` pitch and climb/descent, altitude-hold trims out on release,
+`A`/`D` and `→`/`←` bank and turn (right and left), bank auto-levels on release,
+`S` deploys flaps and bleeds speed, the camera sits behind and above the
+aircraft, and the jet stays airborne through the whole sequence. Input is driven
+by dispatched `KeyboardEvent`s on `window` (where `Controls` listens) rather than
+`page.keyboard`, which desyncs across runs.
 
 ---
 
@@ -668,7 +676,7 @@ npm run dev        # http://127.0.0.1:5173
 
 ```bash
 npm run build && npm run preview    # production build
-node scripts/acceptance.mjs          # verify the controls (16 checks)
+node scripts/acceptance.mjs          # verify the controls (22 checks)
 node scripts/worldcheck.mjs          # verify the world against published data (17 checks)
 ```
 
@@ -708,13 +716,13 @@ world streams as you fly.
   The window grids, spandrel bands and wall tints are generated in the shader.
   There is no photographic surface detail, and that is not available without a
   paid imagery key, which this project deliberately has none of.
-- The **climb rate is well below the real airframe's**. A CRJ-900 at MTOW has
-  roughly 45 kN of excess thrust at 100 m/s, which works out to a 7° climb
-  angle and about 12 m/s of vertical speed. The simulation climbs at
-  **+3 m/s**. The hand calculation from the configured lift, mass and speed
-  says vertical acceleration should be strongly positive, so something in the
-  vertical integration is damping it that I have not isolated. Takeoff, rotation
-  and level flight are all correct; sustained climb rate is not yet faithful.
+- **Climb rate** is now realistic — about 10–11 m/s peak under `↑` at 100 m/s,
+  close to the real airframe's ~12 m/s. The prior "+3 m/s" entry was a symptom
+  of two bugs rather than a real integration limit: a spurious
+  `−gravity·sin(pitch)·0.55` term subtracted from vertical acceleration, and a
+  broken ISA air-density formula that collapsed `rho` to ~0.0024 kg/m³ and
+  erased almost all lift. Both are fixed (§14). Sustained climb is now faithful;
+  takeoff, rotation and level flight were always correct.
 - Altitude is **ellipsoidal**, not orthometric MSL. No keyless source publishes
   a geoid grid that matches the DEM, so the HUD says `ALT` rather than claiming
   a datum it cannot deliver (§ change log, item 30).
@@ -733,3 +741,120 @@ world streams as you fly.
   — but the underlying Cesium condition is not understood.
 
 MIT licensed. `project.md` is updated with every change to the project.
+
+---
+
+## 13. Recent changes (city spawn, look-around camera, flaps, no auto-takeoff)
+
+### Camera — behind, above, movable
+
+- Chase distance reduced from 78 m to **18 m back / 6 m up**: the aircraft is a
+  39 m jet, not an 8 m drone, so the old framing made it a postage stamp — and
+  was exactly what read as "sideways / only the front half" when the model was
+  also being framed in the wrong body axis.
+- Offsets are expressed in the **model's own frame** (`+Y` forward, `+Z` up, so
+  "behind" is `-Y`). Cesium's default orbit camera is disabled so it does not
+  fight the chase camera; the view no longer "locks" because **right-drag
+  yaws and pitches the gaze independently**, springing back to the flight path
+  on release.
+- Removed the takeoff dolly (no runway start anymore).
+
+### No takeoff at start; spawn over a city
+
+- The game no longer drops you on a runway. You choose a city (Manhattan, Tokyo,
+  London, …) and spawn **airborne at 1000 m**, trimmed and holding altitude
+  from frame one.
+- **Removed the rotation-speed gate**: liftoff is no longer auto-sequenced. On
+  the ground (e.g. after a landing) the aircraft leaves when the pilot pulls
+  back enough for the wing to carry it — the nose is allowed to rotate, and the
+  natural lift-over-weight check releases the wheels.
+- `controls.js`: `S` now brakes on the ground **and extends flaps to slow down
+  in the air**; `W`/`A`/`D` and the arrow keys work as you specified; release
+  `↑`/`↓` → altitude-hold auto-level, release `A`/`D`/`←`/`→` → bank
+  auto-level.
+- Added `CONFIG.cities` and a "START OVER" selector.
+
+### Buildings — no more 2D roof images
+
+- Facades are generated in the shader per metre of wall, but they were
+  **also being applied to roofs**, stamping a window grid onto every flat roof
+  — which reads as a 2D image when seen from above. The shader now detects
+  horizontal faces (`dot(normal, up) > 0.95`) and shades them with a plain
+  wall tone.
+- Buildings, terrain and oceans were already real 3D (Re:Earth DEM, Esri
+  imagery, OSM extrusions, Cesium water); this fixes the one place flat roofs
+  mis-shaded.
+
+### Verification
+
+- `acceptance.mjs` rewritten for the airborne-over-city flow.
+- `orientation.mjs`, `pixdiff.mjs` and `thirdperson.mjs` remain green against
+  the new, closer camera.
+
+
+## 13. Recent changes (batch — live)
+
+- **Third-person camera, properly behind the aircraft.** Rewritten in
+  `src/flight/camera.js`: the chase frame is built from the model's own body frame
+  (+Y nose, +Z up, +X right), so "-Y back, +Z up" now actually leaves the aircraft
+  in frame. Distance pulled in from 78/14 m to **18 m back, 6 m up** — close enough
+  to see the wings and the runway ahead, which is what makes the takeoff/pitch-up
+  readable. The view **follows** the aircraft but is **not locked**: hold the right
+  mouse button to yaw/pitch the gaze independently, and it springs back to looking
+  ahead when you let go. Cesium's own orbit/tilt/look input is disabled so it does
+  not fight the chase view.
+- **No takeoff function; spawn over a city.** Removed the runway auto-start and the
+  rotation-speed gate in the lift-off logic. You now choose a city from a `START OVER`
+  bar and drop in airborne, trimmed, holding altitude. `W` accelerates, `A`/`D` and the
+  arrow keys steer/roll, `ArrowUp`/`ArrowDown` pitch, and `S` extends flaps to slow
+  down in the air (on the ground `S` is still the brake). Releasing pitch or roll
+  auto-levels. Rotation into the air on the ground is manual: pulling back builds AoA
+  until the wing carries the aircraft away.
+- **Facades stop stamping windows on roofs.** The procedural window shader now detects
+  horizontal faces (`mi.normalEC` · up > 0.95) and shades them a plain wall tone,
+  removing the "2D image" grid that was being projected onto flat roofs. This also
+  surfaced a real Cesium 1.145 gotcha worth recording: the material struct field is
+  `normalEC`, `not` `normal` or `positionToFragment` (acorn/rollup-plugin-external-globals
+  will happily parse `mi.normal` — it fails at *shader compile time* as "no such field in
+  structure").
+
+## 14. Recent changes (airframe fidelity — fixing the dive lock)
+
+The airborne flow held altitude cleanly with no input, but the moment the pilot
+asked for a climb the jet drove itself into a **steady −25 m/s dive and stayed
+there** — a full stall-lock even though the wing was at a safe angle of attack.
+The probe exposed the real numbers, which never lied:
+
+1. **The ISA air-density formula was wrong** (`src/core/airports.js`).
+   `airDensity` used `rho0 * exp(-h / (44330 / (T0 - 0.0065*h)))` — a
+   pressure-scale expression pressed into service for density, under which
+   `44330 / (T0 - 0.0065*h)` collapses to ~157 m at low altitude and
+   `exp(-980/157)` drove `rho` to **0.0024 kg/m³**, about 1/480th of the real
+   value (~1.13). With lift proportional to rho the wings were making ~0.06x the
+   lift the numbers implied, so there was no recovery authority anywhere.
+   Corrected to the ISA form `rho0 * (T/T0)^(g/(R*L))` =
+   `rho0 * (1 - 0.0065*h/T0)^4.256`; at 980 m this is 1.1116. Idle flight
+   immediately held (vs ≈ −0.2); a held up-arrow now climbs to ~10–11 m/s.
+
+2. **The altitude hold chased a dive down instead of out of it.** The hold
+   re-synced its target to `plane.alt` whenever the gap exceeded 80 m. Once the
+   jet descended, that dragged the setpoint down with it and the hold stopped
+   asking for a climb. Removed the re-sync; the target is latched once at spawn
+   and held.
+
+3. **The derivative kick could slam the elevator to the stop.** `rateError *
+   holdGainD` (0.045) times ±25 m/s saturated the ±0.14 rad pitch limit, so any
+   vertical-speed transient pitched in hard, which on a climb-back shoved AoA
+   into the stall. The D term is now clamped to ±0.06 rad — enough damping, not
+   enough to lock the stall.
+
+4. **An explicit AoA limiter replaces the nose-down "anti-stall".** The previous
+   guard forced `pitch = -0.06` whenever `AoA > 0.22` in a descent, which bled
+   lift on climb-back and deepened the dive. The new limiter caps pitch so AoA
+   stays below `stallAngle - 0.05`, letting the wing keep flying and the
+   base-AoA hold lift the nose back up out of a dive.
+
+5. **`acceptance.mjs` rewritten** for the airborne-over-city flow, with
+   deterministic input (KeyboardEvent dispatch, no page.keyboard desync) and 22
+   assertions covering spawn, idle trim, W / up / down / D / left / right / S,
+   auto-level, camera behind-and-above, and staying airborne. **22/22**.

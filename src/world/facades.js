@@ -145,6 +145,16 @@ uniform vec3 uWall;
 uniform vec3 uGlass;
 
 czm_material czm_getMaterial(czm_materialInput mi) {
+  // Horizontal faces are roofs. A window grid stamps a 2D image onto a flat
+  // roof, so roofs get a plain wall tone. mi.normalEC is the eye-space
+  // geometric normal; MaterialAppearance requests normals so it is set, and
+  // a roof seen from above faces +/-Z.
+  if (abs(dot(mi.normalEC, vec3(0.0, 0.0, 1.0))) > 0.95) {
+    czm_material m;
+    m.diffuse = uWall;
+    m.alpha = 1.0;
+    return m;
+  }
   float floors = mi.st.y / ${FLOOR_HEIGHT.toFixed(2)};
   float cols = mi.st.x / uWindowPitch.x;
   float fy = fract(floors);

@@ -122,6 +122,7 @@ export class Hud {
       : plane.stallFactor > 0.35
         ? "STALL"
         : "AIRBORNE";
+    if (plane.flaps && !plane.onGround) this.status.textContent += " · FLAPS";
     this.stall.style.opacity = plane.stallFactor > 0.2 ? "1" : "0";
   }
 }
