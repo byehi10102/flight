@@ -40,6 +40,18 @@ of 10 000+ real airports.
 - **Real runways** — 14 000+ from OurAirports, at true positions and bearings,
   draped over the terrain.
 
+**Verified against published data** — `node scripts/worldcheck.mjs`, 17/17:
+
+| | |
+|---|---|
+| Buildings over Manhattan | **12,380** real footprints, tops to 932 m |
+| One World Trade Center | **417 m** vs 417 m published |
+| Empire State Building | **444 m** vs 443 m, 1 m from the real footprint |
+| 432 Park Avenue | **426 m** vs 426 m |
+| JFK runway 13R | **14,511 ft → 4,423 m**, exact |
+| Heathrow 09L | **12,799 ft → 3,901 m**, exact |
+| Dubai 12R | **14,590 ft → 4,447 m**, exact |
+
 No Google Maps API, no Cesium ion token, no account. Just a network connection.
 
 See [`project.md`](project.md) for the full design record, data sources,

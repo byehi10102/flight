@@ -198,6 +198,9 @@ export class BuildingLayer {
     // its 429 limiter. The gap costs nothing: the streamer runs continuously.
     this.minRequestGapMs = 450;
     this.backoffUntil = 0;
+    // Tallest extrusions so far, so correctness can be checked against
+    // published building heights rather than assumed.
+    this.tallest = [];
     this.credit = document.createElement("a");
     this.credit.href = "https://openfreemap.org/";
     this.credit.textContent = "Buildings © OpenStreetMap contributors (OpenFreeMap)";
@@ -349,6 +352,9 @@ export class BuildingLayer {
       candidates.push({ lonlats, height, minHeight: resolveMinHeight(props), color: colorFor(props, height) });
       const mid = lonlats[Math.floor(lonlats.length / 2)];
       centroids.push(Cartographic.fromDegrees(mid[0], mid[1]));
+      // Centroid, for verification against known buildings.
+      candidates[candidates.length - 1].lon = mid[0];
+      candidates[candidates.length - 1].lat = mid[1];
     }
     if (!candidates.length) return null;
 
@@ -386,7 +392,12 @@ export class BuildingLayer {
           polygonHierarchy: new PolygonHierarchy(positions),
           height: ground + c.minHeight,
           extrudedHeight: ground + c.height,
-          vertexFormat: PolygonGeometry.POSITION_ONLY,
+          // POSITION_AND_NORMAL, not POSITION_ONLY. With normals the massing is
+          // lit by the sun; without them the appearance has nothing to shade
+          // with and every face comes out the same flat tone. This is the
+          // difference between a solid skyline and coloured cardboard, and it
+          // costs a few bytes per vertex.
+          vertexFormat: PerInstanceColorAppearance.VERTEX_FORMAT,
           granularity: Math.PI / 180,
         });
         instances.push(
@@ -402,6 +413,22 @@ export class BuildingLayer {
     if (!instances.length) return null;
 
     this.buildingCount += instances.length;
+
+    // Record what was actually extruded, so correctness can be checked against
+    // published building heights rather than assumed. Capped: this is a
+    // verification aid, not a cache.
+    for (const c of candidates) {
+      if (c.height < 20) continue;
+      this.tallest.push({
+        lon: +c.lon.toFixed(6),
+        lat: +c.lat.toFixed(6),
+        h: +c.height.toFixed(1),
+        base: +(ground + c.minHeight).toFixed(1),
+        ground: +ground.toFixed(1),
+      });
+    }
+    this.tallest.sort((a, b) => b.h - a.h);
+    this.tallest.length = Math.min(this.tallest.length, 3000);
 
     return new Primitive({
       geometryInstances: instances,

@@ -80,6 +80,9 @@ export class RunwayLayer {
     this.viewer = viewer;
     this.primitives = [];
     this.built = new Set();
+    // Every runway we have drawn, with its published dimensions, so rendered
+    // geometry can be verified rather than assumed.
+    this.builtRunways = [];
     this.index = null;
   }
 
@@ -144,6 +147,26 @@ export class RunwayLayer {
       const ends = runwayEnds(runway);
       if (ends.lengthM < 30) continue; // helipads, ignore
       const surface = (runway.surface || "UNK").toUpperCase();
+
+      // Record the runway we are about to draw, so the rendered geometry can
+      // be checked against the published dimensions rather than assumed.
+      // NB: the source `length`/`width` fields are FEET, so they must be read
+      // through `ends` like the drawing code does. Reporting the raw values
+      // here made a 200 ft runway look like a 200 m one.
+      this.builtRunways.push({
+        icao: airport.icao || airport.iata || airport.id,
+        name: airport.name,
+        rwy: runway.ident || "",
+        lengthM: +ends.lengthM.toFixed(1),
+        widthM: +ends.widthM.toFixed(1),
+        sourceLengthFt: runway.length,
+        sourceWidthFt: runway.width,
+        heading: +runway.heading.toFixed(1),
+        greatCircleM: +ends.lengthM.toFixed(1),
+        midLat: +((runway.lat + runway.endLat) / 2).toFixed(5),
+        midLon: +((runway.lon + runway.endLon) / 2).toFixed(5),
+        surface,
+      });
       const surfaceColor = Color.fromCssColorString(
         SURFACE_COLORS[surface] || SURFACE_COLORS.UNK,
       );

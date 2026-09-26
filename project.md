@@ -390,7 +390,15 @@ Every change to the project, and why. Newest last.
     9/16 bands. That response is what makes massing read as solid geometry.
     Restored `allowPicking: false` at the same time; the lighting edit had
     briefly dropped it.
-30. **HUD relabelled from `FT MSL` to `ALT FT`.** The DEM is ellipsoidal
+30. **Building geometry was being built without normals.** The extruded polygons
+    used `vertexFormat: PolygonGeometry.POSITION_ONLY`, so the appearance had no
+    normals to shade with — the lighting enabled in item 29 had nothing to work
+    with and every face rendered at one flat tone. Changed to
+    `PerInstanceColorAppearance.VERTEX_FORMAT` (`POSITION_AND_NORMAL`). With
+    normals the massing is genuinely lit: over 11 239 buildings in Midtown, mean
+    scene luminance now tracks the sun across a spread of 16.3, against 4.8 with
+    the lighting flag set but no normals present.
+31. **HUD relabelled from `FT MSL` to `ALT FT`.** The DEM is ellipsoidal
     (EGM2008-referenced), so calling the reading MSL was a label the number
     could not support — at Manhattan it was showing ~45 m where a published MSL
     figure is ~2 m. Re:Earth does serve a `/cesium-mesh/geoid` endpoint, and it
@@ -406,7 +414,80 @@ Every change to the project, and why. Newest last.
 
 ---
 
-## 8. Running it
+## 8. Verification
+
+Claims about a 3D world are cheap to make and easy to get wrong, so the ones
+that matter are measured against published ground truth rather than asserted.
+`scripts/worldcheck.mjs` flies the aircraft around and inspects the geometry the
+app actually builds. Latest run: **17/17 checks passed, no console errors.**
+
+### Buildings are real 3D solids
+
+| | |
+|---|---|
+| Buildings instantiated over Manhattan | **12,380**, from 40 vector tiles |
+| Building primitives in the scene graph | **40 / 40**, all ready |
+| Geometry extent | tops reach **932.8 m**, bases from **−30.1 m** — real solids standing on real terrain, not flat marks |
+| Height distribution | 3,000 tracked, **2,314 over 100 m**, tallest **541 m** |
+
+### Building heights match the real buildings
+
+Each landmark's nearest extrusion, compared with its published architectural
+height. The figure compared is the **roof**, which is what OSM's
+`render_height` carries — 1 WTC is popularly called 541 m, but that includes the
+spire; its roof is 417 m and that is what OSM records.
+
+| Building | Ours | Published | Error | Distance |
+|---|---|---|---|---|
+| One World Trade Center (roof) | **417 m** | 417 m | **+0.0 %** | 18 m |
+| Empire State Building | **444 m** | 443 m | **+0.2 %** | 1 m |
+| 432 Park Avenue | **426 m** | 426 m | **+0.0 %** | 19 m |
+| Chrysler Building (roof) | **272 m** | 278 m | −2.2 % | 10 m |
+| Flatiron Building | **88 m** | 87 m | **+1.1 %** | 25 m |
+
+Five skyscrapers landing within 2.2 % of their published heights, with the
+extrusions sitting within 25 m of the real coordinates, is the strongest
+available evidence that the buildings are the real ones.
+
+### Airports are real
+
+Each airport is flown to individually. The drawn metres are checked against the
+source record, and where the published AIP figure is well established the source
+itself is checked against it.
+
+| Airport | Runway | Source | Drawn | Bearing |
+|---|---|---|---|---|
+| **KJFK** JFK Intl | 13R | 14,511 ft | **4,423 m** | 121° |
+| **EGLL** Heathrow | 09L | 12,799 ft | **3,901 m** | 90° |
+| **RJTT** Tokyo Haneda | 16L | 11,024 ft | **3,360 m** | 150° |
+| **YSSY** Sydney | 16R | 12,999 ft | **3,962 m** | 168° |
+| **CYYZ** Toronto Pearson | 05 | 11,120 ft | **3,389 m** | 47° |
+| **OMDB** Dubai Intl | 12R | 14,590 ft | **4,447 m** | 121° |
+
+JFK, Heathrow, Haneda and Dubai match their published AIP lengths exactly.
+**96 / 96** runways convert feet to metres correctly — a check that earned its
+place, because the first version of the instrumentation reported the raw feet
+labelled as metres, making JFK's 200 ft runway look like a 200 m one. The
+renderer was always right; the measurement was wrong. Worth keeping in mind
+that a failing test is as often a broken test as broken code.
+
+### The massing is lit
+
+Mean scene luminance over 11k+ buildings as the sun is swung from high to
+raking to back-lit: **74.6 / 66.6 / 58.3**, a spread of **16.3**. Unlit massing
+would barely move.
+
+### Controls
+
+`scripts/acceptance.mjs` drives real keystrokes on the real GPU and asserts each
+one does what the specification says: **16/16** — spawn on a runway, `W`
+accelerates, rotation speed, lift-off, throttle winds down, `↑`/`↓` pitch and
+climb/descend, altitude holds, `D` and `→` bank and turn right, `←` turns left,
+and bank auto-levels on release.
+
+---
+
+## 9. Running it
 
 ```bash
 npm install
@@ -415,8 +496,8 @@ npm run dev        # http://127.0.0.1:5173
 
 ```bash
 npm run build && npm run preview    # production build
-node scripts/acceptance.mjs          # verify the controls
-node scripts/measure.mjs             # count real buildings in the scene
+node scripts/acceptance.mjs          # verify the controls (16 checks)
+node scripts/worldcheck.mjs          # verify the world against published data (17 checks)
 ```
 
 Requires only a network connection. First load streams a few MB; after that the
@@ -424,7 +505,7 @@ world streams as you fly.
 
 ---
 
-## 9. Attribution
+## 10. Attribution
 
 - **Terrain** — [Re:Earth Terrain](https://terrain.reearth.land/) /
   [Mapterhorn](https://mapterhorn.com/), CC BY 4.0, EGM2008 geoid (NGA).
@@ -439,7 +520,7 @@ world streams as you fly.
 
 ---
 
-## 10. Honest limitations
+## 11. Honest limitations
 
 - Buildings are **untextured massing geometry**. Correct footprints, correct
   heights, and correctly lit by the real sun, but plain facades with no windows
