@@ -202,6 +202,7 @@ export class BuildingLayer {
     // Tallest extrusions so far, so correctness can be checked against
     // published building heights rather than assumed.
     this.tallest = [];
+    this.enabled = true;
     this.credit = document.createElement("a");
     this.credit.href = "https://openfreemap.org/";
     this.credit.textContent = "Buildings © OpenStreetMap contributors (OpenFreeMap)";
@@ -219,6 +220,7 @@ export class BuildingLayer {
   }
 
   update(lat, lon, altitudeAgl) {
+    if (!this.enabled) return;
     const band = this._band(altitudeAgl);
     if (!band) {
       if (this.primitives.size) this._clear();
@@ -489,9 +491,17 @@ export class BuildingLayer {
   destroy() {
     this._clear();
     this.credit.remove();
+    this.enabled = false;
     // The facade texture is shared by every building primitive, so it outlives
     // any individual tile. Only tear it down when the layer itself goes.
     destroyFacadeMaterials();
+  }
+
+  /** Enable or disable the layer. When disabled the OSM extrusions are cleared
+   *  and streaming stops — used when the 3D Tiles layer takes over as primary. */
+  setActive(active) {
+    this.enabled = active;
+    if (!active) this._clear();
   }
 }
 

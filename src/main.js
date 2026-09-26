@@ -12,6 +12,7 @@ import { createViewer, attachTerrain, setSunForTime } from "./core/viewer.js";
 import { GroundSampler } from "./core/ground.js";
 import { AirportIndex } from "./core/airports.js";
 import { BuildingLayer } from "./world/buildings.js";
+import { Buildings3DTiles } from "./world/buildings3dtiles.js";
 import { RunwayLayer } from "./world/runways.js";
 import { createAircraft, stepPhysics, clamp } from "./flight/physics.js";
 import { Controls, updateAxes } from "./flight/controls.js";
@@ -50,6 +51,15 @@ let groundFallback = CONFIG.start.alt;
 const groundSampler = new GroundSampler(viewer);
 const buildings = new BuildingLayer(viewer);
 const runways = new RunwayLayer(viewer);
+const buildings3d = new Buildings3DTiles(viewer);
+buildings3d.load().then((loaded) => {
+  if (loaded) {
+    console.log("[buildings] Re:Earth 3D Tiles loaded, switching from OSM extrusions");
+    buildings.setActive(false);
+  } else {
+    console.log("[buildings] Re:Earth 3D Tiles unavailable, using OSM extrusions");
+  }
+}).catch(() => {});
 const chase = new ChaseCamera(viewer);
 const aircraft = new AircraftModel(viewer);
 const input = new Controls(window);
@@ -278,7 +288,7 @@ setSunForTime(viewer, hour);
 
 window.SKYWARD = {
   plane, viewer, chase, input, controls: new Controls(window), aircraft, buildings,
-  runways, groundSampler, hold,
+  buildings3d, runways, groundSampler, hold,
   cesium: {
     Cartographic, Cartesian3, Ellipsoid, JulianDate, CesiumMath, CesiumModel,
     CesiumMatrix4, CesiumHPR, CesiumTransforms, CesiumSceneTransforms,

@@ -84,6 +84,10 @@ export class ChaseCamera {
       const k = 1 - Math.exp(-CAM.lookSpring * dt);
       this.lookYaw *= (1 - k);
       this.lookPitch *= (1 - k);
+      // Dead zone: kill residual gaze drift so the camera does not pan when
+      // the player is not touching the mouse at all.
+      if (Math.abs(this.lookYaw) < 0.001) this.lookYaw = 0;
+      if (Math.abs(this.lookPitch) < 0.001) this.lookPitch = 0;
     }
 
     if (!this.initialised) {
@@ -92,10 +96,18 @@ export class ChaseCamera {
       this.initialised = true;
     }
 
+    // Position: smooth follow (always).
     const kp = 1 - Math.exp(-CAM.posSmoothing * dt);
-    const kr = 1 - Math.exp(-CAM.rotSmoothing * dt);
     Cartesian3.lerp(this._pos, scratchIdealPos, kp, this._pos);
-    Cartesian3.lerp(this._look, scratchIdealLook, kr, this._look);
+    // Look direction: when not dragging, snap to the ideal. The lerp was the
+    // source of idle panning — it left a trailing offset that shifted as the
+    // plane moved. During drag, keep smoothing for comfort.
+    if (this._dragging) {
+      const kr = 1 - Math.exp(-CAM.rotSmoothing * dt);
+      Cartesian3.lerp(this._look, scratchIdealLook, kr, this._look);
+    } else {
+      Cartesian3.clone(scratchIdealLook, this._look);
+    }
 
     // Never clip through the terrain.
     const carto = Cartographic.fromCartesian(this._pos, Ellipsoid.WGS84);

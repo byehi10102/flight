@@ -81,7 +81,7 @@ export const CONFIG = {
     posSmoothing: 8.0,
     rotSmoothing: 10.0,
     lookAhead: 6,
-    lookSpring: 4.5,        // gaze springs back to the flight path when idle
+    lookSpring: 8.0,        // faster gaze spring-back; dead zone in camera.js kills residual drift
     minHeightAboveGround: 4,
   },
 

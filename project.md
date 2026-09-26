@@ -44,7 +44,8 @@ Here is what replaces it, and the honest trade-off:
 
 | Layer | Keyless source | What you get | What you lose vs. Google |
 |---|---|---|---|
-| **Buildings** | OpenFreeMap vector tiles (`building` layer) | Real OSM footprints, real `render_height`, correct plan shapes | Plain untextured facades. No photogrammetric colour or window detail. |
+|| **Buildings (primary)** | Re:Earth Buildings 3D Tiles (`https://buildings.reearth.land/tileset.json`) | Real 3D building geometry — actual roof shapes and massing, global, keyless, from Overture Maps / OSM | Not photogrammetric. Texture is procedural, not photographic. Coverage is broad but not complete; where a tile has no data the OSM extrusion layer below is the fallback. |
+|| **Buildings (fallback)** | OpenFreeMap vector tiles (`building` layer) | Real OSM footprints, real `render_height`, correct plan shapes; extruded to real heights with procedural window-grid facades (4 archetypes) | Plain facades, no photogrammetric colour. Used when the 3D Tiles are unavailable or have no data for a tile. |
 | **Terrain** | Re:Earth / Mapterhorn quantized-mesh DEM (CC BY 4.0) | Real global elevation, vertex normals, to z14 | 90 m-class resolution, so fine terrain detail is smoothed. |
 | **Surface cover** | Esri World Imagery | Real satellite imagery — forests, fields, water, roads are all genuinely there | Imagery only; vegetation and rock are painted, not modelled. |
 | **Airports** | OurAirports (public domain) | Real thresholds, true bearings, lengths, widths, surfaces | No terminals, towers or taxiway detail. |
@@ -85,9 +86,10 @@ skyward/
     │   ├── viewer.js              Cesium viewer, terrain, imagery, sun
     │   ├── ground.js              accurate elevation sampler + cache
     │   └── airports.js            airport index, spatial grid, runway spawn
-    ├── world/
-    │   ├── buildings.js           OpenFreeMap tiles -> extruded 3D buildings
-    │   └── runways.js             OurAirports -> terrain-draped 3D runways
+    │   ├── world/
+    │   │   ├── buildings.js           OpenFreeMap tiles -> extruded 3D buildings (fallback)
+    │   │   ├── buildings3dtiles.js    Re:Earth 3D Tiles -> real 3D building geometry (primary)
+    │   │   └── runways.js             OurAirports -> terrain-draped 3D runways
     ├── flight/
     │   ├── physics.js             the flight model
     │   ├── controls.js            keyboard -> ramped axes + altitude hold
@@ -144,32 +146,40 @@ everywhere, while the resident-tile value is off by kilometres.
 This matters for three things: where the aircraft sits, where a building's base
 is, and when the wheels touch ground.
 
-### 4.3 Buildings — `src/world/buildings.js`
+### 4.3 Buildings — `src/world/buildings3dtiles.js` (primary) + `src/world/buildings.js` (fallback)
 
-OpenFreeMap serves OpenMapTiles-schema vector tiles with no key. Its `building`
-layer carries a real `render_height` per footprint, derived from OSM `height`
-or `building:levels`.
+**Primary: Re:Earth Buildings 3D Tiles.** Re:Earth serves a global 3D Tiles 1.1
+tileset derived from Overture Maps building data. It provides real 3D building
+geometry — actual roof shapes, massing, and structural detail — streamed on demand
+with Cesium's native LOD, culling, and screen-space error. It is free, keyless, and
+requires no account. The tileset is loaded in `src/world/buildings3dtiles.js` and
+added to `viewer.scene.primitives`; when it resolves the OSM extrusion layer below is
+disabled and its primitives cleared, so the real geometry takes over.
 
-Streaming policy, measured against the live tile set:
+**Fallback: OSM extruded buildings with procedural facades.** If the 3D Tiles
+tileset fails to load (network error, CORS, service outage) the project falls back to
+OpenFreeMap vector tiles with extruded footprints and the procedural facade shader in
+`src/world/facades.js` (§7b). This guarantees that buildings are always shown
+somewhere, even when the 3D Tiles service is unavailable.
 
-- **z14 is the maximum published level.** Every z15 request returns an empty
-  body. Survey results: Midtown Manhattan 1 488 footprints (all with heights),
-  Lower Manhattan 1 421, Seattle downtown 525, Chicago 259, SF 190.
-- A 7×7 grid of z14 city tiles is ~30 MB, so tiles are requested **two at a
-  time with a 450 ms gap**. OpenFreeMap is a free public service and returns
-  HTTP 429 if pulled harder; a 429 backs off 8 s and doubles the gap, and the
-  tile is retried rather than being marked empty.
-- Tiles that resolve to *no buildings* are negatively cached, so flying over
-  open country costs nothing instead of re-fetching an empty tile forever.
+**Switching logic.** The 3D Tiles load asynchronously at startup. When they resolve,
+`buildings.setActive(false)` clears the OSM primitives and stops streaming new ones.
+When they fail, the OSM layer stays active. The 3D Tiles credit (`3D Buildings:
+Re:Earth / Overture Maps (ODbL)`) is appended to the Cesium credit container; the OSM
+credit is removed when the 3D Tiles take over.
 
-Each footprint becomes one `PolygonGeometry` extruded from `render_min_height`
-to `render_height`; all footprints in a tile go into a single `Primitive`, so
-Cesium batches them into one draw call. Facade colour uses the OSM `colour`
-tag when present, otherwise a plausible tone derived from the building's own
-type and height, so a skyline reads as a skyline.
+**Streaming policy (3D Tiles).** Handled internally by Cesium's `Cesium3DTileset`:
+tile selection, LOD, frustum culling, and screen-space error are all managed by the
+engine. The app sets `dynamicScreenSpaceError`, `skipLevelOfDetail`, and
+`cullWithChildrenBounds` for performance. No tile is ever requested twice by the
+app layer — the tileset handles that.
 
-**Measured in the running game:** 12 856 real buildings instantiated over
-Lower Manhattan, 14 212 over the Chicago Loop, 15 598 over Sydney CBD.
+**Honest assessment.** Re:Earth Buildings are real 3D geometry, but they are
+*not* photogrammetric captures. They are derived from map data, not from aerial
+photography. Roof shapes and massing are real (from OSM), but surface texture is
+procedural. This is the best keyless global option available; anything photogrammetric
+(Google Photorealistic 3D Tiles, Cesium ion) requires an API key with billing, which
+this project does not use. The honest ceiling is documented in §2 and §11.
 
 ### 4.4 Runways — `src/world/runways.js`
 
@@ -574,16 +584,17 @@ into Cesium.
 Claims about a 3D world are cheap to make and easy to get wrong, so the ones
 that matter are measured against published ground truth rather than asserted.
 
-| Script | Proves | Result |
-|---|---|---|
-| `worldcheck.mjs` | Buildings and airports against published data | **17/17**, no console errors |
+|| Script | Proves | Result |
+||---|---|---|
+|| `worldcheck.mjs` | Buildings and airports against published data | **17/17**, no console errors |
 || `acceptance.mjs` | Every control, on the real GPU | **22/22** |
+|| `tilesetcheck.mjs` | Re:Earth 3D Tiles load and replace OSM extrusions | **PASS** (tileset resolves, OSM layer cleared) |
 || `orientation.mjs` | The CRJ-900's own vertices land where the aeroplane flies | **10/10** |
-| `thirdperson.mjs` | The view is genuinely from behind | **7/7** |
-| `cameraview.mjs` | Camera distance, heading, framing on roll and climb | **6/6** |
-| `facadecheck.mjs` | Facades reach the screen | **PASS**, 12,089 buildings / 41 tiles, clean console |
-| `pixdiff.mjs` | The model draws pixels at all | **PASS** — 35,302 px on the ground |
-| `takeoff.mjs` | The takeoff roll, traced second by second | climbs +3 m/s, 110 → 227 m |
+|| `thirdperson.mjs` | The view is genuinely from behind | **7/7** |
+|| `cameraview.mjs` | Camera distance, heading, framing on roll and climb | **6/6** |
+|| `facadecheck.mjs` | Facades reach the screen | **PASS**, 12,089 buildings / 41 tiles, clean console |
+|| `pixdiff.mjs` | The model draws pixels at all | **PASS** — 35,302 px on the ground |
+|| `takeoff.mjs` | Airborne climb trace (spawn-over-city, W+↑ then auto-level) | climbs ~10 m/s, then holds altitude |
 
 ### `orientation.mjs` — the one that matters most
 
@@ -722,7 +733,9 @@ world streams as you fly.
   `−gravity·sin(pitch)·0.55` term subtracted from vertical acceleration, and a
   broken ISA air-density formula that collapsed `rho` to ~0.0024 kg/m³ and
   erased almost all lift. Both are fixed (§14). Sustained climb is now faithful;
-  takeoff, rotation and level flight were always correct.
+  takeoff, rotation and level flight were always correct — there is no runway
+  takeoff anymore, so that clause now reads: **spawn, level flight and
+  auto-level were always correct**.
 - Altitude is **ellipsoidal**, not orthometric MSL. No keyless source publishes
   a geoid grid that matches the DEM, so the HUD says `ALT` rather than claiming
   a datum it cannot deliver (§ change log, item 30).
@@ -798,7 +811,7 @@ MIT licensed. `project.md` is updated with every change to the project.
   `src/flight/camera.js`: the chase frame is built from the model's own body frame
   (+Y nose, +Z up, +X right), so "-Y back, +Z up" now actually leaves the aircraft
   in frame. Distance pulled in from 78/14 m to **18 m back, 6 m up** — close enough
-  to see the wings and the runway ahead, which is what makes the takeoff/pitch-up
+  to see the wings and the runway ahead, which is what makes pitch-up / climb
   readable. The view **follows** the aircraft but is **not locked**: hold the right
   mouse button to yaw/pitch the gaze independently, and it springs back to looking
   ahead when you let go. Cesium's own orbit/tilt/look input is disabled so it does
