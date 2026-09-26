@@ -3,25 +3,62 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>Skyward — an open flight simulator on a real 3D Earth</title>
-    <meta
-      name="description"
-      content="Fly anywhere on Earth over real terrain, real 3D buildings and real runways. No API keys, no accounts, no downloads."
-    />
-    <link rel="preconnect" href="https://tile.openstreetmap.org" />
+    <title>Skyward — Flight Simulator</title>
+    <meta name="description" content="Fly anywhere on Earth over real 3D terrain. No API keys, no accounts." />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="/src/ui/style.css" />
   </head>
   <body>
-    <div id="cesiumContainer" class="cesium-container"></div>
+    <div id="cesiumContainer"></div>
+    <div id="threeContainer"></div>
 
-    <div id="app" class="app"></div>
+    <div id="mainMenu" class="overlay">
+      <div class="menu-container">
+        <div class="menu-content">
+          <div class="menu-header">
+            <span class="logo-main">SKYWARD</span>
+            <span class="logo-sub">FLIGHT SIMULATOR</span>
+          </div>
+          <p class="menu-desc">Fly anywhere on Earth over real 3D terrain. No API keys, no accounts.</p>
+          <button id="startBtn" class="menu-btn">START FLIGHT</button>
+          <div class="controls-help">
+            <b>Controls:</b> W/S Throttle · Arrow Keys Pitch/Roll · A/D Yaw · Space Boost · Mouse Drag Look Around
+          </div>
+        </div>
+      </div>
+    </div>
 
-    <div id="boot" class="boot">
-      <div class="boot-inner">
-        <div class="boot-mark">SKYWARD</div>
-        <div class="boot-sub">Real terrain · Real buildings · Real runways</div>
-        <div id="load-status" class="boot-status">Building the world…</div>
+    <div id="loadingIndicator" class="loading-container">
+      <div class="spinner"></div>
+      <div id="loadingText" class="loading-text">Loading...</div>
+    </div>
+
+    <div id="spawnInstruction" class="hidden">
+      <div id="spawn-top-ui" class="spawn-hud-top">
+        <div id="instruction-text">CLICK ANYWHERE ON THE MAP TO CHOOSE SPAWN POINT</div>
+      </div>
+      <button id="confirmSpawnBtn" class="menu-btn hidden">CONFIRM SPAWN POINT</button>
+    </div>
+
+    <div id="uiContainer" class="hidden">
+      <div id="hud-top-left">
+        SPD <span id="speed">0</span> KT<br/>
+        ALT <span id="altitude">0</span> FT<br/>
+        HDG <span id="heading">000</span>&deg;
+      </div>
+      <div id="hud-top-right">
+        THR <span id="throttle">0</span>%<br/>
+        <span id="coords">0.0000, 0.0000</span>
+      </div>
+    </div>
+
+    <div id="transition-vignette"></div>
+
+    <div id="pauseMenu" class="overlay hidden">
+      <div class="pause-content">
+        <h2>PAUSED</h2>
+        <button id="resumeBtn" class="menu-btn">RESUME</button>
+        <button id="restartBtn" class="menu-btn">RESTART</button>
       </div>
     </div>
 
