@@ -28,6 +28,7 @@ const state = {
   heading: 0,
   pitch: 0,
   roll: 0,
+  flightPathAngle: 0,
   speed: 0,
   throttle: 0,
 };
@@ -101,7 +102,6 @@ updateLoadingUI();
 
 groundSampler = new GroundSampler(viewer);
 
-// Globe surface loading tracker
 let globeLoadingStarted = false;
 const unregisterGlobeTracker = viewer.scene.postRender.addEventListener(() => {
   const tilesLoaded = viewer.scene.globe.tilesLoaded;
@@ -128,7 +128,7 @@ viewer.scene.globe.tileLoadProgressEvent.addEventListener((queueLength) => {
   }
 });
 
-// ── Preload terrain around initial position ─────────────────────────────────
+// ── Preload terrain ─────────────────────────────────────────────────────────
 async function preloadTerrain() {
   try {
     const provider = await attachTerrain(viewer);
@@ -136,12 +136,10 @@ async function preloadTerrain() {
       terrainReady = true;
       loadingStatus.terrain = true;
       updateLoadingUI();
-      // Pre-sample the initial area
       await groundSampler.seed([[state.lat, state.lon]]);
     }
   } catch (error) {
     console.warn("[terrain] Preload failed, will retry on spawn:", error);
-    // Don't set failed — terrain can still load on demand
   }
 }
 
@@ -151,7 +149,7 @@ function initThree() {
   scene = new THREE.Scene();
   camera = new THREE.PerspectiveCamera(CONFIG.camera.fov, window.innerWidth / window.innerHeight, CONFIG.camera.near, CONFIG.camera.far);
 
-  renderer = new THREE.WebGLRenderer({ alpha: true, antialiasing: true });
+  renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.setPixelRatio(window.devicePixelRatio);
   renderer.setClearColor(0x000000, 0);
@@ -191,22 +189,20 @@ function movePosition(lon, lat, alt, heading, pitch, distance) {
   };
 }
 
-// ── Chase camera: behind and above the airplane ─────────────────────────────
-function updateChaseCamera(heading, pitch, roll, cameraYaw, cameraPitch) {
+// ── Chase camera: behind and above, NO roll coupling ────────────────────────
+function updateChaseCamera(heading, pitch, roll, flightPathAngle, cameraYaw, cameraPitch) {
   const planeCartesian = Cesium.Cartesian3.fromDegrees(state.lon, state.lat, state.alt);
 
-  // Speed-scaled boom: pull back and rise as speed increases
   const speedT = Math.min(1, Math.max(0, (state.speed - 60) / 190));
   const boomDist = CONFIG.camera.boomDistance * (1 + 0.55 * speedT);
   const boomH = CONFIG.camera.boomHeight * (1 + 0.35 * speedT);
 
-  // Build the boom frame from HEADING ONLY, with reduced pitch and roll.
-  // Full attitude coupling makes the camera bank with the plane, so the
-  // horizon stays level and you lose all sense of the turn.
+  // Camera follows heading and flight path angle only — NO roll.
+  // This keeps the horizon level and prevents the "sideways" feeling.
   const camHPR = new Cesium.HeadingPitchRoll(
     Cesium.Math.toRadians(heading),
-    Cesium.Math.toRadians(-pitch * 0.25),
-    Cesium.Math.toRadians(roll * 0.35)
+    Cesium.Math.toRadians(-flightPathAngle * 0.5),
+    0
   );
   const camQuat = Cesium.Quaternion.fromHeadingPitchRoll(camHPR);
 
@@ -224,8 +220,6 @@ function updateChaseCamera(heading, pitch, roll, cameraYaw, cameraPitch) {
   const rotatedOffset = Cesium.Matrix4.multiplyByPoint(enuMatrix, offset, new Cesium.Cartesian3());
 
   const finalHPR = Cesium.HeadingPitchRoll.fromQuaternion(finalQuat);
-
-  // Speed-scaled FOV: narrow when slow, wide when fast
   const fov = Cesium.Math.toRadians(58 + 14 * speedT);
 
   viewer.camera.setView({
@@ -233,11 +227,10 @@ function updateChaseCamera(heading, pitch, roll, cameraYaw, cameraPitch) {
     orientation: {
       heading: finalHPR.heading,
       pitch: Cesium.Math.toRadians(-5 - 3 * speedT),
-      roll: finalHPR.roll,
+      roll: 0,
     },
   });
 
-  // Apply FOV if it changed significantly
   const currentFov = viewer.camera.frustum.fov;
   if (Math.abs(currentFov - fov) > 1e-4) {
     viewer.camera.frustum.fov = fov;
@@ -336,7 +329,6 @@ function setupSearch() {
     }
   });
 
-  // Hide search results when clicking outside
   document.addEventListener("click", (e) => {
     if (!locationSearch.contains(e.target) && !searchResults.contains(e.target)) {
       searchResults.style.display = "none";
@@ -380,19 +372,16 @@ function selectSearchResult(lon, lat, name) {
 
   if (instructionText) instructionText.textContent = name.split(",")[0].toUpperCase();
 
-  // Sample terrain
   groundSampler.seed([[lat, lon]]).then(() => {
     const ground = groundSampler.get(lat, lon, 0);
     state.alt = ground + 1500;
   }).catch(() => {});
 
-  // Fly camera to location
   viewer.camera.flyTo({
     destination: Cesium.Cartesian3.fromDegrees(lon, lat, 5000),
     duration: 1.5,
   });
 
-  // Place marker
   if (spawnMarker) viewer.entities.remove(spawnMarker);
   spawnMarker = viewer.entities.add({
     position: Cesium.Cartesian3.fromDegrees(lon, lat),
@@ -412,39 +401,37 @@ function selectSearchResult(lon, lat, name) {
 
 function setupSpawnPicker() {
   const handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
-  const canvas = viewer.scene.canvas;
 
-  function isClickInSearchUI(x, y) {
+  handler.setInputAction((click) => {
+    if (currentState !== States.PICK_SPAWN) return;
+
+    // Check if click is within the search UI area
+    const clickX = click.position.x;
+    const clickY = click.position.y;
     const searchRect = locationSearch ? locationSearch.getBoundingClientRect() : null;
     if (searchRect) {
-      const padding = 20;
+      const pad = 20;
       if (
-        x >= searchRect.left - padding &&
-        x <= searchRect.right + padding &&
-        y >= searchRect.top - padding - 40 &&
-        y <= searchRect.bottom + padding + 100
+        clickX >= searchRect.left - pad &&
+        clickX <= searchRect.right + pad &&
+        clickY >= searchRect.top - pad - 40 &&
+        clickY <= searchRect.bottom + pad + 100
       ) {
-        return true;
+        return;
       }
     }
     const confirmRect = confirmSpawnBtn ? confirmSpawnBtn.getBoundingClientRect() : null;
     if (confirmRect) {
-      const padding = 20;
+      const pad = 20;
       if (
-        x >= confirmRect.left - padding &&
-        x <= confirmRect.right + padding &&
-        y >= confirmRect.top - padding &&
-        y <= confirmRect.bottom + padding
+        clickX >= confirmRect.left - pad &&
+        clickX <= confirmRect.right + pad &&
+        clickY >= confirmRect.top - pad &&
+        clickY <= confirmRect.bottom + pad
       ) {
-        return true;
+        return;
       }
     }
-    return false;
-  }
-
-  handler.setInputAction((click) => {
-    if (currentState !== States.PICK_SPAWN) return;
-    if (isClickInSearchUI(click.position.x, click.position.y)) return;
 
     const ray = viewer.camera.getPickRay(click.position);
     const cartesian = viewer.scene.globe.pick(ray, viewer.scene);
@@ -484,14 +471,6 @@ function setupSpawnPicker() {
       if (confirmSpawnBtn) confirmSpawnBtn.classList.remove("hidden");
     }
   }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
-
-  canvas.addEventListener("mousedown", (e) => {
-    if (currentState !== States.PICK_SPAWN) return;
-    if (isClickInSearchUI(e.clientX, e.clientY)) {
-      e.stopImmediatePropagation();
-      e.preventDefault();
-    }
-  }, true);
 }
 
 // ── Confirm spawn with transition animation ──────────────────────────────────
@@ -514,6 +493,7 @@ function confirmSpawn() {
     state.speed = 100;
     state.pitch = 0;
     state.roll = 0;
+    state.flightPathAngle = 0;
 
     try {
       const cam = viewer.camera;
@@ -535,7 +515,6 @@ function confirmSpawn() {
 
     currentState = States.TRANSITIONING;
 
-    // Pan down to spawn location
     viewer.camera.flyTo({
       destination: Cesium.Cartesian3.fromDegrees(state.lon, state.lat, state.alt + 500),
       orientation: {
@@ -563,8 +542,6 @@ function update(dt) {
   if (currentState !== States.FLYING) return;
 
   const input = controller.update();
-
-  // Get ground height at current position
   const groundHeight = groundSampler.get(state.lat, state.lon, 0);
 
   const physicsResult = physics.update(input, dt, groundHeight);
@@ -573,24 +550,21 @@ function update(dt) {
   state.pitch = physicsResult.pitch;
   state.roll = physicsResult.roll;
   state.heading = physicsResult.heading;
+  state.flightPathAngle = physicsResult.flightPathAngle;
   state.throttle = input.throttle;
 
-  // Move the aircraft
-  const newPos = movePosition(state.lon, state.lat, state.alt, state.heading, state.pitch, state.speed * dt);
+  // Move the aircraft along flight path angle
+  const newPos = movePosition(state.lon, state.lat, state.alt, state.heading, state.flightPathAngle, state.speed * dt);
   state.lon = newPos.lon;
   state.lat = newPos.lat;
   state.alt = newPos.alt;
 
-  // Check crash
   checkCrash();
-
-  // Check GPWS
   checkGPWS();
 
-  // Update chase camera
-  updateChaseCamera(state.heading, state.pitch, state.roll, input.cameraYaw, input.cameraPitch);
+  // Update chase camera — pass flightPathAngle, NOT pitch, and NO roll
+  updateChaseCamera(state.heading, state.pitch, state.roll, state.flightPathAngle, input.cameraYaw, input.cameraPitch);
 
-  // Update Three.js plane model
   planeModel.update(
     { boostDuration: physicsResult.boostDuration, boostTimeRemaining: physicsResult.boostTimeRemaining, boostRotations: physicsResult.boostRotations },
     input,
@@ -598,7 +572,6 @@ function update(dt) {
     physicsResult.isBoosting
   );
 
-  // Update region name
   const now = Date.now();
   const distFromLast = calculateDistance(state.lon, state.lat, lastGeocodePos.lon, lastGeocodePos.lat);
   if (now - geocodeTimer > 10000 || distFromLast > 1000) {
@@ -620,11 +593,11 @@ function checkGPWS() {
   if (terrainHeight === undefined) return;
 
   const agl = state.alt - terrainHeight;
-  const pitchRad = Cesium.Math.toRadians(state.pitch);
-  const verticalSpeed = state.speed * Math.sin(pitchRad);
+  const gammaRad = Cesium.Math.toRadians(state.flightPathAngle);
+  const verticalSpeed = state.speed * Math.sin(gammaRad);
 
   let showWarning = false;
-  if (state.pitch < -1) {
+  if (state.flightPathAngle < -2) {
     if (agl < 450) {
       if (agl < 150) showWarning = true;
       if (verticalSpeed < -20) showWarning = true;
@@ -681,8 +654,6 @@ function animate() {
     }
 
     if (hud) hud.update(state, now);
-
-    // Update engine audio
     audio.update({ throttle: state.throttle, speed: state.speed });
 
     minimapUpdateTimer += dt;
@@ -700,7 +671,7 @@ function animate() {
     try {
       renderer.render(scene, camera);
     } catch (e) {
-      // Render error — keep going
+      // keep going
     }
   }
 
@@ -727,7 +698,6 @@ document.getElementById("restartBtn").addEventListener("click", () => {
   enterSpawnPicking(true);
 });
 
-// Start audio on first user gesture (browser requirement)
 let audioStarted = false;
 function startAudioOnce() {
   if (!audioStarted) {
@@ -783,7 +753,7 @@ initThree();
 setupSpawnPicker();
 setupSearch();
 preloadTerrain();
-setSunForTime(viewer, 12);
+setSunForTime(viewer, 12, state.lat, state.lon);
 
 if (uiContainer) uiContainer.classList.add("hidden");
 if (threeContainer) threeContainer.classList.add("hidden");

@@ -3,13 +3,13 @@ import { CONFIG } from "../core/config.js";
 /**
  * Flight controller.
  *
- * Controls (exactly as specified):
+ * Controls:
  *   W — accelerate (throttle up)
  *   S — slow down (throttle down)
  *   A — turn left (yaw left)
  *   D — turn right (yaw right)
- *   Up Arrow — nose down (pitch down)
- *   Down Arrow — nose up (pitch up)
+ *   Up Arrow — nose down (descend along flight path)
+ *   Down Arrow — nose up (climb along flight path)
  *   Left Arrow — roll left
  *   Right Arrow — roll right
  *   Space — boost (afterburner)
@@ -60,7 +60,7 @@ export class PlaneController {
     });
 
     this.input = {
-      throttle: 0,
+      throttle: 0.5,
       pitch: 0,
       roll: 0,
       yaw: 0,
@@ -91,17 +91,18 @@ export class PlaneController {
       this.input.throttle = Math.max(0, this.input.throttle - accelRate * 0.016);
     }
 
-    // Up arrow = nose down, Down arrow = nose up
+    // Up arrow = nose down (descend), Down arrow = nose up (climb)
+    // The plane always moves forward, so pitch changes the flight path angle
     const pitchTarget = this.keys["ArrowUp"] ? 1 : this.keys["ArrowDown"] ? -1 : 0;
-    this.input.pitch = this.lerp(this.input.pitch, pitchTarget, 0.1);
+    this.input.pitch = this.lerp(this.input.pitch, pitchTarget, 0.12);
 
     // Left arrow = roll left, Right arrow = roll right
     const rollTarget = this.keys["ArrowLeft"] ? -1 : this.keys["ArrowRight"] ? 1 : 0;
-    this.input.roll = this.lerp(this.input.roll, rollTarget, 0.1);
+    this.input.roll = this.lerp(this.input.roll, rollTarget, 0.12);
 
     // A/D: yaw left/right
     const yawTarget = this.keys["KeyA"] ? -1 : this.keys["KeyD"] ? 1 : 0;
-    this.input.yaw = this.lerp(this.input.yaw, yawTarget, 0.1);
+    this.input.yaw = this.lerp(this.input.yaw, yawTarget, 0.12);
 
     // Mouse drag: look around
     if (this.mouseDragging) {
