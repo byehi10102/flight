@@ -19,8 +19,16 @@ export class PlaneController {
   constructor() {
     this.keys = {};
     this.prevKeys = {};
-    window.addEventListener("keydown", (e) => (this.keys[e.key.toLowerCase()] = true));
-    window.addEventListener("keyup", (e) => (this.keys[e.key.toLowerCase()] = false));
+    window.addEventListener("keydown", (e) => {
+      const tag = e.target.tagName;
+      if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return;
+      this.keys[e.code] = true;
+    });
+    window.addEventListener("keyup", (e) => {
+      const tag = e.target.tagName;
+      if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return;
+      this.keys[e.code] = false;
+    });
 
     this.mouseDragging = false;
     this.mouseDeltaX = 0;
@@ -57,6 +65,7 @@ export class PlaneController {
       roll: 0,
       yaw: 0,
       boost: false,
+      deceleration: false,
       cameraYaw: 0,
       cameraPitch: 0,
       isDragging: false,
@@ -70,27 +79,28 @@ export class PlaneController {
   }
 
   update() {
-    this.input.boost = !!this.keys[" "];
+    this.input.boost = !!this.keys["Space"];
+    this.input.deceleration = !!this.keys["KeyS"];
     this.input.isDragging = this.mouseDragging;
 
     // W/S: throttle up/down
     const accelRate = 0.5;
-    if (this.keys["w"]) {
+    if (this.keys["KeyW"]) {
       this.input.throttle = Math.min(1, this.input.throttle + accelRate * 0.016);
-    } else if (this.keys["s"]) {
+    } else if (this.keys["KeyS"]) {
       this.input.throttle = Math.max(0, this.input.throttle - accelRate * 0.016);
     }
 
     // Up arrow = nose down, Down arrow = nose up
-    const pitchTarget = this.keys["arrowup"] ? 1 : this.keys["arrowdown"] ? -1 : 0;
+    const pitchTarget = this.keys["ArrowUp"] ? 1 : this.keys["ArrowDown"] ? -1 : 0;
     this.input.pitch = this.lerp(this.input.pitch, pitchTarget, 0.1);
 
     // Left arrow = roll left, Right arrow = roll right
-    const rollTarget = this.keys["arrowleft"] ? -1 : this.keys["arrowright"] ? 1 : 0;
+    const rollTarget = this.keys["ArrowLeft"] ? -1 : this.keys["ArrowRight"] ? 1 : 0;
     this.input.roll = this.lerp(this.input.roll, rollTarget, 0.1);
 
     // A/D: yaw left/right
-    const yawTarget = this.keys["a"] ? -1 : this.keys["d"] ? 1 : 0;
+    const yawTarget = this.keys["KeyA"] ? -1 : this.keys["KeyD"] ? 1 : 0;
     this.input.yaw = this.lerp(this.input.yaw, yawTarget, 0.1);
 
     // Mouse drag: look around
@@ -115,10 +125,11 @@ export class PlaneController {
     this.mouseDragging = false;
     this.mouseDeltaX = 0;
     this.mouseDeltaY = 0;
-    this.input.throttle = 0;
+    this.input.throttle = 0.5;
     this.input.pitch = 0;
     this.input.roll = 0;
     this.input.yaw = 0;
+    this.input.deceleration = false;
   }
 
   lerp(start, end, amt) {

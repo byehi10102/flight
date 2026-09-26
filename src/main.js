@@ -47,6 +47,7 @@ let minimapUpdateTimer = 0;
 let geocodeTimer = 0;
 let lastGeocodePos = { lon: 0, lat: 0 };
 let currentRegionName = null;
+let terrainReady = false;
 
 // ── DOM refs ─────────────────────────────────────────────────────────────────
 const mainMenu = document.getElementById("mainMenu");
@@ -62,7 +63,7 @@ const locationSearch = document.getElementById("locationSearch");
 const searchResults = document.getElementById("search-results");
 const instructionText = document.getElementById("instruction-text");
 
-const loadingStatus = { model: false, cesium: false, globe: false, failed: false };
+const loadingStatus = { model: false, cesium: false, globe: false, terrain: false, failed: false };
 
 function updateLoadingUI() {
   if (!loadingIndicator || !loadingText || !startBtn) return;
@@ -70,13 +71,14 @@ function updateLoadingUI() {
     loadingIndicator.classList.add("hidden");
     return;
   }
-  const isAllLoaded = loadingStatus.model && loadingStatus.cesium && loadingStatus.globe;
+  const isAllLoaded = loadingStatus.model && loadingStatus.cesium && loadingStatus.globe && loadingStatus.terrain;
   if (loadingStatus.failed) {
     loadingText.textContent = "Loading Failed. Please Refresh.";
   } else if (!isAllLoaded) {
     if (!loadingStatus.model) loadingText.textContent = "Loading Aircraft Model...";
     else if (!loadingStatus.cesium) loadingText.textContent = "Loading Satellite Imagery...";
     else if (!loadingStatus.globe) loadingText.textContent = "Loading Globe Surface...";
+    else if (!loadingStatus.terrain) loadingText.textContent = "Loading Terrain Data...";
   }
   if (!isAllLoaded || loadingStatus.failed) {
     loadingText.textContent = loadingText.textContent || "Loading...";
@@ -97,6 +99,7 @@ updateLoadingUI();
 
 groundSampler = new GroundSampler(viewer);
 
+// Globe surface loading tracker
 let globeLoadingStarted = false;
 const unregisterGlobeTracker = viewer.scene.postRender.addEventListener(() => {
   const tilesLoaded = viewer.scene.globe.tilesLoaded;
@@ -122,6 +125,23 @@ viewer.scene.globe.tileLoadProgressEvent.addEventListener((queueLength) => {
     }
   }
 });
+
+// ── Preload terrain around initial position ─────────────────────────────────
+async function preloadTerrain() {
+  try {
+    const provider = await attachTerrain(viewer);
+    if (provider) {
+      terrainReady = true;
+      loadingStatus.terrain = true;
+      updateLoadingUI();
+      // Pre-sample the initial area
+      await groundSampler.seed([[state.lat, state.lon]]);
+    }
+  } catch (error) {
+    console.warn("[terrain] Preload failed, will retry on spawn:", error);
+    // Don't set failed — terrain can still load on demand
+  }
+}
 
 // ── Three.js setup ───────────────────────────────────────────────────────────
 function initThree() {
@@ -169,8 +189,11 @@ function movePosition(lon, lat, alt, heading, pitch, distance) {
   };
 }
 
-// ── Camera: behind and above the airplane ───────────────────────────────────
+// ── Chase camera: behind and above the airplane ─────────────────────────────
 function updateChaseCamera(heading, pitch, roll, cameraYaw, cameraPitch) {
+  const planeCartesian = Cesium.Cartesian3.fromDegrees(state.lon, state.lat, state.alt);
+  const enuMatrix = Cesium.Transforms.eastNorthUpToFixedFrame(planeCartesian);
+
   const planeHPR = new Cesium.HeadingPitchRoll(
     Cesium.Math.toRadians(heading),
     Cesium.Math.toRadians(pitch),
@@ -186,20 +209,18 @@ function updateChaseCamera(heading, pitch, roll, cameraYaw, cameraPitch) {
   const orbitQuat = Cesium.Quaternion.fromHeadingPitchRoll(orbitHPR);
 
   const finalQuat = Cesium.Quaternion.multiply(planeQuat, orbitQuat, new Cesium.Quaternion());
-  const finalHPR = Cesium.HeadingPitchRoll.fromQuaternion(finalQuat);
 
-  // Position camera behind and above the airplane
-  const planeCartesian = Cesium.Cartesian3.fromDegrees(state.lon, state.lat, state.alt);
-  const offset = new Cesium.Cartesian3(0, -60, 20); // behind 60m, above 20m
-
-  constenuMatrix = Cesium.Transforms.eastNorthUpToFixedFrame(planeCartesian);
+  // Boom offset: behind and above
+  const offset = new Cesium.Cartesian3(0, -CONFIG.camera.boomDistance, CONFIG.camera.boomHeight);
   const rotatedOffset = Cesium.Matrix4.multiplyByPoint(enuMatrix, offset, new Cesium.Cartesian3());
+
+  const finalHPR = Cesium.HeadingPitchRoll.fromQuaternion(finalQuat);
 
   viewer.camera.setView({
     destination: rotatedOffset,
     orientation: {
       heading: finalHPR.heading,
-      pitch: Cesium.Math.toRadians(-5), // slightly above looking down at plane
+      pitch: Cesium.Math.toRadians(-8), // slightly above looking down at plane
       roll: finalHPR.roll,
     },
   });
@@ -372,11 +393,39 @@ function selectSearchResult(lon, lat, name) {
 
 function setupSpawnPicker() {
   const handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
+  const canvas = viewer.scene.canvas;
+
+  function isClickInSearchUI(x, y) {
+    const searchRect = locationSearch ? locationSearch.getBoundingClientRect() : null;
+    if (searchRect) {
+      const padding = 20;
+      if (
+        x >= searchRect.left - padding &&
+        x <= searchRect.right + padding &&
+        y >= searchRect.top - padding - 40 &&
+        y <= searchRect.bottom + padding + 100
+      ) {
+        return true;
+      }
+    }
+    const confirmRect = confirmSpawnBtn ? confirmSpawnBtn.getBoundingClientRect() : null;
+    if (confirmRect) {
+      const padding = 20;
+      if (
+        x >= confirmRect.left - padding &&
+        x <= confirmRect.right + padding &&
+        y >= confirmRect.top - padding &&
+        y <= confirmRect.bottom + padding
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }
 
   handler.setInputAction((click) => {
     if (currentState !== States.PICK_SPAWN) return;
-    // Don't trigger if clicking on search UI
-    if (click.position.x < 0 || click.position.y < 0) return;
+    if (isClickInSearchUI(click.position.x, click.position.y)) return;
 
     const ray = viewer.camera.getPickRay(click.position);
     const cartesian = viewer.scene.globe.pick(ray, viewer.scene);
@@ -416,11 +465,18 @@ function setupSpawnPicker() {
       if (confirmSpawnBtn) confirmSpawnBtn.classList.remove("hidden");
     }
   }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+
+  canvas.addEventListener("mousedown", (e) => {
+    if (currentState !== States.PICK_SPAWN) return;
+    if (isClickInSearchUI(e.clientX, e.clientY)) {
+      e.stopImmediatePropagation();
+      e.preventDefault();
+    }
+  }, true);
 }
 
 // ── Confirm spawn with transition animation ──────────────────────────────────
 function confirmSpawn() {
-  // Step 1: Fade to black
   if (vignette) vignette.style.opacity = "1";
 
   setTimeout(() => {
@@ -429,7 +485,6 @@ function confirmSpawn() {
       spawnMarker = null;
     }
 
-    // Disable camera controls
     const ctrl = viewer.scene.screenSpaceCameraController;
     ctrl.enableRotate = false;
     ctrl.enableTranslate = false;
@@ -461,18 +516,17 @@ function confirmSpawn() {
 
     currentState = States.TRANSITIONING;
 
-    // Step 2: Pan down to spawn location (the animation from reference)
+    // Pan down to spawn location
     viewer.camera.flyTo({
       destination: Cesium.Cartesian3.fromDegrees(state.lon, state.lat, state.alt + 500),
       orientation: {
         heading: Cesium.Math.toRadians(state.heading),
-        pitch: Cesium.Math.toRadians(-30), // start looking down
+        pitch: Cesium.Math.toRadians(-30),
         roll: 0,
       },
       duration: 2.0,
       easingFunction: Cesium.EasingFunction.QUADRATIC_IN_OUT,
       complete: () => {
-        // Step 3: Transition to chase camera behind airplane
         setTimeout(() => {
           flightStartTime = Date.now();
           if (uiContainer) uiContainer.classList.remove("hidden");
@@ -490,7 +544,11 @@ function update(dt) {
   if (currentState !== States.FLYING) return;
 
   const input = controller.update();
-  const physicsResult = physics.update(input, dt);
+
+  // Get ground height at current position
+  const groundHeight = groundSampler.get(state.lat, state.lon, 0);
+
+  const physicsResult = physics.update(input, dt, groundHeight);
 
   state.speed = physicsResult.speed;
   state.pitch = physicsResult.pitch;
@@ -510,7 +568,7 @@ function update(dt) {
   // Check GPWS
   checkGPWS();
 
-  // Update chase camera (behind and above)
+  // Update chase camera
   updateChaseCamera(state.heading, state.pitch, state.roll, input.cameraYaw, input.cameraPitch);
 
   // Update Three.js plane model
@@ -605,7 +663,6 @@ function animate() {
 
     if (hud) hud.update(state, now);
 
-    // Update minimap at 10 Hz
     minimapUpdateTimer += dt;
     if (minimapUpdateTimer > 0.1) {
       minimapUpdateTimer = 0;
@@ -689,7 +746,7 @@ initialCameraView = {
 initThree();
 setupSpawnPicker();
 setupSearch();
-attachTerrain(viewer).catch(() => {});
+preloadTerrain();
 setSunForTime(viewer, 12);
 
 if (uiContainer) uiContainer.classList.add("hidden");

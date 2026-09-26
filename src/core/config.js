@@ -20,19 +20,33 @@ export const CONFIG = {
     modelScale: 0.2,
   },
 
-  // ── Flight model: reference-style arcade physics ──────────────────────────
+  // ── Flight model: realistic aerodynamics ─────────────────────────────────
   physics: {
-    speed: 100,
-    maxSpeed: 1000,
-    minSpeed: 100,
-    throttle: 0.5,
-    enginePower: 1.2,
-    drag: 0.005,
-    liftFactor: 0.002,
-    gravity: 9.8,
-    pitchRate: 1.2,
+    mass: 38300,               // kg (CRJ-900)
+    wingArea: 104.9,           // m²
+    maxThrust: 147000,         // N (2 × 73.5 kN)
+    maxSpeed: 250,             // m/s (~485 knots)
+    minSpeed: 66,              // m/s (stall speed)
+    densitySeaLevel: 1.225,    // kg/m³
+    temperatureSeaLevel: 288.15, // K
+    gravity: 9.80665,
+    // Aerodynamic coefficients
+    cl0: 0.22,                 // lift at zero alpha
+    clAlpha: 4.6,              // lift curve slope
+    clMax: 1.55,               // max lift coefficient
+    stallAngle: 0.28,          // rad (~16 degrees)
+    cd0: 0.025,                // parasitic drag
+    inducedDragFactor: 0.045,  // induced drag factor
+    // Control rates (rad/s)
+    pitchRate: 0.8,
     rollRate: 2.5,
     yawRate: 0.5,
+    // Ground handling
+    groundFriction: 0.02,
+    brakeFriction: 0.15,
+    steerRate: 0.3,
+    rotationSpeed: 75,         // m/s — liftoff speed
+    ceiling: 12500,            // m
   },
 
   // ── Boost (afterburner) ───────────────────────────────────────────────────
@@ -48,6 +62,8 @@ export const CONFIG = {
     fov: 75,
     near: 0.1,
     far: 100000,
+    boomDistance: 60,   // behind aircraft
+    boomHeight: 20,     // above aircraft
   },
 
   sim: {
