@@ -3,6 +3,7 @@ import {
   EllipsoidTerrainProvider,
   UrlTemplateImageryProvider,
   Cartographic,
+  Color,
   Math as CesiumMath,
   Viewer as CesiumViewer,
 } from "cesium";
@@ -62,19 +63,35 @@ export function applyBaseWorld(viewer) {
   });
   const layer = viewer.imageryLayers.addImageryProvider(imagery, 0);
   layer.maximumLevel = CONFIG.imagery.maximumLevel;
+  try { layer.anisotropy = 16; } catch (e) { /* older Cesium */ }
 
-  viewer.scene.globe.baseColor = "#0b1622";
+  // ── Quality: LOD, AA and atmosphere ──────────────────────────────────────
+  viewer.scene.globe.maximumScreenSpaceError = 2;
+  viewer.scene.globe.skipLevelOfDetail = true;
+  viewer.scene.globe.baseScreenSpaceError = 1024;
+  viewer.scene.globe.skipScreenSpaceErrorFactor = 16;
+  viewer.scene.globe.skipLevels = 1;
+
+  viewer.scene.globe.tileCacheSize = 2048;
+  viewer.scene.globe.preloadAncestors = true;
+  viewer.scene.globe.preloadSiblings = true;
+  viewer.scene.globe.loadingDescendantLimit = 20;
+
+  viewer.scene.globe.showWaterEffect = false;
   viewer.scene.globe.depthTestAgainstTerrain = true;
-  viewer.scene.globe.showWaterEffect = true;
   viewer.scene.globe.enableLighting = true;
-  viewer.scene.globe.atmosphereLightIntensity = 14;
-  viewer.scene.globe.maximumScreenSpaceError = 1.6;
+  viewer.scene.globe.atmosphereLightIntensity = 10;
+  viewer.scene.globe.baseColor = Color.fromCssColorString("#0b1622");
+
+  viewer.scene.highDynamicRange = false;
+  viewer.scene.postProcessStages.fxaa.enabled = true;
+  viewer.scene.msaaSamples = 4;
+
   viewer.scene.skyAtmosphere.hueShift = -0.02;
   viewer.scene.skyAtmosphere.saturationShift = -0.08;
+
   viewer.scene.fog.enabled = true;
-  viewer.scene.fog.density = 0.00022;
-  viewer.scene.highDynamicRange = true;
-  viewer.scene.msaaSamples = 4;
+  viewer.scene.fog.density = 0.0001;
 
   // A visible sun keeps the aircraft lit and gives terrain real shading.
   // Intensity is driven per-frame-of-day by setSunForTime().
@@ -127,19 +144,28 @@ export async function attachTerrain(viewer) {
 }
 
 /** Sun position driven by a single "hour of day" scalar, 0–24. */
-export function setSunForTime(viewer, hours) {
+export function setSunForTime(viewer, hours, latitude = 45, longitude = 0, date = new Date()) {
   const dayFraction = ((hours % 24) + 24) % 24 / 24;
-  // Approximate solar declination for a mid-latitude summer day.
-  const declination = 0.409;
+  const phi = CesiumMath.toRadians(latitude);
+
+  // Solar declination for the actual day of year (Cooper's equation).
+  const start = Date.UTC(date.getUTCFullYear(), 0, 0);
+  const dayOfYear = Math.floor((date.getTime() - start) / 86400000);
+  const declination = 0.006918
+    - 0.399912 * Math.cos((2 * Math.PI * dayOfYear) / 365)
+    + 0.070257 * Math.sin((2 * Math.PI * dayOfYear) / 365)
+    - 0.006758 * Math.cos((4 * Math.PI * dayOfYear) / 365)
+    + 0.000907 * Math.sin((4 * Math.PI * dayOfYear) / 365)
+    - 0.002697 * Math.cos((6 * Math.PI * dayOfYear) / 365)
+    + 0.00148 * Math.sin((6 * Math.PI * dayOfYear) / 365);
+
   const hourAngle = CesiumMath.toRadians(dayFraction * 2 * Math.PI - Math.PI);
-  const latitude = CesiumMath.toRadians(45);
   const altitude = Math.asin(
-    Math.sin(declination) * Math.sin(latitude) +
-      Math.cos(declination) * Math.cos(latitude) * Math.cos(hourAngle),
+    Math.sin(declination) * Math.sin(phi) +
+      Math.cos(declination) * Math.cos(phi) * Math.cos(hourAngle),
   );
+
   if (altitude <= 0.02) {
-    // Below the horizon — dial the sun right down instead of letting it
-    // light the terrain from underneath.
     viewer.scene.light.intensity = 0.05;
     return altitude;
   }

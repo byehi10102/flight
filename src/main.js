@@ -8,6 +8,7 @@ import { PlanePhysics } from "./plane/planePhysics.js";
 import { PlaneController } from "./plane/planeController.js";
 import { PlaneModel } from "./plane/planeModel.js";
 import { Hud } from "./ui/hud.js";
+import { EngineAudio } from "./flight/engine.js";
 import { reverseGeocode, calculateDistance } from "./utils/geo.js";
 
 const States = {
@@ -37,6 +38,7 @@ let planeModel;
 let physics = new PlanePhysics();
 let controller = new PlaneController();
 let hud = new Hud();
+let audio = new EngineAudio();
 let clock = new THREE.Clock();
 let groundSampler;
 let spawnMarker = null;
@@ -192,14 +194,21 @@ function movePosition(lon, lat, alt, heading, pitch, distance) {
 // ── Chase camera: behind and above the airplane ─────────────────────────────
 function updateChaseCamera(heading, pitch, roll, cameraYaw, cameraPitch) {
   const planeCartesian = Cesium.Cartesian3.fromDegrees(state.lon, state.lat, state.alt);
-  const enuMatrix = Cesium.Transforms.eastNorthUpToFixedFrame(planeCartesian);
 
-  const planeHPR = new Cesium.HeadingPitchRoll(
+  // Speed-scaled boom: pull back and rise as speed increases
+  const speedT = Math.min(1, Math.max(0, (state.speed - 60) / 190));
+  const boomDist = CONFIG.camera.boomDistance * (1 + 0.55 * speedT);
+  const boomH = CONFIG.camera.boomHeight * (1 + 0.35 * speedT);
+
+  // Build the boom frame from HEADING ONLY, with reduced pitch and roll.
+  // Full attitude coupling makes the camera bank with the plane, so the
+  // horizon stays level and you lose all sense of the turn.
+  const camHPR = new Cesium.HeadingPitchRoll(
     Cesium.Math.toRadians(heading),
-    Cesium.Math.toRadians(pitch),
-    Cesium.Math.toRadians(roll)
+    Cesium.Math.toRadians(-pitch * 0.25),
+    Cesium.Math.toRadians(roll * 0.35)
   );
-  const planeQuat = Cesium.Quaternion.fromHeadingPitchRoll(planeHPR);
+  const camQuat = Cesium.Quaternion.fromHeadingPitchRoll(camHPR);
 
   const orbitHPR = new Cesium.HeadingPitchRoll(
     Cesium.Math.toRadians(cameraYaw),
@@ -208,22 +217,32 @@ function updateChaseCamera(heading, pitch, roll, cameraYaw, cameraPitch) {
   );
   const orbitQuat = Cesium.Quaternion.fromHeadingPitchRoll(orbitHPR);
 
-  const finalQuat = Cesium.Quaternion.multiply(planeQuat, orbitQuat, new Cesium.Quaternion());
+  const finalQuat = Cesium.Quaternion.multiply(camQuat, orbitQuat, new Cesium.Quaternion());
 
-  // Boom offset: behind and above
-  const offset = new Cesium.Cartesian3(0, -CONFIG.camera.boomDistance, CONFIG.camera.boomHeight);
+  const enuMatrix = Cesium.Transforms.eastNorthUpToFixedFrame(planeCartesian);
+  const offset = new Cesium.Cartesian3(0, -boomDist, boomH);
   const rotatedOffset = Cesium.Matrix4.multiplyByPoint(enuMatrix, offset, new Cesium.Cartesian3());
 
   const finalHPR = Cesium.HeadingPitchRoll.fromQuaternion(finalQuat);
+
+  // Speed-scaled FOV: narrow when slow, wide when fast
+  const fov = Cesium.Math.toRadians(58 + 14 * speedT);
 
   viewer.camera.setView({
     destination: rotatedOffset,
     orientation: {
       heading: finalHPR.heading,
-      pitch: Cesium.Math.toRadians(-8), // slightly above looking down at plane
+      pitch: Cesium.Math.toRadians(-5 - 3 * speedT),
       roll: finalHPR.roll,
     },
   });
+
+  // Apply FOV if it changed significantly
+  const currentFov = viewer.camera.frustum.fov;
+  if (Math.abs(currentFov - fov) > 1e-4) {
+    viewer.camera.frustum.fov = fov;
+  }
+
   viewer.scene.requestRender();
 }
 
@@ -663,6 +682,9 @@ function animate() {
 
     if (hud) hud.update(state, now);
 
+    // Update engine audio
+    audio.update({ throttle: state.throttle, speed: state.speed });
+
     minimapUpdateTimer += dt;
     if (minimapUpdateTimer > 0.1) {
       minimapUpdateTimer = 0;
@@ -705,6 +727,17 @@ document.getElementById("restartBtn").addEventListener("click", () => {
   enterSpawnPicking(true);
 });
 
+// Start audio on first user gesture (browser requirement)
+let audioStarted = false;
+function startAudioOnce() {
+  if (!audioStarted) {
+    audioStarted = true;
+    audio.start();
+  }
+}
+window.addEventListener("keydown", startAudioOnce, { once: true });
+window.addEventListener("mousedown", startAudioOnce, { once: true });
+
 window.addEventListener("keydown", (e) => {
   const key = e.key.toLowerCase();
   if (key === "escape" || key === "p") {
@@ -721,6 +754,9 @@ window.addEventListener("keydown", (e) => {
     } else if (currentState === States.PICK_SPAWN && key === "escape") {
       exitSpawnPicking();
     }
+  }
+  if (key === "m" && currentState === States.FLYING) {
+    audio.toggle();
   }
 });
 

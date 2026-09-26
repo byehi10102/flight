@@ -221,7 +221,10 @@ export class PlanePhysics {
       this.speed = Math.max(P.minSpeed * 0.5, this.speed + accel * dt);
 
       // Coordinated turn: bank causes heading change
-      const turnRate = (P.gravity * Math.tan(THREE.MathUtils.degToRad(this.roll))) / Math.max(this.speed, 20);
+      // Roll authority scales with dynamic pressure
+      const authority = Math.min(1, (q * P.wingArea) / (P.mass * 8));
+      const turnRate = (P.gravity * Math.tan(THREE.MathUtils.degToRad(this.roll)))
+        / Math.max(this.speed, 20) * (0.55 + 0.45 * authority);
       this.heading = ((this.heading + THREE.MathUtils.radToDeg(turnRate) * dt) % 360 + 360) % 360;
 
       // G-load

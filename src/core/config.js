@@ -15,8 +15,8 @@ export const CONFIG = {
   },
 
   aircraft: {
-    modelUrl: "models/crj900.glb",
-    modelAttribution: "Bombardier CRJ-900 CityJet",
+    modelUrl: "models/f-15.glb",
+    modelAttribution: "F-15 Low Poly",
     modelScale: 0.2,
   },
 
@@ -41,12 +41,23 @@ export const CONFIG = {
     pitchRate: 0.8,
     rollRate: 2.5,
     yawRate: 0.5,
+    maxBank: 0.85,             // rad (~48.7 degrees)
     // Ground handling
     groundFriction: 0.02,
     brakeFriction: 0.15,
     steerRate: 0.3,
     rotationSpeed: 75,         // m/s — liftoff speed
     ceiling: 12500,            // m
+    // Altitude hold tuning
+    autoLevelRate: 0.9,
+    bankLevelRate: 1.4,
+    throttleUpRate: 0.55,
+    throttleDownRate: 0.35,
+    holdGainP: 0.00012,
+    holdGainD: 0.022,
+    holdGainI: 0.006,
+    holdIntegralLimit: 0.25,
+    holdPitchLimit: 0.22,
   },
 
   // ── Boost (afterburner) ───────────────────────────────────────────────────

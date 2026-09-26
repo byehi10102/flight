@@ -26,6 +26,7 @@ export class Hud {
     this._fpsFrames = 0;
     this._fpsLast = performance.now();
     this._score = 0;
+    this.statusEl = document.getElementById("hud-status");
 
     this._buildCompassTape();
   }
@@ -52,11 +53,20 @@ export class Hud {
     const headingDeg = ((state.heading % 360) + 360) % 360;
     const altFt = state.alt * M_TO_FT;
     const speedKt = state.speed * MPS_TO_KNOTS;
+    const stallFactor = state.stallFactor || 0;
 
     if (this.speedEl) this.speedEl.textContent = Math.round(speedKt);
     if (this.altEl) this.altEl.textContent = Math.round(altFt).toLocaleString();
     if (this.headingEl) this.headingEl.textContent = String(Math.round(headingDeg)).padStart(3, "0");
     if (this.coordsEl) this.coordsEl.textContent = `${state.lat.toFixed(4)}, ${state.lon.toFixed(4)}`;
+
+    // Status text with stall warning
+    if (this.statusEl) {
+      const status = state.onGround
+        ? (state.speed < 1 ? "PARKED" : "TAXIING")
+        : stallFactor > 0.35 ? "STALL" : "AIRBORNE";
+      this.statusEl.textContent = status;
+    }
 
     // Update compass tape position
     if (this.compassTape) {
