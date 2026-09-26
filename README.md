@@ -1,63 +1,57 @@
 # Skyward
 
-**An open flight simulator on a real 3D Earth.** Real terrain, real 3D
-buildings, real runways, anywhere on Earth — **no API keys, no accounts, no
-billing**.
+**An open flight simulator on a real 3D Earth.** Real 3D terrain, realistic satellite imagery, anywhere on the planet — with **no API keys, no accounts, no sign-up**.
 
 ```bash
 npm install
 npm run dev
 ```
 
-Open <http://127.0.0.1:5173>. You spawn on the threshold of a real runway.
-Hold **W** to accelerate, rotate, and take off.
+Open [http://127.0.0.1:5173](http://127.0.0.1:5173). Click **START FLIGHT**, pick a spawn point on the map, and fly.
 
 ## Controls
 
-| | Ground | Air |
-|---|---|---|
-| **W** | accelerate | accelerate |
-| **S** | brakes | — |
-| **A** / **D** | steer | bank left / right |
-| **←** / **→** | — | bank left / right |
-| **↑** / **↓** | — | nose up / down |
-
-All controls are hold-to-act, and they self-centre: release **↑/↓** and the
-plane levels off and holds its altitude; release **A/D** and the bank decays to
-wings-level. **P** pauses, **C** cleans the view, **H** hides the UI.
-
-Search any address in the location panel to fly there, or jump straight to any
-of 10 000+ real airports.
+| Key | Action |
+| --- | --- |
+| **W** / **S** | Throttle up / down |
+| **Arrow Up** / **Arrow Down** | Pitch up / down |
+| **Arrow Left** / **Arrow Right** | Roll left / right |
+| **A** / **D** | Yaw (rudder) |
+| **Space** | Afterburner (boost) |
+| **Mouse drag** | Look around |
+| **Esc** / **P** | Pause |
 
 ## What makes it real
 
-- **Real 3D buildings** — actual OpenStreetMap footprints at their real
-  heights, streamed from OpenFreeMap. 12 000+ buildings over Manhattan.
-- **Real terrain** — a global elevation DEM. Everest measures 8 685 m, not
-  the −5 931 m the naive API returns.
-- **Real surface cover** — satellite imagery, so oceans, forests, farmland and
-  cities are genuine, not procedural.
-- **Real runways** — 14 000+ from OurAirports, at true positions and bearings,
-  draped over the terrain.
+- **Real 3D terrain** — a global elevation DEM from Re:Earth/Mapterhorn (CC BY 4.0).
+- **Real satellite imagery** — Esri World Imagery, so oceans, forests, farmland and cities are genuine surface cover, not procedural.
+- **No API keys** — no Google Maps API, no Cesium ion token, no account. Just a network connection.
 
-**Verified against published data** — `node scripts/worldcheck.mjs`, 17/17:
+## Architecture
 
-| | |
-|---|---|
-| Buildings over Manhattan | **12,380** real footprints, tops to 932 m |
-| One World Trade Center | **417 m** vs 417 m published |
-| Empire State Building | **444 m** vs 443 m, 1 m from the real footprint |
-| 432 Park Avenue | **426 m** vs 426 m |
-| JFK runway 13R | **14,511 ft → 4,423 m**, exact |
-| Heathrow 09L | **12,799 ft → 3,901 m**, exact |
-| Dubai 12R | **14,590 ft → 4,447 m**, exact |
+Vanilla ES modules + Vite + CesiumJS + Three.js.
 
-No Google Maps API, no Cesium ion token, no account. Just a network connection.
+```
+src/
+├── main.js                    state machine, spawn picker, game loop
+├── core/
+│   ├── config.js              all tunables
+│   ├── viewer.js              Cesium viewer, terrain, imagery, sun
+│   └── ground.js              accurate elevation sampler + cache
+├── plane/
+│   ├── planePhysics.js        arcade flight model (THREE.Quaternion)
+│   ├── planeController.js     keyboard + mouse input
+│   └── planeModel.js          Three.js aircraft model overlay
+└── ui/
+    ├── hud.js                 speed, altitude, heading, throttle
+    └── style.css
+```
 
-See [`project.md`](project.md) for the full design record, data sources,
-attribution, and the complete change log.
+## Attribution
 
-## License
+- **Terrain** — Re:Earth / Mapterhorn, CC BY 4.0
+- **Imagery** — Esri World Imagery, (c) Esri, Maxar, Earthstar Geographics
+- **Geocoding** — Nominatim / OpenStreetMap
+- **Engine** — CesiumJS (Apache-2.0), Three.js (MIT)
 
-MIT. Data © OpenStreetMap contributors, Re:Earth/Mapterhorn (CC BY 4.0), Esri,
-OurAirports (public domain), NASA (public domain).
+MIT licensed.
