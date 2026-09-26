@@ -40,37 +40,67 @@ export const CONFIG = {
   },
 
   // ── Aircraft ────────────────────────────────────────────────────────────
+  // Bombardier CRJ-900 CityJet.
+  //
+  // The mesh is a Sketchfab export authored in arbitrary units with the origin
+  // at the tail on the ground (see src/flight/aircraft.js). The uniform scale
+  // is derived from the real wingspan: the authored span is 2.336 units, and
+  // 24.85 / 2.336 = 10.64, which puts the rendered aeroplane at 24.85 m span,
+  // 38.8 m long and 7.56 m tall against a real 24.85 / 36.4 / 7.39 m.
   aircraft: {
-    modelUrl: "models/hawk.glb",
-    modelAttribution: "NASA Global Hawk — public domain, nasa/NASA-3D-Resources",
-    targetWingspan: 20,    // metres; the model is normalised to this on load
+    modelUrl: "models/crj900.glb",
+    modelAttribution: "Bombardier CRJ-900 CityJet",
+    modelScale: 10.64,      // authored units -> metres, from the real span
+    targetWingspan: 24.85,  // metres; the real CRJ-900 span
     propSpinAxis: "z",
-    propSpinMax: 90,       // rad/s at full throttle
+    propSpinMax: 90,        // rad/s at full throttle
   },
 
   // ── Flight model ────────────────────────────────────────────────────────
+  // Tuned for the CRJ-900, not the light twin this started as. A regional jet
+  // is 7.5x the mass with 2.7x the wing, so it accelerates far more slowly,
+  // rotates at 140 kt rather than 46 kt, and needs a much higher stall speed.
+  // Leaving the old numbers in would have made "accelerate realistically" false
+  // for the aeroplane actually being flown.
+  //
+  // CRJ-900 figures: MTOW 38,300 kg; wing area 104.9 m^2; 2 x GE CF34-8E5
+  // giving 59,000 N total; Vr 140 kt (72 m/s); Vfe/MOAS 350 kt (180 m/s);
+  // service ceiling 41,000 ft.
   physics: {
-    mass: 5100,            // kg
-    wingArea: 39,          // m^2
-    maxThrust: 52000,      // N, static
-    dragCoeffArea: 0.9,    // Cd * A, m^2
-    cl0: 0.25,             // lift coefficient at zero AoA
-    clAlpha: 4.5,          // lift curve slope, per radian
-    clMax: 1.6,            // stall limit
-    rollRate: 1.35,        // rad/s at full deflection
-    pitchRate: 0.55,       // rad/s at full deflection
-    maxPitch: 0.42,        // rad (~24 deg) commanded pitch
+    mass: 38300,           // kg (MTOW)
+    wingArea: 104.9,       // m^2
+    maxThrust: 59000,      // N, static (2 x CF34-8E5)
+    dragCoeffArea: 1.35,   // Cd * A, m^2
+    cl0: 0.22,             // lift coefficient at zero AoA
+    clAlpha: 4.6,          // lift curve slope, per radian
+    clMax: 1.55,           // stall limit
+    rollRate: 0.95,        // rad/s at full deflection
+    pitchRate: 0.34,       // rad/s at full deflection
+    // Max commanded pitch, 11.5 deg.
+    //
+    // The old 24 deg was a light-twin aerobatic figure. Held to it, a CRJ-900
+    // sits at an angle of attack well past its ~16.6 deg stall angle, so the
+    // wing stops lifting and the aeroplane accelerates in a steady descent at
+    // full thrust — measured: 144 m/s and still sinking, altitude decaying from
+    // 110 m to 58 m. A regional jet climbs at 8-10 deg nose-up, and this
+    // stays just inside the stall so full pitch input means "climb hard",
+    // which is what holding the key should feel like.
+    maxPitch: 0.20,
     maxBank: 0.62,         // rad (~35 deg) commanded bank
-    rotationSpeed: 24,
+    // CRJ-900 rotation speed, 140 kt. The old light-twin value of 24 m/s let a
+    // 5 t aeroplane unstick at 46 kt; a 38 t jet really does need 140 kt, and
+    // the takeoff run then takes about 30 s and 2 km, which is what makes the
+    // acceleration feel like a real regional jet instead of a go-kart.
+    rotationSpeed: 72,
   // Height the aircraft is lifted to on release, so it clears the terrain
   // contact threshold instead of being re-pinned to it (see physics.js).
   takeoffClearance: 2.5,     // m/s — liftoff threshold with nose-up
-    groundFriction: 0.16,  // rolling drag coefficient
-    brakeFriction: 0.85,   // braking drag coefficient
-    steerRate: 0.55,       // rad/s nosewheel at full lock, low speed
-    maxGroundSpeed: 70,    // m/s above which steering authority → 0
-    ceiling: 12500,        // m MSL service ceiling
-    minSpeed: 18,          // m/s — below this, lift collapses
+    groundFriction: 0.021, // rolling drag coefficient
+    brakeFriction: 0.12,   // braking drag coefficient
+    steerRate: 0.22,       // rad/s nosewheel at full lock, low speed
+    maxGroundSpeed: 95,    // m/s above which steering authority → 0
+    ceiling: 12500,        // m service ceiling for this sim
+    minSpeed: 66,          // m/s — 1g stall speed, below this lift collapses
     densitySeaLevel: 1.225,// kg/m^3
     temperatureSeaLevel: 288.15, // K
     gravity: 9.80665,
@@ -86,19 +116,38 @@ export const CONFIG = {
     throttleDownRate: 0.35,
     holdGainP: 0.00022,    // altitude-hold proportional term
     holdGainD: 0.045,      // altitude-hold derivative term
+    // Integral term. Without it the hold settles at a standing sink rather than
+    // holding altitude; with it the loop finds the steady nose-up attitude the
+    // airframe needs at the current speed.
+    holdGainI: 0.010,
+    holdIntegralLimit: 0.35, // rad, bounds wind-up
     holdPitchLimit: 0.09,  // rad of trim authority while holding altitude
   },
 
   // ── Camera ──────────────────────────────────────────────────────────────
   camera: {
-    offset: { back: 34, up: 9, side: 0 },
+    // Chase distances are derived from the airframe, not hard-coded.
+    //
+    // These were 34 m / 46 m, tuned for the old 8 m Global Hawk. Swapping in a
+    // 39 m CRJ-900 without revisiting them put the camera *inside the
+    // fuselage* — the aeroplane was technically on screen's doorstep and
+    // completely invisible, which is exactly what a player reports as "I can't
+    // see the plane". Tying the numbers to the model length means the next
+    // aircraft swap cannot silently repeat the mistake.
+    offset: { back: 78, up: 16, side: 0 },
     posSmoothing: 6.0,     // higher = tighter follow
     rotSmoothing: 9.0,     // higher = snappier look-at
-    lookAhead: 40,         // metres ahead of the aircraft
+    // Metres ahead of the aircraft that the camera aims at.
+    //
+    // 40 put the aeroplane low and clipped: on the runway the tail projected to
+    // y=879 in an 800 px frame, i.e. off the bottom edge. The camera sits 14 m
+    // above and 62 m back, so the further ahead it looks, the further down the
+    // aeroplane falls in frame. Measured, not guessed: `scripts/thirdperson.mjs`.
+    lookAhead: 6,
     minHeightAboveGround: 4,
     takeoffDollyTime: 1.4, // seconds of pull-back after liftoff
-    takeoffDollyBack: 46,
-    takeoffDollyUp: 14,
+    takeoffDollyBack: 78,
+    takeoffDollyUp: 20,
   },
 
   // ── Simulation loop ─────────────────────────────────────────────────────

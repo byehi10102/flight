@@ -26,7 +26,7 @@ import {
   ColorGeometryInstanceAttribute,
   GeometryInstance,
   HeightReference,
-  PerInstanceColorAppearance,
+  MaterialAppearance,
   PolygonGeometry,
   PolygonHierarchy,
   Primitive,
@@ -36,6 +36,7 @@ import {
 import { VectorTile } from "@mapbox/vector-tile";
 import Pbf from "pbf";
 import { CONFIG } from "../core/config.js";
+import { facadeMaterials, facadeVariant, destroyFacadeMaterials } from "./facades.js";
 
 const TILE_EXTENT_FALLBACK = 4096;
 
@@ -299,16 +300,21 @@ export class BuildingLayer {
         this.emptyTiles.add(key);
         return;
       }
-      const primitive = await this._buildPrimitive(layer, z, tx, ty);
-      if (primitive) {
-        this.viewer.scene.primitives.add(primitive);
-        this.primitives.set(key, primitive);
+      // One primitive per facade variant present in this tile.
+      const built = await this._buildPrimitive(layer, z, tx, ty);
+      if (built && built.length) {
+        for (const primitive of built) this.viewer.scene.primitives.add(primitive);
+        this.primitives.set(key, built);
       } else {
         this.emptyTiles.add(key);
       }
     } catch (error) {
       // One bad tile must never break the sim.
       console.warn(`[buildings] ${key}: ${error.message}`);
+      if (!window.__facadeTraced) {
+        window.__facadeTraced = true;
+        console.error(`[buildings] first failure stack for ${key}:`, error && error.stack);
+      }
     } finally {
       this.pending.delete(key);
       this.inFlight--;
@@ -384,7 +390,14 @@ export class BuildingLayer {
       ground = 0;
     }
 
-    const instances = [];
+    // Group the tile's footprints by facade variant.
+    //
+    // A `MaterialAppearance` carries exactly one material, so the four
+    // variants (office / residential / brick / glass) have to be separate
+    // primitives. Without this every building in the city gets the same
+    // pattern, and with a single flat colour per building — which is what it
+    // used to do — the whole skyline reads as solid colour blocks.
+    const buckets = [[], [], [], []];
     for (const c of candidates) {
       const positions = c.lonlats.map(([lo, la]) => Cartesian3.fromDegrees(lo, la, 0));
       try {
@@ -392,17 +405,23 @@ export class BuildingLayer {
           polygonHierarchy: new PolygonHierarchy(positions),
           height: ground + c.minHeight,
           extrudedHeight: ground + c.height,
-          // POSITION_AND_NORMAL, not POSITION_ONLY. With normals the massing is
-          // lit by the sun; without them the appearance has nothing to shade
-          // with and every face comes out the same flat tone. This is the
-          // difference between a solid skyline and coloured cardboard, and it
-          // costs a few bytes per vertex.
-          vertexFormat: PerInstanceColorAppearance.VERTEX_FORMAT,
+          // POSITION_ONLY. `MaterialAppearance` derives its own lighting
+          // from the material and the face normal, and it needs the ST
+          // texture coordinates to place the facade. It rejects anything
+          // else here.
+          vertexFormat: MaterialAppearance.VERTEX_FORMAT,
           granularity: Math.PI / 180,
         });
-        instances.push(
+        const variant = facadeVariant(
+          (c.lon * 733 + c.lat * 977) | 0,
+          c.height,
+        );
+        buckets[variant].push(
           new GeometryInstance({
             geometry,
+            // Per-building tint still rides along on the instance and is
+            // multiplied over the facade, so OSM `colour` tags still tint
+            // their building without erasing the window detail.
             attributes: { color: ColorGeometryInstanceAttribute.fromColor(c.color) },
           }),
         );
@@ -410,6 +429,8 @@ export class BuildingLayer {
         // Self-intersecting ring — skip this building, keep the tile.
       }
     }
+
+    const instances = buckets.flat();
     if (!instances.length) return null;
 
     this.buildingCount += instances.length;
@@ -430,27 +451,37 @@ export class BuildingLayer {
     this.tallest.sort((a, b) => b.h - a.h);
     this.tallest.length = Math.min(this.tallest.length, 3000);
 
-    return new Primitive({
-      geometryInstances: instances,
-      // flat:false = per-vertex lighting, so the massing shades against the
-      // real sun direction and the skyline reads as solid geometry. With
-      // flat:true every face gets an identical colour, which makes a city look
-      // like coloured cardboard no matter how good the footprints and heights
-      // are. PolygonGeometry supplies the normals this needs.
-      appearance: new PerInstanceColorAppearance({ flat: false, translucent: false }),
-      // Built on the main thread: these are cheap relative to the terrain and
-      // imagery, and synchronous construction keeps the primitive's bounding
-      // volume valid from the frame it is added.
-      asynchronous: false,
-      allowPicking: false,
-      compressVertices: true,
-      releaseGeometryInstances: true,
-    });
+    // One primitive per non-empty variant.
+    const materials = facadeMaterials();
+    const out = [];
+    for (let v = 0; v < buckets.length; v++) {
+      if (!buckets[v].length) continue;
+      out.push(
+        new Primitive({
+          geometryInstances: buckets[v],
+          appearance: new MaterialAppearance({
+            material: materials[v],
+            // Lit by the sun, so massing reads as solid geometry.
+            flat: false,
+            translucent: false,
+            closed: false,
+          }),
+          // Built on the main thread: these are cheap relative to the terrain
+          // and imagery, and synchronous construction keeps the primitive's
+          // bounding volume valid from the frame it is added.
+          asynchronous: false,
+          allowPicking: false,
+          compressVertices: true,
+          releaseGeometryInstances: true,
+        }),
+      );
+    }
+    return out;
   }
 
   _clear() {
-    for (const [, primitive] of this.primitives) {
-      this.viewer.scene.primitives.remove(primitive);
+    for (const list of this.primitives.values()) {
+      for (const primitive of list) this.viewer.scene.primitives.remove(primitive);
     }
     this.primitives.clear();
   }
@@ -458,6 +489,9 @@ export class BuildingLayer {
   destroy() {
     this._clear();
     this.credit.remove();
+    // The facade texture is shared by every building primitive, so it outlives
+    // any individual tile. Only tear it down when the layer itself goes.
+    destroyFacadeMaterials();
   }
 }
 

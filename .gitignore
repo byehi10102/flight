@@ -9,6 +9,7 @@ dist/
 .cache/
 
 # test artefacts
+shots/
 shot-*.png
 verify-*.png
 diag*.png

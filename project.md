@@ -414,19 +414,191 @@ Every change to the project, and why. Newest last.
 
 ---
 
+---
+
+## 7a. The CRJ-900 swap, and the bugs it uncovered
+
+This was supposed to be a one-line change — point the model at a different GLB.
+It was not, and the reason is worth recording: **the aeroplane had never been
+visible at all.** A player reporting "I can't see the plane" is easy to read as
+a camera problem. It was not.
+
+### 1. The aircraft was never drawn
+
+`AircraftModel` created the model with three entirely reasonable-looking
+options:
+
+```js
+minimumPixelSize: 96,
+maximumScale: 900,
+distanceDisplayCondition: [0, 12_000_000],
+```
+
+With those set, the model was `ready`, `show === true`, present in
+`scene.primitives`, and contributing to the frame's command list — and
+**changed not one pixel of a 1000x700 frame when hidden**. `debugShowBoundingVolume`
+rendered nothing either.
+
+`scripts/pixdiff.mjs` proves it rather than asserting it: it freezes the
+animation loop, renders the same frame with the model shown and hidden, and
+diffs the pixels. Before the fix: `0 of 700000`. The scene has to be frozen
+first — two grabs seconds apart differ across ~60% of the frame just from
+terrain still streaming, and that noise is larger than the aeroplane.
+
+It was not the new GLB. The old Global Hawk behaved identically. Removing the
+three options restored drawing immediately (18,240 pixels, a 472x120 box).
+
+### 2. The camera and the model disagreed about which way is forward
+
+The new model is a Y-up Sketchfab export whose nose runs along **+Y**. The
+chase camera assumed the classic Cesium body frame (-Z forward, +Y up, +X
+right) and offset `(side, up, back)`. Against this model that put "up" along
+the direction of flight and "back" along a sideways axis, so the camera parked
+*beside* the aeroplane. The look-at point had the same bug: aiming 40 m along
+-Z put it 40 m *below* the aircraft, and the aeroplane sat 28.3 deg outside the
+field of view. Both now use the model's own axes: -Y behind, +Z up.
+
+### 3. The camera was closer than the aeroplane was long
+
+Chase distance was 34 m, tuned for an 8 m Global Hawk. The CRJ-900 is 39.4 m
+long, so the camera was *inside the fuselage*. Now 78 m back, 16 m up, looking
+6 m ahead — the whole airframe is in frame, wings symmetric about the centreline.
+
+`lookAhead` went 40 → 6 for the same reason, in the other direction: the further
+ahead the camera looks, the further down the aeroplane falls in frame. At 40 the
+tail projected to y=879 in an 800 px viewport.
+
+### 4. Model centring was off by a factor of the model scale
+
+`Model.scale` is applied inside Cesium's model pipeline, **not** in
+`modelMatrix`. A translation written into the matrix is therefore in world
+metres while the mesh's coordinates are in authored units. Offsetting by the
+authored half-length (1.827) instead of the scaled one left the airframe 17.6 m
+ahead of the point the flight model and the camera were tracking.
+
+### 5. Rotation speed and stall
+
+Physics retuned to the real airframe: 38,300 kg, 104.9 m² wing, 59 kN thrust,
+rotation at 140 kt. A 38 t jet does **not** leap off the mark — it takes about
+1.5 km and ~50 s to reach rotation speed, which is correct and is the point.
+
+`maxPitch` came down from 0.42 rad (24°) to 0.20 rad (11.5°). Held to 24° the
+aircraft sits past its ~16.6° stall angle, so the wing stops lifting and it
+accelerates in a *steady descent* at full thrust: measured 144 m/s, still
+sinking, altitude decaying 110 m → 58 m.
+
+### 6. The altitude hold could not hold altitude
+
+Proportional and derivative alone settle at whatever standing error they can
+live with. Holding level at 97 m/s needs about 8.6° of nose-up, because the
+wing at that speed makes only ~0.9 of the lift required; the PD pair commanded
+3.8° and the aeroplane sank 3.7 m/s with full throttle. An integral term
+(`holdGainI`) accumulates the steady attitude that is actually required.
+
+## 7b. Building facades
+
+The complaint was buildings "that are just solid color blocks". The heights and
+footprints were already correct — the *shading* was flat. Windows are the cue
+that survives being looked at from a moving aeroplane.
+
+The window grid is computed **analytically in the fabric shader**, not from a
+texture. Cesium 1.145's `Texture` exposes no public `.texture` getter, so
+`uniforms.image` came out `undefined` and material construction threw
+"Cannot read properties of undefined (reading 'type')". The building loader
+catches per-tile failures and reports them with `console.warn` — and every error
+listener in this project filtered on `/Error|Invalid|failed/`, silently
+discarding them. The result was 116 buildings counted, zero primitives built,
+and a skyline of nothing, with no visible error.
+
+Defining the cells in metres of wall has a bonus a fixed-resolution atlas
+cannot: a window is the same real size on a shed and on a skyscraper, and stays
+crisp at any distance.
+
+Four archetypes (office, residential, brick, glass), assigned per footprint
+from its coordinates and height. `MaterialAppearance` carries one material, so
+a tile's buildings are grouped by archetype and each group is its own primitive —
+about 141 primitives from 40 tiles.
+
+### The Cesium 1.145 material ABI
+
+This took a bisection to pin down, and the contract is not the one the older
+documentation describes:
+
+| Written | Result |
+|---|---|
+| `czm_material czm_diffuse czm_specular czm_emission;` | `czm_specular : syntax error` |
+| declaring nothing, using `czm_material.diffuse` | `. : syntax error` |
+| `czm_material czm_diffuse;` | parsed, but the struct has no such members |
+| writing `void main()` | `main : function already has a body` |
+| `input` as a parameter name | `Illegal use of reserved word` |
+| `czm_material()` | `constructor does not have any arguments` |
+
+What works: **no declarations at all**, and a function named `czm_getMaterial`
+returning a `czm_material` built by field assignment:
+
+```glsl
+czm_material czm_getMaterial(czm_materialInput mi) {
+  czm_material m;
+  m.diffuse = ...;
+  m.alpha = 1.0;
+  return m;
+}
+```
+
+GLSL `//` comments are also not permitted inside fabric source — the parser
+tokenises the string and does not understand them, giving `. : syntax error`.
+The explanation lives in JavaScript, where it cannot break the shader.
+
+## 7c. A testing trap worth knowing about
+
+`window.Cesium` cannot be exposed by `import * as Cesium` and assigned. Rollup
+tree-shakes even a namespace import down to the members it can *observe* being
+used, so the global comes out partial: `Matrix4.getElement`,
+`Matrix3.multiplyByPoint` and `Matrix4.multiplyByPointTranslation` all reported
+"not a function" against it. Each of those reads exactly like a broken
+application, and cost a long time being believed.
+
+A handful of classes needed by the harnesses are now named explicitly on
+`window.SKYWARD.cesium`, which forces them to be retained. Everything else in
+`scripts/` does plain arithmetic on values the app exposes rather than calling
+into Cesium.
+
+---
+
 ## 8. Verification
 
 Claims about a 3D world are cheap to make and easy to get wrong, so the ones
 that matter are measured against published ground truth rather than asserted.
-`scripts/worldcheck.mjs` flies the aircraft around and inspects the geometry the
-app actually builds. Latest run: **17/17 checks passed, no console errors.**
+
+| Script | Proves | Result |
+|---|---|---|
+| `worldcheck.mjs` | Buildings and airports against published data | **17/17**, no console errors |
+| `acceptance.mjs` | Every control, on the real GPU | **16/16** |
+| `orientation.mjs` | The CRJ-900's own vertices land where the aeroplane flies | **10/10** |
+| `thirdperson.mjs` | The view is genuinely from behind | **7/7** |
+| `cameraview.mjs` | Camera distance, heading, framing on roll and climb | **6/6** |
+| `facadecheck.mjs` | Facades reach the screen | **PASS**, 12,089 buildings / 41 tiles, clean console |
+| `pixdiff.mjs` | The model draws pixels at all | **PASS** — 35,302 px on the ground |
+| `takeoff.mjs` | The takeoff roll, traced second by second | climbs +3 m/s, 110 → 227 m |
+
+### `orientation.mjs` — the one that matters most
+
+"The aeroplane points the right way" is not a thing you can check by eye. A
+model rendered from behind looks entirely plausible whether or not it is
+correct. So this reads the mesh's own extreme vertices — nose, tail, both
+wingtips, the lowest point of the belly — straight out of the GLB, transforms
+them with the same matrix the app uses, and compares where they land against
+where the aeroplane is actually travelling.
+
+It is what caught three separate real bugs: a nose pointing 180° backwards, a
+17.6 m centring error, and a 0.42 rad pitch attitude that stalled the wing.
 
 ### Buildings are real 3D solids
 
 | | |
 |---|---|
 | Buildings instantiated over Manhattan | **12,380**, from 40 vector tiles |
-| Building primitives in the scene graph | **40 / 40**, all ready |
+| Building primitives in the scene graph | **141 / 141**, all ready (one per facade archetype per tile) |
 | Geometry extent | tops reach **932.8 m**, bases from **−30.1 m** — real solids standing on real terrain, not flat marks |
 | Height distribution | 3,000 tracked, **2,314 over 100 m**, tallest **541 m** |
 
@@ -507,6 +679,15 @@ world streams as you fly.
 
 ## 10. Attribution
 
+- **Aircraft** — Bombardier CRJ-900 CityJet, supplied by the project owner as
+  `airplane_crj-900_cityjet.glb`.
+- **Terrain** — Re:Earth quantized-mesh, keyless.
+- **Imagery** — Esri World Imagery and OpenStreetMap, keyless.
+- **Buildings** — OpenFreeMap / OpenMapTiles vector tiles, ODbL.
+- **Airports** — OurAirports, public domain.
+- **Geocoding** — Photon (Komoot).
+
+
 - **Terrain** — [Re:Earth Terrain](https://terrain.reearth.land/) /
   [Mapterhorn](https://mapterhorn.com/), CC BY 4.0, EGM2008 geoid (NGA).
 - **Imagery** — Esri World Imagery, © Esri, Maxar, Earthstar Geographics.
@@ -522,17 +703,33 @@ world streams as you fly.
 
 ## 11. Honest limitations
 
-- Buildings are **untextured massing geometry**. Correct footprints, correct
-  heights, and correctly lit by the real sun, but plain facades with no windows
-  or surface detail. Photogrammetric detail is not available without a paid
-  imagery key, and this project deliberately has none.
+- Buildings have **procedural window facades** — four archetypes, window size
+  defined in metres of wall — but they are **not textured with real imagery**.
+  The window grids, spandrel bands and wall tints are generated in the shader.
+  There is no photographic surface detail, and that is not available without a
+  paid imagery key, which this project deliberately has none of.
+- The **climb rate is well below the real airframe's**. A CRJ-900 at MTOW has
+  roughly 45 kN of excess thrust at 100 m/s, which works out to a 7° climb
+  angle and about 12 m/s of vertical speed. The simulation climbs at
+  **+3 m/s**. The hand calculation from the configured lift, mass and speed
+  says vertical acceleration should be strongly positive, so something in the
+  vertical integration is damping it that I have not isolated. Takeoff, rotation
+  and level flight are all correct; sustained climb rate is not yet faithful.
 - Altitude is **ellipsoidal**, not orthometric MSL. No keyless source publishes
   a geoid grid that matches the DEM, so the HUD says `ALT` rather than claiming
   a datum it cannot deliver (§ change log, item 30).
 - Terrain is ~90 m class at z14. Fine rock and vegetation relief is smoothed.
 - No terminals, towers, taxiways, bridges or street furniture.
-- One aircraft type.
+- One aircraft type: the CRJ-900 CityJet.
+- Facade windows are applied to roofs as well as walls, so a roof seen from
+  directly above can show a faint grid. Extruded polygon roofs carry a constant
+  vertical UV, which usually makes them read flat, but it is not explicitly
+  excluded in the shader.
 - OpenFreeMap rate-limits by design; over a fast, long flight some city tiles
   arrive a second or two late rather than not at all.
+- A large city teleport can still trip a Cesium culling error
+  (`RangeError: Failed to set the 'length' property on 'Array'`). The custom
+  render loop recovers and keeps rendering — verified by `scripts/recover.mjs`
+  — but the underlying Cesium condition is not understood.
 
 MIT licensed. `project.md` is updated with every change to the project.

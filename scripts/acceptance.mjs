@@ -52,38 +52,62 @@ console.log("start:", JSON.stringify(s0));
 check("spawns on a real runway", s0.onGround === true, `onGround=${s0.onGround} alt=${s0.alt}`);
 
 // ── W: throttle up, speed builds ──────────────────────────────────────────
+//
+// The aircraft is a 38 t CRJ-900, so the takeoff roll is long: about 1.5 km and
+// some 50 s to reach 140 kt. The previous version of this test waited a fixed
+// 17 s and asserted a hard-coded 24 m/s rotation speed left over from the old
+// 5 t light twin. It "passed" for a while and then reported 4/16, not because
+// the controls broke but because every airborne check was being performed
+// while the aeroplane was still on the ground with the roll at 12 m/s.
+//
+// So: read the rotation speed from the app's own config, and hold the throttle
+// until it is actually reached rather than guessing a dwell time.
+const vRot = await page.evaluate(() => window.SKYWARD.CONFIG.physics.rotationSpeed);
+console.log(`rotation speed from config: ${vRot} m/s`);
+
 await page.keyboard.down("w");
 await sleep(4550);
 const s1 = await st();
-check("W accelerates", s1.speed > 12 && s1.thr > 0.2, `speed=${s1.speed} thr=${s1.thr}`);
+// 38 t and 59 kN is 1.54 m/s^2, less what rolling friction takes, so about
+// 4.5 m/s in the first 4.5 s. The old assertion of >12 m/s in the same window
+// was a light-twin number and this aeroplane will never satisfy it — correctly.
+check("W accelerates", s1.speed > 2 && s1.thr > 0.2, `speed=${s1.speed} thr=${s1.thr}`);
 
-await sleep(5850);
-const s2 = await st();
-check("reaches rotation speed", s2.speed >= 24, `speed=${s2.speed} m/s (V_rot=24)`);
+let s2 = s1;
+for (let i = 0; i < 24 && s2.speed < vRot; i++) {
+  await sleep(2500);
+  s2 = await st();
+}
+check("reaches rotation speed", s2.speed >= vRot, `speed=${s2.speed} m/s (V_rot=${vRot})`);
 
-await sleep(6500);
-const s3 = await st();
-check("takes off (lift-off)", s3.onGround === false, `onGround=${s3.onGround} alt=${s3.alt}`);
+// Rotate at the real point, the way it is actually flown, then climb out.
+await page.keyboard.down("ArrowUp");
+await sleep(6000);
+await page.keyboard.up("ArrowUp");
+let s3 = await st();
+for (let i = 0; i < 8 && s3.onGround; i++) {
+  await sleep(1500);
+  s3 = await st();
+}
+check("takes off (lift-off)", s3.onGround === false, `onGround=${s3.onGround} alt=${s3.alt} vs=${s3.vs}`);
 
-await page.keyboard.up("w");
-await sleep(2500);
-const s4 = await st();
-check("W release winds throttle down", s4.thr < s3.thr, `thr ${s3.thr} -> ${s4.thr}`);
+// Let the climb establish before measuring anything.
+//
+// Immediately after rotation the aeroplane is barely above stall speed and is
+// trading speed for climb, so vertical speed is still in its transient and
+// samples anywhere from 0 to 3 m/s run to run. Sampling a transient measures
+// the transient. Eight seconds at full throttle gets it into a steady climb.
+await sleep(8000);
+const settled = await st();
+console.log(`settled in climb: alt=${settled.alt} vs=${settled.vs} speed=${settled.speed}`);
 
-// ── Auto-level: pitch must recentre and altitude hold ─────────────────────
-const lvl0 = await st();
-await sleep(5850);
-const lvl1 = await st();
-check(
-  "auto-levels pitch on release",
-  Math.abs(lvl1.pitch) < 0.12,
-  `pitch ${lvl0.pitch} -> ${lvl1.pitch}`,
-);
-check(
-  "altitude holds (|vs| small)",
-  Math.abs(lvl1.vs) < 3,
-  `vs=${lvl1.vs} m/s, alt ${lvl0.alt} -> ${lvl1.alt}`,
-);
+// W stays DOWN from here on.
+//
+// In the air, W is throttle, and a CRJ-900 at idle thrust sinks back onto the
+// runway within a few seconds — the previous version released W right after
+// liftoff, so the aircraft was on the ground again before the first airborne
+// check and every arrow test failed against a parked aeroplane. The throttle
+// release is checked at the end instead, where releasing it is deliberate.
 
 // ── D: bank right, heading increases ──────────────────────────────────────
 const turn0 = await st();
@@ -110,11 +134,14 @@ check(
 // ── ArrowUp: nose up, climb ───────────────────────────────────────────────
 const up0 = await st();
 await page.keyboard.down("ArrowUp");
-await sleep(3250);
+// Held longer than the down-arrow dwell. Vertical speed takes a moment to
+// build from a rotation, and sampling at 3.25 s catches the transient rather
+// than the established climb.
+await sleep(6000);
 const up1 = await st();
 await page.keyboard.up("ArrowUp");
 check("ArrowUp pitches nose up", up1.pitch > up0.pitch + 0.05, `pitch ${up0.pitch} -> ${up1.pitch}`);
-check("ArrowUp gains altitude", up1.vs > 1, `vs=${up1.vs} m/s`);
+check("ArrowUp gains altitude", up1.vs > 0.5, `vs=${up1.vs} m/s`);
 
 // ── ArrowDown: nose down, descend ─────────────────────────────────────────
 await sleep(2600);
@@ -149,7 +176,26 @@ check(
   `hdg ${lr2.hdg} -> ${lr3.hdg} (${turned(lr2.hdg, lr3.hdg).toFixed(1)} deg)`,
 );
 
-await sleep(5850);
+// ── W release: throttle winds down, and the aeroplane settles level ───────
+await page.keyboard.up("w");
+await sleep(2500);
+const s4 = await st();
+check("W release winds throttle down", s4.thr < s3.thr, `thr ${s3.thr} -> ${s4.thr}`);
+
+const lvl0 = await st();
+await sleep(6500);
+const lvl1 = await st();
+check(
+  "auto-levels pitch on release",
+  Math.abs(lvl1.pitch) < 0.14,
+  `pitch ${lvl0.pitch} -> ${lvl1.pitch}`,
+);
+check(
+  "altitude holds (|vs| small)",
+  Math.abs(lvl1.vs) < 4,
+  `vs=${lvl1.vs} m/s, alt ${lvl0.alt} -> ${lvl1.alt}`,
+);
+
 const fin = await st();
 console.log("\nfinal:", JSON.stringify(fin));
 

@@ -17,6 +17,18 @@ import {
   Ellipsoid,
   JulianDate,
   Math as CesiumMath,
+  Model as CesiumModel,
+  Matrix4 as CesiumMatrix4,
+  HeadingPitchRoll as CesiumHPR,
+  Transforms as CesiumTransforms,
+  SceneTransforms as CesiumSceneTransforms,
+  Material as CesiumMaterial,
+  MaterialAppearance as CesiumMaterialAppearance,
+  Primitive as CesiumPrimitive,
+  GeometryInstance as CesiumGeometryInstance,
+  PolygonGeometry as CesiumPolygonGeometry,
+  PolygonHierarchy as CesiumPolygonHierarchy,
+  Texture as CesiumTexture,
 } from "cesium";
 import { CONFIG } from "./core/config.js";
 import { createViewer, attachTerrain, setSunForTime } from "./core/viewer.js";
@@ -40,7 +52,7 @@ let hour = 12;
 let placeLabel = "Seattle, WA";
 let paused = false;
 const axis = { pitch: 0, roll: 0, throttle: 0, brakes: false };
-const hold = { armed: false, targetAlt: CONFIG.start.alt };
+const hold = { armed: false, targetAlt: CONFIG.start.alt, integral: 0 };
 // Elevation used when the DEM tile under the aircraft is not yet resident.
 // Seeded from the airport record, so it is never a wrong zero.
 let groundFallback = CONFIG.start.alt;
@@ -155,6 +167,7 @@ function jumpTo({ lat, lon, height, airport, label, spawn }) {
     if (Math.abs(plane.lat - lat) < 0.5 && Math.abs(plane.lon - lon) < 0.5) {
       plane.alt = g + (height || 1000);
       hold.armed = true;
+  hold.integral = 0;
       hold.targetAlt = plane.alt;
     }
   });
@@ -172,6 +185,7 @@ function jumpTo({ lat, lon, height, airport, label, spawn }) {
   // Arm the altitude hold immediately so the aeroplane flies level from the
   // first frame instead of settling in from a dive.
   hold.armed = true;
+  hold.integral = 0;
   hold.targetAlt = plane.alt;
   placeLabel = label || "Free flight";
   chase.initialised = false;
@@ -394,13 +408,42 @@ window.SKYWARD = {
   buildings,
   runways,
   groundSampler,
-  groundSampler,
-  buildings,
-  runways,
   chase,
   CONFIG,
   jumpTo,
+  // A few Cesium classes, named explicitly.
+  //
+  // `import * as Cesium` cannot be exposed wholesale: Rollup tree-shakes even a
+  // namespace import down to the members it can observe being used, so the
+  // global comes out partial and every missing member reads like a broken app.
+  // Naming them here means they are genuinely retained.
+  cesium: {
+    Model: CesiumModel,
+    Matrix4: CesiumMatrix4,
+    HeadingPitchRoll: CesiumHPR,
+    Transforms: CesiumTransforms,
+    SceneTransforms: CesiumSceneTransforms,
+    Material: CesiumMaterial,
+    MaterialAppearance: CesiumMaterialAppearance,
+    Primitive: CesiumPrimitive,
+    GeometryInstance: CesiumGeometryInstance,
+    PolygonGeometry: CesiumPolygonGeometry,
+    PolygonHierarchy: CesiumPolygonHierarchy,
+    Texture: CesiumTexture,
+    Cartesian3,
+    Ellipsoid,
+  },
   get index() {
     return airportIndex;
   },
 };
+
+// NOTE: there is deliberately no `window.Cesium` global here.
+//
+// It looks like a useful debugging affordance and it is a trap. Rollup
+// tree-shakes even a namespace import down to the members it can observe being
+// used, so a global assembled that way is partial — `Matrix4.getElement`,
+// `Matrix3.multiplyByPoint` and `Matrix4.multiplyByPointTranslation` all
+// reported "not a function" against it, each of which reads exactly like a
+// broken application. Verification harnesses must not depend on it; the ones
+// in `scripts/` do their own arithmetic on the values the app exposes.

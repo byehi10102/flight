@@ -111,7 +111,20 @@ export class ChaseCamera {
       scratchFrame,
     );
 
-    // Body frame: -Z forward, +Y up, +X right. So "behind and above" is +Z/+Y.
+    // Offset inside the aircraft's own body frame.
+    //
+    // The frame's axes are fixed by the MODEL, not by a convenient convention.
+    // This GLB is a Y-up Sketchfab export whose nose runs along +Y, and
+    // `aircraft.js` carries a yaw offset so that +Y is the flight direction —
+    // which puts +Z along world up.
+    //
+    // The old code assumed the classic Cesium body frame (-Z forward, +Y up,
+    // +X right) and offset `(side, up, back)`. Against this model that means
+    // "up" is applied along the direction of flight and "back" along an axis
+    // pointing sideways, so the camera parks beside the aeroplane looking the
+    // wrong way and the aircraft never appears on screen.
+    //
+    // So: -Y is behind, +Z is up, +X is to the right.
     //
     // NOTE: `headingPitchRollToFixedFrame` already maps local ENU coordinates
     // to ECEF *including* the origin translation, so this transform's output
@@ -120,14 +133,20 @@ export class ChaseCamera {
     // the aeroplane a speck, and no amount of offset tuning will fix it.
     Matrix4.multiplyByPoint(
       scratchFrame,
-      new Cartesian3(side, up, back),
+      new Cartesian3(side, -back, up),
       this._targetPos,
     );
 
     // Aim ahead along the flight path. Same reasoning: no extra translation.
+    //
+    // Ahead is +Y in this frame, matching the model. The old `-Z` was correct
+    // for the previous body-frame convention, and against this model it put
+    // the look-at point 40 m *below* the aeroplane, so the camera stared at
+    // the ground and the aircraft sat 28 deg outside the field of view —
+    // present in the world, invisible to the player.
     Matrix4.multiplyByPoint(
       scratchFrame,
-      new Cartesian3(0, 0, -CAM.lookAhead * (1 - this.dolly * 0.4)),
+      new Cartesian3(0, CAM.lookAhead * (1 - this.dolly * 0.4), 0),
       this._targetLook,
     );
 

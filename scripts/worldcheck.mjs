@@ -98,7 +98,11 @@ const world = await page.evaluate(() => {
   // is checked by object identity against the layer's own collection. Checking
   // a property that does not exist would report "not in the scene" for
   // primitives that are demonstrably rendering.
-  const layerPrims = [...S.buildings.primitives.values()];
+  //
+  // Each tile holds an ARRAY of primitives — one per facade archetype — so
+  // the map values must be flattened before comparing. Comparing the arrays
+  // themselves reports 0 in scene for a city that is plainly rendering.
+  const layerPrims = [...S.buildings.primitives.values()].flat();
   const inScene = layerPrims.filter((p) => {
     for (let i = 0; i < coll.length; i++) if (coll.get(i) === p) return true;
     return false;
@@ -116,6 +120,7 @@ const world = await page.evaluate(() => {
     tallest: S.buildings.tallest,
     inScene,
     ready,
+    layerPrims: layerPrims.length,
     sceneLength: coll.length,
     highest: +highest.toFixed(1),
     lowest: +lowest.toFixed(1),
@@ -125,8 +130,12 @@ const world = await page.evaluate(() => {
 check("buildings instantiated", world.buildingCount > 5000, `${world.buildingCount} from ${world.tiles} tiles`);
 check(
   "building primitives live in the scene graph",
-  world.inScene === world.tiles && world.tiles > 5,
-  `${world.inScene}/${world.tiles} in scene (${world.ready} ready), scene holds ${world.sceneLength} primitives`,
+  // Compared against the PRIMITIVE count, not the tile count: each tile now
+  // contributes one primitive per facade archetype present in it, so 42 tiles
+  // legitimately become ~149 primitives. Comparing against tiles reported a
+  // failure for a city that was rendering correctly.
+  world.inScene === world.layerPrims && world.layerPrims > 5 && world.ready === world.layerPrims,
+  `${world.inScene}/${world.layerPrims} primitives from ${world.tiles} tiles, all ready; scene holds ${world.sceneLength}`,
 );
 check(
   "geometry rises above the terrain it stands on",
