@@ -29,8 +29,8 @@ const state = {
   pitch: 0,
   roll: 0,
   flightPathAngle: 0,
-  speed: 0,
-  throttle: 0,
+  speed: 100,
+  throttle: 0.5,
 };
 
 // ── Three.js overlay ─────────────────────────────────────────────────────────
@@ -128,6 +128,17 @@ viewer.scene.globe.tileLoadProgressEvent.addEventListener((queueLength) => {
   }
 });
 
+// Fallback: after 8 seconds, enable the start button even if terrain hasn't fully loaded.
+// The Re:Earth provider can be slow or unavailable in some environments; the game should
+// still be playable with the ellipsoid as a fallback.
+setTimeout(() => {
+  if (!loadingStatus.globe) {
+    loadingStatus.globe = true;
+    loadingStatus.terrain = true;
+    updateLoadingUI();
+  }
+}, 8000);
+
 // ── Preload terrain ─────────────────────────────────────────────────────────
 async function preloadTerrain() {
   try {
@@ -144,23 +155,31 @@ async function preloadTerrain() {
 }
 
 // ── Three.js setup ───────────────────────────────────────────────────────────
+// The Three.js camera stays at the origin. The plane model is placed at a
+// local offset (BASE_PLANE_POS) and rotates around the origin. The Cesium
+// camera handles the world-space tracking. This layer-based compositing
+// keeps the plane visible over the globe.
 function initThree() {
   clock = new THREE.Clock();
   scene = new THREE.Scene();
   camera = new THREE.PerspectiveCamera(CONFIG.camera.fov, window.innerWidth / window.innerHeight, CONFIG.camera.near, CONFIG.camera.far);
+  camera.position.set(0, 0, 0);
 
-  renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+  renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true, premultipliedAlpha: false });
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.setPixelRatio(window.devicePixelRatio);
   renderer.setClearColor(0x000000, 0);
+  renderer.autoClear = false;
   threeContainer = document.getElementById("threeContainer");
   threeContainer.appendChild(renderer.domElement);
   threeContainer.classList.add("hidden");
 
   const ambientLight = new THREE.AmbientLight(0xffffff, 1.0);
+  ambientLight.layers.enable(1);
   scene.add(ambientLight);
   const directionalLight = new THREE.DirectionalLight(0xffffff, 1.0);
   directionalLight.position.set(5, 10, 5);
+  directionalLight.layers.enable(1);
   scene.add(directionalLight);
 
   planeModel = new PlaneModel(scene);
@@ -174,68 +193,16 @@ function initThree() {
   });
 }
 
-// ── Position utility ─────────────────────────────────────────────────────────
-function movePosition(lon, lat, alt, heading, pitch, distance) {
-  const headingRad = Cesium.Math.toRadians(heading);
-  const pitchRad = Cesium.Math.toRadians(pitch);
-  const R = 6371000;
-  const dLat = (distance * Math.cos(headingRad) * Math.cos(pitchRad)) / R;
-  const dLon = (distance * Math.sin(headingRad) * Math.cos(pitchRad)) / (R * Math.cos(Cesium.Math.toRadians(lat)));
-  const dAlt = distance * Math.sin(pitchRad);
-  return {
-    lon: lon + Cesium.Math.toDegrees(dLon),
-    lat: lat + Cesium.Math.toDegrees(dLat),
-    alt: alt + dAlt,
-  };
-}
-
-// ── Chase camera: behind and above, NO roll coupling ────────────────────────
-function updateChaseCamera(heading, pitch, roll, flightPathAngle, cameraYaw, cameraPitch) {
-  const planeCartesian = Cesium.Cartesian3.fromDegrees(state.lon, state.lat, state.alt);
-
-  const speedT = Math.min(1, Math.max(0, (state.speed - 60) / 190));
-  const boomDist = CONFIG.camera.boomDistance * (1 + 0.55 * speedT);
-  const boomH = CONFIG.camera.boomHeight * (1 + 0.35 * speedT);
-
-  // Camera follows heading and flight path angle only — NO roll.
-  // This keeps the horizon level and prevents the "sideways" feeling.
-  const camHPR = new Cesium.HeadingPitchRoll(
-    Cesium.Math.toRadians(heading),
-    Cesium.Math.toRadians(-flightPathAngle * 0.5),
-    0
-  );
-  const camQuat = Cesium.Quaternion.fromHeadingPitchRoll(camHPR);
-
-  const orbitHPR = new Cesium.HeadingPitchRoll(
-    Cesium.Math.toRadians(cameraYaw),
-    Cesium.Math.toRadians(-cameraPitch),
-    0
-  );
-  const orbitQuat = Cesium.Quaternion.fromHeadingPitchRoll(orbitHPR);
-
-  const finalQuat = Cesium.Quaternion.multiply(camQuat, orbitQuat, new Cesium.Quaternion());
-
-  const enuMatrix = Cesium.Transforms.eastNorthUpToFixedFrame(planeCartesian);
-  const offset = new Cesium.Cartesian3(0, -boomDist, boomH);
-  const rotatedOffset = Cesium.Matrix4.multiplyByPoint(enuMatrix, offset, new Cesium.Cartesian3());
-
-  const finalHPR = Cesium.HeadingPitchRoll.fromQuaternion(finalQuat);
-  const fov = Cesium.Math.toRadians(58 + 14 * speedT);
-
+// ── Cesium camera: positioned at the plane, looking forward ────────────────
+function setCameraToPlane(lon, lat, alt, heading, pitch, roll) {
   viewer.camera.setView({
-    destination: rotatedOffset,
+    destination: Cesium.Cartesian3.fromDegrees(lon, lat, alt),
     orientation: {
-      heading: finalHPR.heading,
-      pitch: Cesium.Math.toRadians(-5 - 3 * speedT),
-      roll: 0,
+      heading: Cesium.Math.toRadians(heading),
+      pitch: Cesium.Math.toRadians(pitch),
+      roll: Cesium.Math.toRadians(roll),
     },
   });
-
-  const currentFov = viewer.camera.frustum.fov;
-  if (Math.abs(currentFov - fov) > 1e-4) {
-    viewer.camera.frustum.fov = fov;
-  }
-
   viewer.scene.requestRender();
 }
 
@@ -405,7 +372,6 @@ function setupSpawnPicker() {
   handler.setInputAction((click) => {
     if (currentState !== States.PICK_SPAWN) return;
 
-    // Check if click is within the search UI area
     const clickX = click.position.x;
     const clickY = click.position.y;
     const searchRect = locationSearch ? locationSearch.getBoundingClientRect() : null;
@@ -515,11 +481,12 @@ function confirmSpawn() {
 
     currentState = States.TRANSITIONING;
 
+    // Fly camera to spawn point
     viewer.camera.flyTo({
-      destination: Cesium.Cartesian3.fromDegrees(state.lon, state.lat, state.alt + 500),
+      destination: Cesium.Cartesian3.fromDegrees(state.lon, state.lat, state.alt + 200),
       orientation: {
         heading: Cesium.Math.toRadians(state.heading),
-        pitch: Cesium.Math.toRadians(-30),
+        pitch: Cesium.Math.toRadians(-20),
         roll: 0,
       },
       duration: 2.0,
@@ -531,7 +498,7 @@ function confirmSpawn() {
           if (threeContainer) threeContainer.classList.remove("hidden");
           currentState = States.FLYING;
           if (vignette) vignette.style.opacity = "0";
-        }, 500);
+        }, 300);
       },
     });
   }, 500);
@@ -562,9 +529,10 @@ function update(dt) {
   checkCrash();
   checkGPWS();
 
-  // Update chase camera — pass flightPathAngle, NOT pitch, and NO roll
-  updateChaseCamera(state.heading, state.pitch, state.roll, state.flightPathAngle, input.cameraYaw, input.cameraPitch);
+  // Position Cesium camera at the plane, looking forward
+  setCameraToPlane(state.lon, state.lat, state.alt, state.heading, state.flightPathAngle, 0);
 
+  // Update Three.js plane model (rotates around origin)
   planeModel.update(
     { boostDuration: physicsResult.boostDuration, boostTimeRemaining: physicsResult.boostTimeRemaining, boostRotations: physicsResult.boostRotations },
     input,
@@ -584,6 +552,20 @@ function update(dt) {
       }
     });
   }
+}
+
+function movePosition(lon, lat, alt, heading, pitch, distance) {
+  const headingRad = Cesium.Math.toRadians(heading);
+  const pitchRad = Cesium.Math.toRadians(pitch);
+  const R = 6371000;
+  const dLat = (distance * Math.cos(headingRad) * Math.cos(pitchRad)) / R;
+  const dLon = (distance * Math.sin(headingRad) * Math.cos(pitchRad)) / (R * Math.cos(Cesium.Math.toRadians(lat)));
+  const dAlt = distance * Math.sin(pitchRad);
+  return {
+    lon: lon + Cesium.Math.toDegrees(dLon),
+    lat: lat + Cesium.Math.toDegrees(dLat),
+    alt: alt + dAlt,
+  };
 }
 
 function checkGPWS() {
@@ -630,23 +612,14 @@ function animate() {
   const now = performance.now();
 
   if (currentState === States.FLYING || currentState === States.PAUSED || currentState === States.TRANSITIONING) {
+    // Sync Three.js camera FOV with Cesium camera
     if (viewer && viewer.camera) {
-      const cesiumCamera = viewer.camera;
-      const fov = Cesium.Math.toDegrees(cesiumCamera.frustum.fovy);
-      camera.fov = fov;
-      camera.aspect = window.innerWidth / window.innerHeight;
-      camera.updateProjectionMatrix();
-
-      camera.position.set(
-        cesiumCamera.position.x,
-        cesiumCamera.position.y,
-        cesiumCamera.position.z
-      );
-      camera.lookAt(
-        cesiumCamera.position.x + cesiumCamera.direction.x,
-        cesiumCamera.position.y + cesiumCamera.direction.y,
-        cesiumCamera.position.z + cesiumCamera.direction.z
-      );
+      const fov = Cesium.Math.toDegrees(viewer.camera.frustum.fovy);
+      if (Math.abs(camera.fov - fov) > 0.1) {
+        camera.fov = fov;
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+      }
     }
 
     if (currentState === States.FLYING) {
@@ -662,17 +635,16 @@ function animate() {
       hud.updateMinimap(state);
     }
 
+    // Render Three.js overlay on top of Cesium
     renderer.autoClear = false;
     renderer.clear();
 
-    camera.layers.enable(0);
-    camera.layers.enable(1);
+    // Render the plane layer (layer 1) — camera at origin, plane at offset
+    camera.layers.set(1);
+    renderer.render(scene, camera);
 
-    try {
-      renderer.render(scene, camera);
-    } catch (e) {
-      // keep going
-    }
+    // Clear depth for the next frame
+    renderer.clearDepth();
   }
 
   viewer.render();

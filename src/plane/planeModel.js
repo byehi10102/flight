@@ -2,11 +2,14 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { CONFIG } from "../core/config.js";
 
-const BASE_PLANE_POS = new THREE.Vector3(0, -0.8, -2.75);
+// The plane is placed behind the camera (negative Z) and slightly below.
+// The camera looks down -Z, so the plane appears centered in the lower half.
+const BASE_PLANE_POS = new THREE.Vector3(0, -1.5, -15);
 
 /**
  * F-15 aircraft model loaded from a GLB file.
- * The model is centered, scaled, and positioned relative to the camera.
+ * The model is placed at a local offset from the camera and rotates
+ * based on user input (pitch, roll, yaw visual feedback).
  */
 export class PlaneModel {
   constructor(scene) {
@@ -34,7 +37,14 @@ export class PlaneModel {
           this.model.add(mesh);
           this.scene.add(this.model);
 
-          // Center the mesh
+          // Set the model and all children to layer 1 so they render
+          // as an overlay on top of the Cesium globe (layer 0)
+          this.model.layers.set(1);
+          this.model.traverse((child) => {
+            child.layers.set(1);
+          });
+
+          // Center the mesh on its bounding box
           const box = new THREE.Box3().setFromObject(mesh);
           const center = box.getCenter(new THREE.Vector3());
           mesh.position.sub(center);
@@ -46,7 +56,10 @@ export class PlaneModel {
           resolve(this.model);
         },
         undefined,
-        reject
+        (error) => {
+          console.error("Model load error:", error);
+          reject(error);
+        }
       );
     });
   }
@@ -54,6 +67,7 @@ export class PlaneModel {
   update(state, input, dt, isBoosting) {
     if (!this.model) return;
 
+    // Boost visual effects
     if (isBoosting && !this.lastIsBoosting) {
       this.boostRollDirection = Math.random() > 0.5 ? 1 : -1;
     }
@@ -73,7 +87,7 @@ export class PlaneModel {
         boostZOffset = -1.5;
         const easedP = localP < 0.5
           ? 4 * localP * localP * localP
-          : 1 - Math.pow(-2 * localP + 2, 3) / 2;
+          : 1 - Math.pow(2 * localP + 2, 3) / 2;
         this.boostRoll = easedP * Math.PI * 2 * state.boostRotations * this.boostRollDirection;
       } else {
         const localP = (p - 0.8) / 0.2;
@@ -91,23 +105,25 @@ export class PlaneModel {
     this.currentBoostZOffset += (boostZOffset - this.currentBoostZOffset) * zLerp;
     const targetZ = BASE_PLANE_POS.z - this.currentBoostZOffset;
 
+    // Idle wobble
     const time = performance.now() * 0.001;
-    const idleX = Math.sin(time * 0.8) * 0.035;
-    const idleY = Math.cos(time * 0.6) * 0.025;
-    const idleRotX = Math.sin(time * 0.5) * 0.015;
-    const idleRotY = Math.cos(time * 0.4) * 0.015;
-    const idleRotZ = Math.sin(time * 0.7) * 0.025;
+    const idleX = Math.sin(time * 0.8) * 0.05;
+    const idleY = Math.cos(time * 0.6) * 0.03;
+    const idleRotX = Math.sin(time * 0.5) * 0.02;
+    const idleRotY = Math.cos(time * 0.4) * 0.02;
+    const idleRotZ = Math.sin(time * 0.7) * 0.03;
 
+    // Visual offset based on input
     const targetX = input.isDragging
       ? BASE_PLANE_POS.x
-      : BASE_PLANE_POS.x - input.roll * 0.6 - input.yaw * 0.12 + idleX;
+      : BASE_PLANE_POS.x - input.roll * 0.8 - input.yaw * 0.15 + idleX;
     const targetY = input.isDragging
       ? BASE_PLANE_POS.y
-      : BASE_PLANE_POS.y - input.pitch * 0.1 + idleY;
+      : BASE_PLANE_POS.y - input.pitch * 0.15 + idleY;
 
-    let targetRotZ = input.isDragging ? 0 : THREE.MathUtils.degToRad(-input.roll * 15) + idleRotZ;
-    const targetRotX = input.isDragging ? 0 : THREE.MathUtils.degToRad(input.pitch * 10) + idleRotX;
-    const targetRotY = input.isDragging ? 0 : THREE.MathUtils.degToRad(-input.yaw * 4) + idleRotY;
+    let targetRotZ = input.isDragging ? 0 : THREE.MathUtils.degToRad(-input.roll * 20) + idleRotZ;
+    const targetRotX = input.isDragging ? 0 : THREE.MathUtils.degToRad(input.pitch * 12) + idleRotX;
+    const targetRotY = input.isDragging ? 0 : THREE.MathUtils.degToRad(-input.yaw * 5) + idleRotY;
 
     const lerpFactor = isBoosting ? 3.0 * dt : 5.0 * dt;
     this.visualOffset.x += (targetX - this.visualOffset.x) * lerpFactor;
@@ -118,6 +134,7 @@ export class PlaneModel {
     this.visualRotation.x += (targetRotX - this.visualRotation.x) * lerpFactor;
     this.visualRotation.y += (targetRotY - this.visualRotation.y) * lerpFactor;
 
+    // Camera orbit from mouse drag (look around)
     const orbitQ = new THREE.Quaternion().setFromEuler(
       new THREE.Euler(
         THREE.MathUtils.degToRad(-input.cameraPitch),
