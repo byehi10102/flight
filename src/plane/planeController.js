@@ -60,7 +60,7 @@ export class PlaneController {
     });
 
     this.input = {
-      throttle: 0.5,
+      throttle: 0,
       pitch: 0,
       roll: 0,
       yaw: 0,
@@ -93,16 +93,16 @@ export class PlaneController {
 
     // Up arrow = nose down (descend), Down arrow = nose up (climb)
     // The plane always moves forward, so pitch changes the flight path angle
-    const pitchTarget = this.keys["ArrowUp"] ? 1 : this.keys["ArrowDown"] ? -1 : 0;
-    this.input.pitch = this.lerp(this.input.pitch, pitchTarget, 0.12);
+    const pitchTarget = this.keys["ArrowUp"] ? -1 : this.keys["ArrowDown"] ? 1 : 0;
+    this.input.pitch = this.lerp(this.input.pitch, pitchTarget, 0.1);
 
     // Left arrow = roll left, Right arrow = roll right
     const rollTarget = this.keys["ArrowLeft"] ? -1 : this.keys["ArrowRight"] ? 1 : 0;
-    this.input.roll = this.lerp(this.input.roll, rollTarget, 0.12);
+    this.input.roll = this.lerp(this.input.roll, rollTarget, 0.1);
 
     // A/D: yaw left/right
     const yawTarget = this.keys["KeyA"] ? -1 : this.keys["KeyD"] ? 1 : 0;
-    this.input.yaw = this.lerp(this.input.yaw, yawTarget, 0.12);
+    this.input.yaw = this.lerp(this.input.yaw, yawTarget, 0.1);
 
     // Mouse drag: look around
     if (this.mouseDragging) {
@@ -126,7 +126,7 @@ export class PlaneController {
     this.mouseDragging = false;
     this.mouseDeltaX = 0;
     this.mouseDeltaY = 0;
-    this.input.throttle = 0.5;
+    this.input.throttle = 0;
     this.input.pitch = 0;
     this.input.roll = 0;
     this.input.yaw = 0;

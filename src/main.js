@@ -28,9 +28,10 @@ const state = {
   heading: 0,
   pitch: 0,
   roll: 0,
-  flightPathAngle: 0,
-  speed: 100,
-  throttle: 0.5,
+  speed: 0,
+  throttle: 0,
+  stallFactor: 0,
+  onGround: false,
 };
 
 // ── Three.js overlay ─────────────────────────────────────────────────────────
@@ -456,10 +457,10 @@ function confirmSpawn() {
     ctrl.enableTilt = false;
     ctrl.enableLook = false;
 
-    state.speed = 100;
+    state.speed = CONFIG.physics.minSpeed;
     state.pitch = 0;
     state.roll = 0;
-    state.flightPathAngle = 0;
+    state.stallFactor = 0;
 
     try {
       const cam = viewer.camera;
@@ -501,6 +502,18 @@ function confirmSpawn() {
         }, 300);
       },
     });
+
+    // Safety net: the flight's complete callback can be skipped if the
+    // camera animation is interrupted, which would leave the player
+    // stranded behind the transition vignette. Force FLYING after 4s.
+    setTimeout(() => {
+      if (currentState !== States.TRANSITIONING) return;
+      flightStartTime = Date.now();
+      if (uiContainer) uiContainer.classList.remove("hidden");
+      if (threeContainer) threeContainer.classList.remove("hidden");
+      currentState = States.FLYING;
+      if (vignette) vignette.style.opacity = "0";
+    }, 4000);
   }, 500);
 }
 
@@ -509,19 +522,26 @@ function update(dt) {
   if (currentState !== States.FLYING) return;
 
   const input = controller.update();
-  const groundHeight = groundSampler.get(state.lat, state.lon, 0);
-
-  const physicsResult = physics.update(input, dt, groundHeight);
+  const physicsResult = physics.update(input, dt);
 
   state.speed = physicsResult.speed;
   state.pitch = physicsResult.pitch;
   state.roll = physicsResult.roll;
   state.heading = physicsResult.heading;
-  state.flightPathAngle = physicsResult.flightPathAngle;
   state.throttle = input.throttle;
+  state.stallFactor = 0;
+  state.onGround = false;
 
-  // Move the aircraft along flight path angle
-  const newPos = movePosition(state.lon, state.lat, state.alt, state.heading, state.flightPathAngle, state.speed * dt);
+  // An interrupted camera flight can leave a non-finite attitude behind;
+  // sending that to the camera drops the globe out of the frame entirely.
+  if (!Number.isFinite(state.heading)) state.heading = 0;
+  if (!Number.isFinite(state.pitch)) state.pitch = 0;
+  if (!Number.isFinite(state.roll)) state.roll = 0;
+  if (!Number.isFinite(state.speed)) state.speed = CONFIG.physics.minSpeed;
+
+  // The aircraft travels wherever the nose points. The horizontal component is
+  // scaled by cos(pitch), so it always moves forward as well as up or down.
+  const newPos = movePosition(state.lon, state.lat, state.alt, state.heading, state.pitch, state.speed * dt);
   state.lon = newPos.lon;
   state.lat = newPos.lat;
   state.alt = newPos.alt;
@@ -529,8 +549,32 @@ function update(dt) {
   checkCrash();
   checkGPWS();
 
-  // Position Cesium camera at the plane, looking forward
-  setCameraToPlane(state.lon, state.lat, state.alt, state.heading, state.flightPathAngle, 0);
+  // Camera: the plane's attitude with the mouse orbit applied on top. The
+  // orbit is what makes look-around rotate the world around a stationary
+  // aircraft instead of spinning the model off to one side.
+  const planeHPR = new Cesium.HeadingPitchRoll(
+    Cesium.Math.toRadians(state.heading),
+    Cesium.Math.toRadians(state.pitch),
+    Cesium.Math.toRadians(state.roll)
+  );
+  const planeQuat = Cesium.Quaternion.fromHeadingPitchRoll(planeHPR);
+
+  const orbitHPR = new Cesium.HeadingPitchRoll(
+    Cesium.Math.toRadians(input.cameraYaw),
+    Cesium.Math.toRadians(-input.cameraPitch),
+    0
+  );
+  const orbitQuat = Cesium.Quaternion.fromHeadingPitchRoll(orbitHPR);
+
+  const finalQuat = Cesium.Quaternion.multiply(planeQuat, orbitQuat, new Cesium.Quaternion());
+  const finalHPR = Cesium.HeadingPitchRoll.fromQuaternion(finalQuat);
+
+  setCameraToPlane(
+    state.lon, state.lat, state.alt,
+    Cesium.Math.toDegrees(finalHPR.heading),
+    Cesium.Math.toDegrees(finalHPR.pitch),
+    Cesium.Math.toDegrees(finalHPR.roll)
+  );
 
   // Update Three.js plane model (rotates around origin)
   planeModel.update(
@@ -575,11 +619,11 @@ function checkGPWS() {
   if (terrainHeight === undefined) return;
 
   const agl = state.alt - terrainHeight;
-  const gammaRad = Cesium.Math.toRadians(state.flightPathAngle);
-  const verticalSpeed = state.speed * Math.sin(gammaRad);
+  const pitchRad = Cesium.Math.toRadians(state.pitch);
+  const verticalSpeed = state.speed * Math.sin(pitchRad);
 
   let showWarning = false;
-  if (state.flightPathAngle < -2) {
+  if (state.pitch < -2) {
     if (agl < 450) {
       if (agl < 150) showWarning = true;
       if (verticalSpeed < -20) showWarning = true;
@@ -608,20 +652,12 @@ function checkCrash() {
 // ── Render loop ──────────────────────────────────────────────────────────────
 function animate() {
   requestAnimationFrame(animate);
-  const dt = clock ? clock.getDelta() : 0.016;
+  // Clamp dt so a backgrounded tab doesn't teleport the aircraft kilometres
+  // in a single frame when it regains focus.
+  const dt = Math.min(clock ? clock.getDelta() : 0.016, 0.05);
   const now = performance.now();
 
   if (currentState === States.FLYING || currentState === States.PAUSED || currentState === States.TRANSITIONING) {
-    // Sync Three.js camera FOV with Cesium camera
-    if (viewer && viewer.camera) {
-      const fov = Cesium.Math.toDegrees(viewer.camera.frustum.fovy);
-      if (Math.abs(camera.fov - fov) > 0.1) {
-        camera.fov = fov;
-        camera.aspect = window.innerWidth / window.innerHeight;
-        camera.updateProjectionMatrix();
-      }
-    }
-
     if (currentState === States.FLYING) {
       update(dt);
     }
@@ -635,18 +671,18 @@ function animate() {
       hud.updateMinimap(state);
     }
 
-    // Render Three.js overlay on top of Cesium
+    // Render the plane overlay. The Three.js camera stays at the origin with
+    // a fixed FOV; the Cesium camera does the world-space tracking.
     renderer.autoClear = false;
     renderer.clear();
-
-    // Render the plane layer (layer 1) — camera at origin, plane at offset
     camera.layers.set(1);
     renderer.render(scene, camera);
-
-    // Clear depth for the next frame
     renderer.clearDepth();
   }
 
+  // Cesium's own loop can stall under a throttled/batched frame scheduler
+  // (headless CI, backgrounded tabs). Driving it explicitly guarantees the
+  // globe always composites under the Three.js overlay.
   viewer.render();
 }
 

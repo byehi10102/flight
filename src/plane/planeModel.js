@@ -4,7 +4,7 @@ import { CONFIG } from "../core/config.js";
 
 // The plane is placed behind the camera (negative Z) and slightly below.
 // The camera looks down -Z, so the plane appears centered in the lower half.
-const BASE_PLANE_POS = new THREE.Vector3(0, -1.5, -15);
+const BASE_PLANE_POS = new THREE.Vector3(0, -0.8, -2.75);
 
 /**
  * F-15 aircraft model loaded from a GLB file.
