@@ -26,6 +26,7 @@ const state = {
   lon: 106.8272,
   lat: -6.1754,
   alt: 1000,
+  agl: 1000,
   heading: 0,
   pitch: 0,
   roll: 0,
@@ -33,6 +34,7 @@ const state = {
   throttle: 0,
   stallFactor: 0,
   onGround: false,
+  spawnName: null,
 };
 
 // ── Three.js overlay ─────────────────────────────────────────────────────────
@@ -45,6 +47,8 @@ let audio = new EngineAudio();
 let clock = new THREE.Clock();
 let groundSampler;
 let spawnMarker = null;
+let spawnIndicator = null;
+let pendingSpawnName = null;
 let initialCameraView = null;
 let flightStartTime = 0;
 let lastCrashCheck = 0;
@@ -243,6 +247,11 @@ function enterSpawnPicking(useVignette = true) {
       viewer.entities.remove(spawnMarker);
       spawnMarker = null;
     }
+    if (spawnIndicator) {
+      viewer.entities.remove(spawnIndicator);
+      spawnIndicator = null;
+    }
+    pendingSpawnName = null;
 
     viewer.camera.flyTo({
       destination: Cesium.Cartesian3.fromDegrees(state.lon, state.lat, 15000),
@@ -346,8 +355,9 @@ function selectSearchResult(lon, lat, name) {
   state.lon = lon;
   state.lat = lat;
   state.alt = 1500;
+  pendingSpawnName = name.split(",")[0].toUpperCase();
 
-  if (instructionText) instructionText.textContent = name.split(",")[0].toUpperCase();
+  if (instructionText) instructionText.textContent = pendingSpawnName;
 
   groundSampler.seed([[lat, lon]]).then(() => {
     const ground = groundSampler.get(lat, lon, 0);
@@ -429,6 +439,7 @@ function setupSpawnPicker() {
       }).catch(() => {});
 
       reverseGeocode(lon, lat).then((name) => {
+        pendingSpawnName = name;
         if (name && instructionText) instructionText.textContent = name;
       }).catch(() => {});
 
@@ -461,6 +472,42 @@ function confirmSpawn() {
       viewer.entities.remove(spawnMarker);
       spawnMarker = null;
     }
+    if (spawnIndicator) {
+      viewer.entities.remove(spawnIndicator);
+      spawnIndicator = null;
+    }
+
+    // Spawn-origin indicator: a labeled pin that stays in the world for the
+    // whole flight so you can see where you launched from.
+    state.spawnName =
+      pendingSpawnName ||
+      `SPAWN ${Math.abs(state.lat).toFixed(2)}°${state.lat >= 0 ? "N" : "S"} ` +
+        `${Math.abs(state.lon).toFixed(2)}°${state.lon >= 0 ? "E" : "W"}`;
+    try {
+      const carto = Cesium.Cartographic.fromDegrees(state.lon, state.lat);
+      const groundH = viewer.scene.globe.getHeight(carto);
+      spawnIndicator = viewer.entities.add({
+        position: Cesium.Cartesian3.fromDegrees(
+          state.lon, state.lat, groundH === undefined ? 0 : groundH
+        ),
+        point: {
+          pixelSize: 12,
+          color: Cesium.Color.CYAN,
+          outlineColor: Cesium.Color.WHITE,
+          outlineWidth: 2,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        },
+        label: {
+          text: `SPAWN · ${state.spawnName}`,
+          font: "12pt monospace",
+          style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+          outlineWidth: 2,
+          verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+          pixelOffset: new Cesium.Cartesian2(0, -18),
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        },
+      });
+    } catch (e) { /* indicator is cosmetic */ }
 
     const ctrl = viewer.scene.screenSpaceCameraController;
     ctrl.enableRotate = false;
@@ -495,13 +542,14 @@ function confirmSpawn() {
 
     currentState = States.TRANSITIONING;
 
-    // Fly camera to spawn point
+    // Spawn flight (ref-flight style): cinematic dive straight to the
+    // spawn point in the plane's own attitude.
     viewer.camera.flyTo({
-      destination: Cesium.Cartesian3.fromDegrees(state.lon, state.lat, state.alt + 200),
+      destination: Cesium.Cartesian3.fromDegrees(state.lon, state.lat, state.alt),
       orientation: {
         heading: Cesium.Math.toRadians(state.heading),
-        pitch: Cesium.Math.toRadians(-20),
-        roll: 0,
+        pitch: Cesium.Math.toRadians(state.pitch),
+        roll: Cesium.Math.toRadians(state.roll),
       },
       duration: 2.0,
       easingFunction: Cesium.EasingFunction.QUADRATIC_IN_OUT,
@@ -511,6 +559,9 @@ function confirmSpawn() {
           if (uiContainer) uiContainer.classList.remove("hidden");
           if (threeContainer) threeContainer.classList.remove("hidden");
           currentState = States.FLYING;
+          hud.resetTime();
+          hud.resetScore();
+          if (state.spawnName) hud.showRegion(`SPAWN · ${state.spawnName}`);
           if (vignette) {
             vignette.style.opacity = "0";
             vignette.classList.remove("solid");
@@ -528,6 +579,8 @@ function confirmSpawn() {
       if (uiContainer) uiContainer.classList.remove("hidden");
       if (threeContainer) threeContainer.classList.remove("hidden");
       currentState = States.FLYING;
+      hud.resetTime();
+      hud.resetScore();
       if (vignette) {
         vignette.style.opacity = "0";
         vignette.classList.remove("solid");
@@ -566,6 +619,16 @@ function update(dt) {
   state.lon = newPos.lon;
   state.lat = newPos.lat;
   state.alt = newPos.alt;
+
+  // Realistic altitude: height above the terrain below (AGL), not sea
+  // level, so skimming the ground reads near zero instead of ~900 ft.
+  try {
+    const cartoNow = Cesium.Cartographic.fromDegrees(state.lon, state.lat);
+    const terrainH = viewer.scene.globe.getHeight(cartoNow);
+    state.agl = terrainH === undefined ? state.alt : Math.max(0, state.alt - terrainH);
+  } catch (e) {
+    state.agl = state.alt;
+  }
 
   checkCrash();
   checkGPWS();

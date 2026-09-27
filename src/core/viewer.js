@@ -56,12 +56,20 @@ export function applyBaseWorld(viewer) {
   viewer.terrainProvider = terrainProvider;
   viewer.cesiumTerrainProvider = createTerrainProvider();
 
+  const base = new UrlTemplateImageryProvider({
+    url: CONFIG.imagery.fallbackUrl,
+    subdomains: CONFIG.imagery.fallbackSubdomains,
+    credit: CONFIG.imagery.fallbackAttribution,
+    maximumLevel: CONFIG.imagery.fallbackMaximumLevel,
+  });
+  viewer.imageryLayers.addImageryProvider(base, 0);
+
   const imagery = new UrlTemplateImageryProvider({
     url: CONFIG.imagery.url,
     credit: new URL(CONFIG.imagery.attribution, window.location.href).href,
     maximumLevel: CONFIG.imagery.maximumLevel,
   });
-  const layer = viewer.imageryLayers.addImageryProvider(imagery, 0);
+  const layer = viewer.imageryLayers.addImageryProvider(imagery, 1);
   layer.maximumLevel = CONFIG.imagery.maximumLevel;
   try { layer.anisotropy = 16; } catch (e) { /* older Cesium */ }
 

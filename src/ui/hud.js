@@ -235,7 +235,7 @@ export class Hud {
 
     // ── Speed / altitude (ref-flight formatting) ──
     if (this.speedEl) this.speedEl.innerText = Math.round(state.speed).toString().padStart(3, "0");
-    const altFeet = Math.max(0, Math.round(state.alt * 3.28084));
+    const altFeet = Math.max(0, Math.round((state.agl ?? state.alt) * 3.28084));
     if (this.altEl) this.altEl.innerText = altFeet.toString().padStart(5, "0");
 
     // ── Heading + cardinal + compass tape ──

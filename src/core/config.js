@@ -12,6 +12,12 @@ export const CONFIG = {
       "https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
     attribution: "Imagery &copy; Esri, Maxar, Earthstar Geographics",
     maximumLevel: 19,
+    // Base map under the satellite layer: fills oceans, poles and any tile
+    // the satellite service has no data for, so gaps never read as void.
+    fallbackUrl: "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
+    fallbackAttribution: "Map &copy; OpenStreetMap contributors &copy; CARTO",
+    fallbackSubdomains: ["a", "b", "c", "d"],
+    fallbackMaximumLevel: 19,
   },
 
   aircraft: {

@@ -24,7 +24,11 @@ export async function reverseGeocode(lon, lat) {
   } catch (error) {
     console.error("Reverse geocoding error:", error);
   }
-  return null;
+  // No address (open ocean, remote land, rate-limited): fall back to a
+  // coordinates label so location displays never stick on "fetching...".
+  const latDir = lat >= 0 ? "N" : "S";
+  const lonDir = lon >= 0 ? "E" : "W";
+  return `REMOTE AREA ${Math.abs(lat).toFixed(1)}°${latDir} ${Math.abs(lon).toFixed(1)}°${lonDir}`;
 }
 
 export function calculateDistance(lon1, lat1, lon2, lat2) {
