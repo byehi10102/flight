@@ -14,9 +14,12 @@ export const CONFIG = {
     maximumLevel: 19,
     // Base map under the satellite layer: fills oceans, poles and any tile
     // the satellite service has no data for, so gaps never read as void.
-    fallbackUrl: "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
-    fallbackAttribution: "Map &copy; OpenStreetMap contributors &copy; CARTO",
-    fallbackSubdomains: ["a", "b", "c", "d"],
+    // Esri World Street Map — keyless like the satellite layer, so the game
+    // stays no-API-key. (CARTO's keyless endpoint was retired; it served
+    // "api key required" placeholder tiles over the whole map.)
+    fallbackUrl: "https://services.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}",
+    fallbackAttribution: "Map: Esri, HERE, Garmin, © OpenStreetMap contributors",
+    fallbackSubdomains: [],
     fallbackMaximumLevel: 19,
   },
 
