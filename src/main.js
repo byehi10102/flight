@@ -22,6 +22,10 @@ const States = {
 
 let currentState = States.MENU;
 
+// Flight speeds are MPH throughout (100 slow cruise, 1000 max on W, 2000 on
+// boost); world movement needs m/s.
+const MPH_TO_MPS = 0.44704;
+
 const state = {
   lon: -117.9143,
   lat: 33.8366,
@@ -797,6 +801,9 @@ function confirmSpawn() {
             if (state.spawnName) hud.showRegion(`SPAWN · ${state.spawnName}`);
           try {
             getMiniViewer()?.resize();
+            // Snap the real-map minimap onto the spawn immediately so the
+            // first frame already matches the 3D world.
+            setMinimapCamera(state.lon, state.lat, 1500 + state.speed * 2, state.heading);
           } catch (e) { /* minimap is cosmetic */ }
             if (vignette) {
               vignette.style.opacity = "0";
@@ -865,7 +872,7 @@ function update(dt) {
 
   // The aircraft travels wherever the nose points. The horizontal component is
   // scaled by cos(pitch), so it always moves forward as well as up or down.
-  const newPos = movePosition(state.lon, state.lat, state.alt, state.heading, state.pitch, state.speed * dt);
+  const newPos = movePosition(state.lon, state.lat, state.alt, state.heading, state.pitch, state.speed * MPH_TO_MPS * dt);
   state.lon = newPos.lon;
   state.lat = newPos.lat;
   state.alt = newPos.alt;
@@ -962,7 +969,7 @@ function checkGPWS() {
 
   const agl = state.alt - terrainHeight;
   const pitchRad = Cesium.Math.toRadians(state.pitch);
-  const verticalSpeed = state.speed * Math.sin(pitchRad);
+  const verticalSpeed = state.speed * MPH_TO_MPS * Math.sin(pitchRad);
 
   let showWarning = false;
   if (state.pitch < -2) {
