@@ -2,7 +2,7 @@ import * as THREE from "three";
 import * as Cesium from "cesium";
 import "cesium/Build/Cesium/Widgets/widgets.css";
 import { CONFIG } from "./core/config.js";
-import { createViewer, attachTerrain, setSunForTime } from "./core/viewer.js";
+import { createViewer, attachTerrain, setSunForTime, initMiniViewer, getMiniViewer, setMinimapCamera } from "./core/viewer.js";
 import { GroundSampler } from "./core/ground.js";
 import { PlanePhysics } from "./plane/planePhysics.js";
 import { PlaneController } from "./plane/planeController.js";
@@ -35,6 +35,8 @@ const state = {
   stallFactor: 0,
   onGround: false,
   spawnName: null,
+  spawnLon: null,
+  spawnLat: null,
 };
 
 // ── Three.js overlay ─────────────────────────────────────────────────────────
@@ -460,6 +462,45 @@ function setupSpawnPicker() {
   }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
 }
 
+// ── Floating 3D spawn pin ────────────────────────────────────────────────────
+// A map-pin sprite drawn once on a canvas (no asset file needed), shown as a
+// billboard floating in the sky over the launch point. Always faces the
+// camera; distance-culled when you are really far away.
+let spawnPinImage = null;
+function getSpawnPinImage() {
+  if (spawnPinImage) return spawnPinImage;
+  const c = document.createElement("canvas");
+  c.width = 128;
+  c.height = 168;
+  const g = c.getContext("2d");
+  const grad = g.createLinearGradient(0, 0, 0, 168);
+  grad.addColorStop(0, "#f04444");
+  grad.addColorStop(1, "#a80000");
+  g.fillStyle = grad;
+  g.strokeStyle = "#7a0000";
+  g.lineWidth = 4;
+  // Teardrop body: round head + tapering tail.
+  g.beginPath();
+  g.arc(64, 58, 46, Math.PI * 0.72, Math.PI * 0.28);
+  g.lineTo(64, 156);
+  g.closePath();
+  g.fill();
+  g.stroke();
+  // Punched hole with a light inner ring, like a real map pin.
+  g.globalCompositeOperation = "destination-out";
+  g.beginPath();
+  g.arc(64, 58, 20, 0, Math.PI * 2);
+  g.fill();
+  g.globalCompositeOperation = "source-over";
+  g.strokeStyle = "rgba(255,255,255,0.85)";
+  g.lineWidth = 5;
+  g.beginPath();
+  g.arc(64, 58, 23, 0, Math.PI * 2);
+  g.stroke();
+  spawnPinImage = c.toDataURL("image/png");
+  return spawnPinImage;
+}
+
 // ── Confirm spawn with transition animation ──────────────────────────────────
 function confirmSpawn() {
   // Radial (see-through center) fade, NOT solid black — the spawn flight
@@ -479,25 +520,25 @@ function confirmSpawn() {
       spawnIndicator = null;
     }
 
-    // Spawn-origin indicator: a RED pin (same style as the picker pin) plus
-    // a vertical sky beacon, so the launch point stays findable after you
-    // fly away and you can navigate back to it.
+    // Spawn-origin indicator: a floating 3D-style map pin billboard hovering
+    // in the sky over the launch point, plus label. Faces the camera from
+    // any angle; culled past ~150 km so it never clutters distant views.
     state.spawnName =
       pendingSpawnName ||
       `SPAWN ${Math.abs(state.lat).toFixed(2)}°${state.lat >= 0 ? "N" : "S"} ` +
         `${Math.abs(state.lon).toFixed(2)}°${state.lon >= 0 ? "E" : "W"}`;
+    state.spawnLon = state.lon;
+    state.spawnLat = state.lat;
     try {
-      const carto = Cesium.Cartographic.fromDegrees(state.lon, state.lat);
-      const groundH = viewer.scene.globe.getHeight(carto);
-      const baseH = groundH === undefined ? 0 : groundH;
-      const topH = baseH + 2000;
       spawnIndicator = viewer.entities.add({
-        position: Cesium.Cartesian3.fromDegrees(state.lon, state.lat, baseH),
-        point: {
-          pixelSize: 15,
-          color: Cesium.Color.RED,
-          outlineColor: Cesium.Color.WHITE,
-          outlineWidth: 2,
+        position: Cesium.Cartesian3.fromDegrees(state.lon, state.lat, state.alt),
+        billboard: {
+          image: getSpawnPinImage(),
+          sizeInMeters: true,
+          width: 220,
+          height: 289,
+          verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+          distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 150000),
           disableDepthTestDistance: Number.POSITIVE_INFINITY,
         },
         label: {
@@ -506,20 +547,9 @@ function confirmSpawn() {
           style: Cesium.LabelStyle.FILL_AND_OUTLINE,
           outlineWidth: 2,
           verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
-          pixelOffset: new Cesium.Cartesian2(0, -18),
+          pixelOffset: new Cesium.Cartesian2(0, -190),
           disableDepthTestDistance: Number.POSITIVE_INFINITY,
-        },
-        polyline: {
-          positions: Cesium.Cartesian3.fromDegreesArrayHeights([
-            state.lon, state.lat, baseH,
-            state.lon, state.lat, topH,
-          ]),
-          width: 3,
-          material: Cesium.Color.RED,
-          depthFailMaterial: new Cesium.PolylineDashMaterialProperty({
-            color: Cesium.Color.RED.withAlpha(0.85),
-          }),
-          arcType: Cesium.ArcType.NONE,
+          distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 150000),
         },
       });
     } catch (e) { /* indicator is cosmetic */ }
@@ -581,6 +611,9 @@ function confirmSpawn() {
             hud.resetTime();
             hud.resetScore();
             if (state.spawnName) hud.showRegion(`SPAWN · ${state.spawnName}`);
+          try {
+            getMiniViewer()?.resize();
+          } catch (e) { /* minimap is cosmetic */ }
             if (vignette) {
               vignette.style.opacity = "0";
               vignette.classList.remove("solid");
@@ -611,6 +644,9 @@ function confirmSpawn() {
       currentState = States.FLYING;
       hud.resetTime();
       hud.resetScore();
+      try {
+        getMiniViewer()?.resize();
+      } catch (e) { /* minimap is cosmetic */ }
       if (vignette) {
         vignette.style.opacity = "0";
         vignette.classList.remove("solid");
@@ -805,6 +841,11 @@ function animate() {
     minimapUpdateTimer += dt;
     if (minimapUpdateTimer > 0.1) {
       minimapUpdateTimer = 0;
+      // Real-map minimap tracks the jet (range widens slightly with speed).
+      try {
+        const zoomAlt = 1500 + state.speed * 2;
+        setMinimapCamera(state.lon, state.lat, zoomAlt, state.heading);
+      } catch (e) { /* minimap is cosmetic */ }
       hud.updateMinimap(state);
     }
 
@@ -896,6 +937,9 @@ window.addEventListener("resize", () => {
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
   viewer.resize();
+  try {
+    getMiniViewer()?.resize();
+  } catch (e) { /* minimap is cosmetic */ }
 });
 
 window.addEventListener("contextmenu", (e) => e.preventDefault());
@@ -913,6 +957,7 @@ initialCameraView = {
 initThree();
 setupSpawnPicker();
 setupSearch();
+initMiniViewer("minimapCesium");
 preloadTerrain();
 setSunForTime(viewer, 12, state.lat, state.lon);
 

@@ -336,12 +336,8 @@ export class Hud {
 
     ctx.clearRect(0, 0, w, h);
 
-    // Base disc + range rings
-    ctx.fillStyle = "rgba(0, 0, 0, 0.7)";
-    ctx.beginPath();
-    ctx.arc(cx, cy, 90, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = "rgba(0, 255, 0, 0.2)";
+    // Range rings (subtle — the real satellite map shows through).
+    ctx.strokeStyle = "rgba(0, 255, 0, 0.35)";
     ctx.lineWidth = 1;
     for (let r = 30; r <= 90; r += 30) {
       ctx.beginPath();
@@ -383,6 +379,32 @@ export class Hud {
     ctx.moveTo(cx - 90, cy); ctx.lineTo(cx + 90, cy);
     ctx.moveTo(cx, cy - 90); ctx.lineTo(cx, cy + 90);
     ctx.stroke();
+
+    // Original spawn point (red pin) relative to the jet, rotated by heading.
+    // Same zoom scale the main loop drives the real-map camera with.
+    if (state.spawnLon != null && state.spawnLat != null) {
+      const zoomAlt = 1500 + (state.speed || 0) * 2;
+      const ppm = h / (zoomAlt * 1.1547);
+      const dxm = (state.spawnLon - state.lon) * 111320 * Math.cos((state.lat * Math.PI) / 180);
+      const dym = (state.spawnLat - state.lat) * 111320;
+      const hdg = (this.smoothedHeading * Math.PI) / 180;
+      const rx = dxm * Math.cos(hdg) - dym * Math.sin(hdg);
+      const ry = -dxm * Math.sin(hdg) - dym * Math.cos(hdg);
+      const px = rx * ppm;
+      const py = ry * ppm;
+      if (Math.sqrt(px * px + py * py) < radius - 6) {
+        ctx.fillStyle = "#f00";
+        ctx.beginPath();
+        ctx.arc(cx + px, cy + py, 5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = "#fff";
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        ctx.fillStyle = "#f00";
+        ctx.font = "bold 9px monospace";
+        ctx.fillText("SPAWN", cx + px, cy + py - 10);
+      }
+    }
 
     // Player wedge
     ctx.save();

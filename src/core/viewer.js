@@ -203,3 +203,88 @@ export function setSunForTime(viewer, hours, latitude = 45, longitude = 0, date 
 }
 
 export { Cartographic, CesiumMath, CesiumViewer };
+
+// ── Tactical minimap: a second lightweight Cesium viewer ────────────────────
+// Same real satellite imagery as the main globe, top-down over the jet. The
+// 2D canvas overlay (player wedge, spawn pin, compass labels) draws on top.
+let miniViewer = null;
+
+export function initMiniViewer(containerId) {
+  if (miniViewer) return miniViewer;
+  try {
+    miniViewer = new Viewer(containerId, {
+      terrainProvider: new EllipsoidTerrainProvider(),
+      animation: false,
+      timeline: false,
+      baseLayerPicker: false,
+      geocoder: false,
+      homeButton: false,
+      sceneModePicker: false,
+      navigationHelpButton: false,
+      fullscreenButton: false,
+      vrButton: false,
+      infoBox: false,
+      selectionIndicator: false,
+      baseLayer: false,
+      requestRenderMode: false,
+      skyBox: false,
+      contextOptions: {
+        webgl: { preserveDrawingBuffer: true, powerPreference: "low-power" },
+      },
+    });
+    miniViewer.scene.skyAtmosphere.show = false;
+    miniViewer.scene.fog.enabled = false;
+    miniViewer.scene.globe.enableLighting = false;
+    miniViewer.scene.highDynamicRange = false;
+    try {
+      miniViewer.scene.postProcessStages.fxaa.enabled = false;
+    } catch (e) { /* older Cesium */ }
+
+    const base = new UrlTemplateImageryProvider({
+      url: CONFIG.imagery.fallbackUrl,
+      subdomains: CONFIG.imagery.fallbackSubdomains,
+      credit: CONFIG.imagery.fallbackAttribution,
+      maximumLevel: CONFIG.imagery.fallbackMaximumLevel,
+    });
+    miniViewer.imageryLayers.addImageryProvider(base, 0);
+    const imagery = new UrlTemplateImageryProvider({
+      url: CONFIG.imagery.url,
+      maximumLevel: CONFIG.imagery.maximumLevel,
+    });
+    miniViewer.imageryLayers.addImageryProvider(imagery, 1);
+
+    const ctrl = miniViewer.scene.screenSpaceCameraController;
+    ctrl.enableRotate = false;
+    ctrl.enableTranslate = false;
+    ctrl.enableZoom = false;
+    ctrl.enableTilt = false;
+    ctrl.enableLook = false;
+    try {
+      miniViewer.cesiumWidget.creditContainer.style.display = "none";
+    } catch (e) { /* credit DOM varies by version */ }
+  } catch (e) {
+    console.warn("[minimap] Mini viewer unavailable, overlay still works:", e);
+    miniViewer = null;
+  }
+  return miniViewer;
+}
+
+export function getMiniViewer() {
+  return miniViewer;
+}
+
+/** Top-down minimap camera tracking the aircraft. */
+export function setMinimapCamera(lon, lat, altitude, heading) {
+  if (!miniViewer) return;
+  try {
+    if (miniViewer.canvas.width === 0 || miniViewer.canvas.height === 0) return;
+    miniViewer.camera.setView({
+      destination: Cartesian3.fromDegrees(lon, lat, altitude),
+      orientation: {
+        heading: CesiumMath.toRadians(heading || 0),
+        pitch: CesiumMath.toRadians(-90),
+        roll: 0,
+      },
+    });
+  } catch (e) { /* minimap is cosmetic */ }
+}
