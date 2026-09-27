@@ -580,22 +580,40 @@ function clearNotablePlaces() {
 // billboard floating in the sky over the launch point. Always faces the
 // camera; distance-culled when you are really far away.
 let spawnPinImage = null;
+let customPinReady = false;
+// If you drop the exact pin artwork at public/spawn-pin.png it is used
+// verbatim in the 3D world; otherwise the procedural glossy pin below stands
+// in. Preloaded at boot so it is ready before the first spawn.
+try {
+  const probe = new Image();
+  probe.onload = () => {
+    try {
+      const pc = document.createElement("canvas");
+      pc.width = probe.naturalWidth;
+      pc.height = probe.naturalHeight;
+      pc.getContext("2d").drawImage(probe, 0, 0);
+      spawnPinImage = pc.toDataURL("image/png");
+      customPinReady = true;
+    } catch (e) { /* keep procedural fallback */ }
+  };
+  probe.src = "spawn-pin.png";
+} catch (e) { /* keep procedural fallback */ }
 function getSpawnPinImage() {
   if (spawnPinImage) return spawnPinImage;
-  // Glossy 3D map pin on a transparent background (256x336 for crispness).
+  // Glossy 3D map pin fallback on a transparent background (256x340).
   const c = document.createElement("canvas");
   c.width = 256;
-  c.height = 336;
+  c.height = 340;
   const g = c.getContext("2d");
   const cx = 128;
-  const cy = 116;
-  const r = 92;
+  const cy = 122;
+  const r = 98;
   // Teardrop body.
   g.beginPath();
   g.arc(cx, cy, r, Math.PI * 0.75, Math.PI * 0.25, true);
-  g.lineTo(cx, 312);
+  g.lineTo(cx, 326);
   g.closePath();
-  const body = g.createRadialGradient(cx - 45, cy - 55, 10, cx, cy + 30, 200);
+  const body = g.createRadialGradient(cx - 48, cy - 58, 10, cx, cy + 32, 210);
   body.addColorStop(0, "#ff7b7b");
   body.addColorStop(0.45, "#e01515");
   body.addColorStop(1, "#8a0000");
@@ -607,33 +625,33 @@ function getSpawnPinImage() {
   // Punched see-through hole with a metallic ring.
   g.globalCompositeOperation = "destination-out";
   g.beginPath();
-  g.arc(cx, cy, 40, 0, Math.PI * 2);
+  g.arc(cx, cy, 44, 0, Math.PI * 2);
   g.fill();
   g.globalCompositeOperation = "source-over";
-  const ring = g.createLinearGradient(cx - 50, cy - 50, cx + 50, cy + 50);
+  const ring = g.createLinearGradient(cx - 54, cy - 54, cx + 54, cy + 54);
   ring.addColorStop(0, "#f4f4f4");
   ring.addColorStop(0.5, "#9a9a9a");
   ring.addColorStop(1, "#e0e0e0");
   g.strokeStyle = ring;
-  g.lineWidth = 12;
+  g.lineWidth = 14;
   g.beginPath();
-  g.arc(cx, cy, 46, 0, Math.PI * 2);
+  g.arc(cx, cy, 51, 0, Math.PI * 2);
   g.stroke();
   g.strokeStyle = "rgba(0,0,0,0.45)";
   g.lineWidth = 3;
   g.beginPath();
-  g.arc(cx, cy, 40, 0, Math.PI * 2);
+  g.arc(cx, cy, 44, 0, Math.PI * 2);
   g.stroke();
   // Specular highlight for the glossy 3D read.
   g.save();
-  g.translate(cx - 52, cy - 52);
+  g.translate(cx - 56, cy - 56);
   g.rotate(-0.5);
-  const spec = g.createRadialGradient(0, 0, 2, 0, 0, 46);
+  const spec = g.createRadialGradient(0, 0, 2, 0, 0, 50);
   spec.addColorStop(0, "rgba(255,255,255,0.75)");
   spec.addColorStop(1, "rgba(255,255,255,0)");
   g.fillStyle = spec;
   g.beginPath();
-  g.ellipse(0, 0, 26, 46, 0, 0, Math.PI * 2);
+  g.ellipse(0, 0, 28, 50, 0, 0, Math.PI * 2);
   g.fill();
   g.restore();
   spawnPinImage = c.toDataURL("image/png");
@@ -692,7 +710,7 @@ function confirmSpawn() {
           image: getSpawnPinImage(),
           sizeInMeters: true,
           width: 550,
-          height: 721,
+          height: 730,
           verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
           distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 150000),
           disableDepthTestDistance: Number.POSITIVE_INFINITY,
@@ -1054,11 +1072,21 @@ startBtn.addEventListener("click", () => {
 
 confirmSpawnBtn.addEventListener("click", confirmSpawn);
 
-document.getElementById("resumeBtn").addEventListener("click", () => {
+document.getElementById("resumeBtn").addEventListener("click", async () => {
+  // RESPAWN at the original spawn point (not resume-in-place).
   if (pauseMenu) pauseMenu.classList.add("hidden");
-  if (uiContainer) uiContainer.classList.remove("hidden");
-  if (threeContainer) threeContainer.classList.remove("hidden");
-  currentState = States.FLYING;
+  if (state.spawnLon != null && state.spawnLat != null) {
+    state.lon = state.spawnLon;
+    state.lat = state.spawnLat;
+    pendingSpawnName = state.spawnName;
+    try {
+      await groundSampler.seed([[state.lat, state.lon]]);
+      state.alt = groundSampler.get(state.lat, state.lon, 0) + 1500;
+    } catch (e) {
+      state.alt = Math.max(state.alt, 1500);
+    }
+  }
+  confirmSpawn();
 });
 
 document.getElementById("restartBtn").addEventListener("click", () => {
