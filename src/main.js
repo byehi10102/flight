@@ -477,8 +477,9 @@ function confirmSpawn() {
       spawnIndicator = null;
     }
 
-    // Spawn-origin indicator: a labeled pin that stays in the world for the
-    // whole flight so you can see where you launched from.
+    // Spawn-origin indicator: a RED pin (same style as the picker pin) plus
+    // a vertical sky beacon, so the launch point stays findable after you
+    // fly away and you can navigate back to it.
     state.spawnName =
       pendingSpawnName ||
       `SPAWN ${Math.abs(state.lat).toFixed(2)}°${state.lat >= 0 ? "N" : "S"} ` +
@@ -486,13 +487,13 @@ function confirmSpawn() {
     try {
       const carto = Cesium.Cartographic.fromDegrees(state.lon, state.lat);
       const groundH = viewer.scene.globe.getHeight(carto);
+      const baseH = groundH === undefined ? 0 : groundH;
+      const topH = baseH + 2000;
       spawnIndicator = viewer.entities.add({
-        position: Cesium.Cartesian3.fromDegrees(
-          state.lon, state.lat, groundH === undefined ? 0 : groundH
-        ),
+        position: Cesium.Cartesian3.fromDegrees(state.lon, state.lat, baseH),
         point: {
-          pixelSize: 12,
-          color: Cesium.Color.CYAN,
+          pixelSize: 15,
+          color: Cesium.Color.RED,
           outlineColor: Cesium.Color.WHITE,
           outlineWidth: 2,
           disableDepthTestDistance: Number.POSITIVE_INFINITY,
@@ -505,6 +506,18 @@ function confirmSpawn() {
           verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
           pixelOffset: new Cesium.Cartesian2(0, -18),
           disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        },
+        polyline: {
+          positions: Cesium.Cartesian3.fromDegreesArrayHeights([
+            state.lon, state.lat, baseH,
+            state.lon, state.lat, topH,
+          ]),
+          width: 3,
+          material: Cesium.Color.RED,
+          depthFailMaterial: new Cesium.PolylineDashMaterialProperty({
+            color: Cesium.Color.RED.withAlpha(0.85),
+          }),
+          arcType: Cesium.ArcType.NONE,
         },
       });
     } catch (e) { /* indicator is cosmetic */ }
@@ -880,9 +893,44 @@ initialCameraView = {
   },
 };
 
+// ── Default spawn = the player's actual location ───────────────────────────
+// Browser geolocation first (exact), IP lookup fallback like ref-flight.
+// Async on purpose: whatever resolves before START FLIGHT wins; otherwise
+// the Jakarta default stands.
+function initUserLocation() {
+  const apply = (lat, lon) => {
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+    if (lat < -90 || lat > 90 || lon < -180 || lon > 180) return;
+    state.lat = lat;
+    state.lon = lon;
+    groundSampler?.seed?.([[lat, lon]]).catch(() => {});
+  };
+  const ipFallback = async () => {
+    try {
+      const res = await fetch("https://ipapi.co/json/");
+      const data = await res.json();
+      if (data?.latitude && data?.longitude) apply(data.latitude, data.longitude);
+    } catch (e) { /* default stands */ }
+  };
+  try {
+    if ("geolocation" in navigator) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => apply(pos.coords.latitude, pos.coords.longitude),
+        () => ipFallback(),
+        { timeout: 10000, maximumAge: 600000 }
+      );
+    } else {
+      ipFallback();
+    }
+  } catch (e) {
+    ipFallback();
+  }
+}
+
 initThree();
 setupSpawnPicker();
 setupSearch();
+initUserLocation();
 preloadTerrain();
 setSunForTime(viewer, 12, state.lat, state.lon);
 
