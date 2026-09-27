@@ -4,6 +4,7 @@ import {
   UrlTemplateImageryProvider,
   Cartographic,
   Cartesian3,
+  JulianDate,
   Color,
   Math as CesiumMath,
   Viewer as CesiumViewer,
@@ -44,6 +45,9 @@ export function createViewer(container) {
   });
 
   applyBaseWorld(viewer);
+  // Freeze the simulation clock: we pin the time ourselves for permanent
+  // daylight, so a ticking clock must never drag the sun into night.
+  viewer.clock.shouldAnimate = false;
   return viewer;
 }
 
@@ -152,12 +156,27 @@ export async function attachTerrain(viewer) {
   }
 }
 
-/** Permanent noon at the aircraft: parks the sun just off-overhead so every
- *  part of the globe renders in daylight with relief shading. The old version
- *  only changed brightness — Cesium's light direction stayed fixed, so half
- *  the planet still rendered night. */
+/** Permanent noon at the aircraft, guaranteed two ways.
+ *
+ *  Night had two independent causes and the old code fixed neither:
+ *  1. Cesium's sky + globe night side follow the simulation CLOCK, not the
+ *     light object — so the clock is pinned to solar noon at the aircraft's
+ *     longitude on an equinox (daylight on the whole planet at once).
+ *  2. Directional shading follows scene.light — parked just off-overhead so
+ *     models, buildings and terrain stay lit with relief shading.
+ */
 export function setSunForTime(viewer, hours, latitude = 45, longitude = 0, date = new Date()) {
   try {
+    // Solar noon at this longitude, on the September equinox (sun over the
+    // equator: everywhere except the poles is in daylight simultaneously).
+    const utcNoon = ((12 - longitude / 15) % 24 + 24) % 24;
+    const hh = Math.floor(utcNoon);
+    const mm = Math.floor((utcNoon - hh) * 60);
+    viewer.clock.currentTime = JulianDate.fromDate(
+      new Date(Date.UTC(2026, 8, 22, hh, mm, 0))
+    );
+    viewer.clock.shouldAnimate = false;
+
     const surfacePoint = Cartesian3.fromDegrees(longitude, latitude, 0);
     const normal = Cartesian3.normalize(surfacePoint, new Cartesian3());
     // East for the tilt that keeps terrain relief readable.

@@ -462,8 +462,10 @@ function setupSpawnPicker() {
 
 // ── Confirm spawn with transition animation ──────────────────────────────────
 function confirmSpawn() {
+  // Radial (see-through center) fade, NOT solid black — the spawn flight
+  // itself must stay visible while the camera dives onto the city.
   if (vignette) {
-    vignette.classList.add("solid");
+    vignette.classList.remove("solid");
     vignette.style.opacity = "1";
   }
 
@@ -559,6 +561,8 @@ function confirmSpawn() {
     // confirming always plays the dive-down-onto-the-spawn swoop, then drop
     // onto the spawn point in the plane's own attitude.
     const diveToSpawn = () => {
+      // The airplane fades in as the dive begins so it appears mid-flight.
+      if (threeContainer) threeContainer.classList.remove("hidden");
       viewer.camera.flyTo({
         destination: Cesium.Cartesian3.fromDegrees(state.lon, state.lat, state.alt),
         orientation: {
@@ -911,14 +915,18 @@ initialCameraView = {
 // Async on purpose: whatever resolves before START FLIGHT wins; otherwise
 // the Jakarta default stands.
 function initUserLocation() {
+  let resolved = false;
   const apply = (lat, lon) => {
+    if (resolved) return;
     if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
     if (lat < -90 || lat > 90 || lon < -180 || lon > 180) return;
+    resolved = true;
     state.lat = lat;
     state.lon = lon;
     groundSampler?.seed?.([[lat, lon]]).catch(() => {});
   };
   const ipFallback = async () => {
+    if (resolved) return;
     try {
       const res = await fetch("https://ipapi.co/json/");
       const data = await res.json();
@@ -932,6 +940,9 @@ function initUserLocation() {
         () => ipFallback(),
         { timeout: 10000, maximumAge: 600000 }
       );
+      // If the user never answers the permission prompt, geolocation never
+      // calls back — fall back to IP lookup instead of Jakarta forever.
+      setTimeout(() => ipFallback(), 12000);
     } else {
       ipFallback();
     }
