@@ -473,6 +473,120 @@ html, body {
   height: 100%;
 }
 
+/* ── HUD (ref-flight flight display) ────────────────────────────────────────── */
+#horizon-container {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 600px;
+  height: 600px;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  overflow: hidden;
+}
+
+#normal-crosshair {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 120px;
+  height: 48px;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+#normal-crosshair .xh-ring {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 12px;
+  height: 12px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  border: 2px solid #0f0;
+}
+
+#normal-crosshair .xh-left {
+  position: absolute;
+  top: 50%;
+  left: calc(50% - 6px - 20px);
+  width: 20px;
+  height: 2px;
+  transform: translateY(-50%);
+  background: #0f0;
+}
+
+#normal-crosshair .xh-right {
+  position: absolute;
+  top: 50%;
+  left: calc(50% + 6px);
+  width: 20px;
+  height: 2px;
+  transform: translateY(-50%);
+  background: #0f0;
+}
+
+#normal-crosshair .xh-top {
+  position: absolute;
+  left: 50%;
+  top: calc(50% - 6px - 12px);
+  width: 2px;
+  height: 12px;
+  transform: translateX(-50%);
+  background: #0f0;
+}
+
+#pitch-lines {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+}
+
+#pitch-lines .pitch-line {
+  position: absolute;
+  left: 30%;
+  width: 40%;
+  height: 1px;
+  background: rgba(0, 255, 0, 0.5);
+  text-align: center;
+  font-size: 10px;
+  color: #0f0;
+}
+
+/* Compass (ref-flight tape) */
+#compass-tape {
+  position: absolute;
+  display: flex;
+  height: 100%;
+  align-items: flex-end;
+  font-size: 12px;
+  color: #0f0;
+  will-change: transform;
+  width: 4320px;
+}
+
+#compass-tape .compass-tick {
+  position: absolute;
+  bottom: 0;
+  width: 2px;
+  background: #0f0;
+  box-shadow: 0 0 5px rgba(0, 255, 0, 0.8);
+}
+
+#compass-tape .compass-label {
+  position: absolute;
+  bottom: 12px;
+  width: 40px;
+  margin-left: -20px;
+  text-align: center;
+  font-size: 11px;
+}
+
+#region-notification.region-exit {
+  opacity: 0;
+  transition: opacity 1s ease;
+}
+
 /* ── Transition vignette ───────────────────────────────────────────────────── */
 #transition-vignette {
   position: absolute;
