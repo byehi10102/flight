@@ -604,60 +604,91 @@ try {
 } catch (e) { /* keep procedural fallback */ }
 function getSpawnPinImage() {
   if (spawnPinImage) return spawnPinImage;
-  // Glossy 3D map pin fallback on a transparent background (256x340).
+  // Glossy 3D map pin fallback on a transparent background (280x360),
+  // drawn to match the reference artwork: chubby round head, short blunt
+  // tail, big hole with a thick beveled ring, warm highlight upper-left.
   const c = document.createElement("canvas");
-  c.width = 256;
-  c.height = 340;
+  c.width = 280;
+  c.height = 360;
   const g = c.getContext("2d");
-  const cx = 128;
-  const cy = 122;
-  const r = 98;
-  // Teardrop body.
-  g.beginPath();
-  g.arc(cx, cy, r, Math.PI * 0.75, Math.PI * 0.25, true);
-  g.lineTo(cx, 326);
-  g.closePath();
-  const body = g.createRadialGradient(cx - 48, cy - 58, 10, cx, cy + 32, 210);
-  body.addColorStop(0, "#ff7b7b");
-  body.addColorStop(0.45, "#e01515");
-  body.addColorStop(1, "#8a0000");
+  const cx = 140;
+  const cy = 128;
+  const r = 104;
+  // Teardrop body path (reused for fill + shading clip).
+  const bodyPath = () => {
+    g.beginPath();
+    g.arc(cx, cy, r, Math.PI * 0.75, Math.PI * 0.25, true);
+    g.lineTo(cx, 344);
+    g.closePath();
+  };
+  bodyPath();
+  const body = g.createLinearGradient(cx - r, cy - r, cx + r, cy + r);
+  body.addColorStop(0, "#ff6a6a");
+  body.addColorStop(0.45, "#e01414");
+  body.addColorStop(1, "#7d0000");
   g.fillStyle = body;
   g.fill();
+  // Shading clipped to the body: deep right edge, warm left light.
+  g.save();
+  bodyPath();
+  g.clip();
+  const shade = g.createLinearGradient(cx - r, 0, cx + r, 0);
+  shade.addColorStop(0, "rgba(255,180,120,0.35)");
+  shade.addColorStop(0.5, "rgba(255,255,255,0)");
+  shade.addColorStop(1, "rgba(90,0,0,0.55)");
+  g.fillStyle = shade;
+  g.fillRect(0, 0, 280, 360);
+  const tailShade = g.createLinearGradient(0, cy, 0, 360);
+  tailShade.addColorStop(0, "rgba(0,0,0,0)");
+  tailShade.addColorStop(1, "rgba(60,0,0,0.5)");
+  g.fillStyle = tailShade;
+  g.fillRect(0, 0, 280, 360);
+  g.restore();
   g.strokeStyle = "#6e0000";
   g.lineWidth = 6;
+  bodyPath();
   g.stroke();
-  // Punched see-through hole with a metallic ring.
+  // Punched see-through hole with a thick beveled ring.
   g.globalCompositeOperation = "destination-out";
   g.beginPath();
-  g.arc(cx, cy, 44, 0, Math.PI * 2);
+  g.arc(cx, cy, 46, 0, Math.PI * 2);
   g.fill();
   g.globalCompositeOperation = "source-over";
-  const ring = g.createLinearGradient(cx - 54, cy - 54, cx + 54, cy + 54);
-  ring.addColorStop(0, "#f4f4f4");
-  ring.addColorStop(0.5, "#9a9a9a");
-  ring.addColorStop(1, "#e0e0e0");
+  const ring = g.createLinearGradient(cx - 60, cy - 60, cx + 60, cy + 60);
+  ring.addColorStop(0, "#f6f6f6");
+  ring.addColorStop(0.5, "#8f8f8f");
+  ring.addColorStop(1, "#e2e2e2");
   g.strokeStyle = ring;
-  g.lineWidth = 14;
+  g.lineWidth = 16;
   g.beginPath();
-  g.arc(cx, cy, 51, 0, Math.PI * 2);
+  g.arc(cx, cy, 54, 0, Math.PI * 2);
   g.stroke();
-  g.strokeStyle = "rgba(0,0,0,0.45)";
-  g.lineWidth = 3;
+  // Inner bevel: light top, shadow bottom.
+  g.lineWidth = 5;
+  g.strokeStyle = "rgba(255,255,255,0.7)";
   g.beginPath();
-  g.arc(cx, cy, 44, 0, Math.PI * 2);
+  g.arc(cx, cy, 46, Math.PI * 1.05, Math.PI * 1.95);
   g.stroke();
-  // Specular highlight for the glossy 3D read.
+  g.strokeStyle = "rgba(0,0,0,0.4)";
+  g.beginPath();
+  g.arc(cx, cy, 46, Math.PI * 0.05, Math.PI * 0.95);
+  g.stroke();
+  // Speculars: long left highlight + small hot dot.
   g.save();
-  g.translate(cx - 56, cy - 56);
-  g.rotate(-0.5);
-  const spec = g.createRadialGradient(0, 0, 2, 0, 0, 50);
-  spec.addColorStop(0, "rgba(255,255,255,0.75)");
+  g.translate(cx - 62, cy - 58);
+  g.rotate(-0.45);
+  const spec = g.createRadialGradient(0, 0, 2, 0, 0, 56);
+  spec.addColorStop(0, "rgba(255,255,255,0.8)");
   spec.addColorStop(1, "rgba(255,255,255,0)");
   g.fillStyle = spec;
   g.beginPath();
-  g.ellipse(0, 0, 28, 50, 0, 0, Math.PI * 2);
+  g.ellipse(0, 0, 30, 56, 0, 0, Math.PI * 2);
   g.fill();
   g.restore();
+  g.fillStyle = "rgba(255,255,255,0.85)";
+  g.beginPath();
+  g.arc(cx - 58, cy - 66, 9, 0, Math.PI * 2);
+  g.fill();
   spawnPinImage = c.toDataURL("image/png");
   return spawnPinImage;
 }
@@ -714,7 +745,7 @@ function confirmSpawn() {
           image: getSpawnPinImage(),
           sizeInMeters: true,
           width: 550,
-          height: 730,
+          height: 707,
           verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
           distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 150000),
           disableDepthTestDistance: Number.POSITIVE_INFINITY,
