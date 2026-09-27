@@ -529,6 +529,8 @@ function update(dt) {
   state.roll = physicsResult.roll;
   state.heading = physicsResult.heading;
   state.throttle = input.throttle;
+  state.yaw = input.yaw;
+  state.isBoosting = physicsResult.isBoosting;
   state.stallFactor = 0;
   state.onGround = false;
 
