@@ -230,6 +230,7 @@ function enterSpawnPicking(useVignette = true) {
     if (uiContainer) uiContainer.classList.add("hidden");
     currentState = States.PICK_SPAWN;
     setStreetsVisible(true);
+    showNotablePlaces();
     if (confirmSpawnBtn) confirmSpawnBtn.classList.add("hidden");
     if (searchResults) searchResults.style.display = "none";
     if (locationSearch) locationSearch.value = "";
@@ -271,6 +272,7 @@ function enterSpawnPicking(useVignette = true) {
 
 function exitSpawnPicking() {
   setStreetsVisible(false);
+  clearNotablePlaces();
   if (spawnInstruction) spawnInstruction.classList.add("hidden");
   if (confirmSpawnBtn) confirmSpawnBtn.classList.add("hidden");
   if (mainMenu) mainMenu.classList.remove("hidden");
@@ -427,6 +429,29 @@ function setupSpawnPicker() {
       }
     }
 
+    const zoomRect = document.getElementById("zoom-controls")?.getBoundingClientRect();
+    if (zoomRect) {
+      const pad = 12;
+      if (
+        clickX >= zoomRect.left - pad &&
+        clickX <= zoomRect.right + pad &&
+        clickY >= zoomRect.top - pad &&
+        clickY <= zoomRect.bottom + pad
+      ) {
+        return;
+      }
+    }
+
+    // Landmarks first: tapping a named pin spawns right there.
+    try {
+      const picked = viewer.scene.pick(click.position);
+      const notable = picked?.id?.notable;
+      if (notable) {
+        selectSpawnPoint(notable.lon, notable.lat, 0, notable.name, notable.name);
+        return;
+      }
+    } catch (e) { /* fall through to globe picking */ }
+
     const ray = viewer.camera.getPickRay(click.position);
     const cartesian = viewer.scene.globe.pick(ray, viewer.scene);
 
@@ -435,37 +460,119 @@ function setupSpawnPicker() {
       const lon = Cesium.Math.toDegrees(cartographic.longitude);
       const lat = Cesium.Math.toDegrees(cartographic.latitude);
 
-      state.lon = lon;
-      state.lat = lat;
-      state.alt = Math.max(0, cartographic.height) + 1500;
-
-      if (instructionText) instructionText.textContent = "FETCHING LOCATION INFO...";
-
-      groundSampler.seed([[lat, lon]]).then(() => {
-        const ground = groundSampler.get(lat, lon, cartographic.height || 0);
-        state.alt = ground + 1500;
-      }).catch(() => {});
-
-      reverseGeocodeDetailed(lon, lat).then((place) => {
-        pendingSpawnName = place.short;
-        if (instructionText) instructionText.textContent = place.label;
-      }).catch(() => {});
-
-      if (spawnMarker) viewer.entities.remove(spawnMarker);
-      spawnMarker = viewer.entities.add({
-        position: cartesian,
-        point: {
-          pixelSize: 15,
-          color: Cesium.Color.RED,
-          outlineColor: Cesium.Color.WHITE,
-          outlineWidth: 2,
-          disableDepthTestDistance: Number.POSITIVE_INFINITY,
-        },
-      });
-
-      if (confirmSpawnBtn) confirmSpawnBtn.classList.remove("hidden");
+      selectSpawnPoint(lon, lat, cartographic.height || 0, null, null, cartesian);
     }
   }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+
+  // Guaranteed zoom (wheel/pinch can be finicky across browsers): +/- buttons.
+  const zoomStep = (dir) => {
+    try {
+      if (currentState !== States.PICK_SPAWN) return;
+      const h = viewer.camera.positionCartographic?.height || 10000;
+      const amt = Math.max(100, h * 0.35);
+      if (dir > 0) viewer.camera.zoomOut(amt);
+      else viewer.camera.zoomIn(amt);
+    } catch (e) { /* cosmetic */ }
+  };
+  document.getElementById("zoomInBtn")?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    zoomStep(-1);
+  });
+  document.getElementById("zoomOutBtn")?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    zoomStep(1);
+  });
+}
+
+// ── Spawn selection shared by map clicks, landmark pins and search ──────────
+function selectSpawnPoint(lon, lat, baseHeight, label, shortName, cartesian) {
+  state.lon = lon;
+  state.lat = lat;
+  state.alt = Math.max(0, baseHeight) + 1500;
+
+  if (instructionText) instructionText.textContent = label || "FETCHING LOCATION INFO...";
+  if (shortName) pendingSpawnName = shortName;
+
+  groundSampler.seed([[lat, lon]]).then(() => {
+    const ground = groundSampler.get(lat, lon, baseHeight);
+    state.alt = ground + 1500;
+  }).catch(() => {});
+
+  if (!label) {
+    reverseGeocodeDetailed(lon, lat).then((place) => {
+      pendingSpawnName = place.short;
+      if (instructionText) instructionText.textContent = place.label;
+    }).catch(() => {});
+  }
+
+  if (spawnMarker) viewer.entities.remove(spawnMarker);
+  spawnMarker = viewer.entities.add({
+    position: cartesian || Cesium.Cartesian3.fromDegrees(lon, lat, Math.max(0, baseHeight)),
+    point: {
+      pixelSize: 15,
+      color: Cesium.Color.RED,
+      outlineColor: Cesium.Color.WHITE,
+      outlineWidth: 2,
+      disableDepthTestDistance: Number.POSITIVE_INFINITY,
+    },
+  });
+
+  if (confirmSpawnBtn) confirmSpawnBtn.classList.remove("hidden");
+}
+
+// ── Notable landmarks: minimal readable labels on the spawn map ─────────────
+const NOTABLE_PLACES = [
+  { name: "WHITE HOUSE", lat: 38.8977, lon: -77.0365 },
+  { name: "STATUE OF LIBERTY", lat: 40.6892, lon: -74.0445 },
+  { name: "HOLLYWOOD SIGN", lat: 34.1341, lon: -118.3215 },
+  { name: "DISNEYLAND", lat: 33.8121, lon: -117.919 },
+  { name: "KNOTT'S BERRY FARM", lat: 33.8441, lon: -118.0002 },
+  { name: "GOLDEN GATE BRIDGE", lat: 37.8199, lon: -122.4783 },
+  { name: "SPACE NEEDLE", lat: 47.6205, lon: -122.3493 },
+  { name: "GRAND CANYON", lat: 36.1069, lon: -112.1129 },
+  { name: "MOUNT RUSHMORE", lat: 43.8791, lon: -103.4591 },
+  { name: "EIFFEL TOWER", lat: 48.8584, lon: 2.2945 },
+  { name: "BIG BEN", lat: 51.5007, lon: -0.1246 },
+  { name: "COLOSSEUM", lat: 41.8902, lon: 12.4922 },
+  { name: "TAJ MAHAL", lat: 27.1751, lon: 78.0421 },
+  { name: "SYDNEY OPERA HOUSE", lat: -33.8568, lon: 151.2153 },
+  { name: "GREAT WALL", lat: 40.4319, lon: 116.5704 },
+  { name: "MOUNT FUJI", lat: 35.3606, lon: 138.7274 },
+];
+let notableEntities = [];
+
+function showNotablePlaces() {
+  clearNotablePlaces();
+  try {
+    for (const p of NOTABLE_PLACES) {
+      const ent = viewer.entities.add({
+        position: Cesium.Cartesian3.fromDegrees(p.lon, p.lat, 300),
+        point: {
+          pixelSize: 9,
+          color: Cesium.Color.WHITE,
+          outlineColor: Cesium.Color.RED,
+          outlineWidth: 2,
+        },
+        label: {
+          text: p.name,
+          font: "11pt sans-serif",
+          style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+          outlineWidth: 2,
+          verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+          pixelOffset: new Cesium.Cartesian2(0, -20),
+        },
+      });
+      ent.notable = p;
+      notableEntities.push(ent);
+    }
+  } catch (e) { /* landmarks are cosmetic */ }
+}
+
+function clearNotablePlaces() {
+  try {
+    for (const ent of notableEntities) viewer.entities.remove(ent);
+  } catch (e) { /* cosmetic */ }
+  notableEntities = [];
 }
 
 // ── Floating 3D spawn pin ────────────────────────────────────────────────────
@@ -512,6 +619,7 @@ function confirmSpawn() {
   // Radial (see-through center) fade, NOT solid black — the spawn flight
   // itself must stay visible while the camera dives onto the city.
   setStreetsVisible(false);
+  clearNotablePlaces();
   if (vignette) {
     vignette.classList.remove("solid");
     vignette.style.opacity = "1";

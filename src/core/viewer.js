@@ -78,17 +78,15 @@ export function applyBaseWorld(viewer) {
   layer.maximumLevel = CONFIG.imagery.maximumLevel;
   try { layer.anisotropy = 16; } catch (e) { /* older Cesium */ }
 
-  // Street map (same tiles as the fallback base, on top): hidden while
-  // flying, shown in the spawn picker so it reads like Google/Apple Maps —
-  // streets, landmark labels, pan/zoom.
-  const streets = new UrlTemplateImageryProvider({
-    url: CONFIG.imagery.fallbackUrl,
-    subdomains: CONFIG.imagery.fallbackSubdomains,
-    credit: CONFIG.imagery.fallbackAttribution,
-    maximumLevel: CONFIG.imagery.fallbackMaximumLevel,
+  // Reference overlay (boundaries + place labels, transparent): hidden while
+  // flying, shown in the spawn picker over the SATELLITE view so cities and
+  // landmarks stay readable like a real map app.
+  const reference = new UrlTemplateImageryProvider({
+    url: "https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
+    maximumLevel: 19,
   });
-  streetsLayer = viewer.imageryLayers.addImageryProvider(streets, 2);
-  streetsLayer.show = false;
+  referenceLayer = viewer.imageryLayers.addImageryProvider(reference, 2);
+  referenceLayer.show = false;
 
   // ── Quality: LOD, AA and atmosphere ──────────────────────────────────────
   viewer.scene.globe.maximumScreenSpaceError = 2;
@@ -222,7 +220,7 @@ export { Cartographic, CesiumMath, CesiumViewer };
 let miniViewer = null;
 let streetsLayer = null;
 
-/** Street-map overlay for the spawn picker (Google/Apple-Maps feel). */
+/** Reference-labels overlay for the spawn picker (satellite stays visible). */
 export function setStreetsVisible(show) {
   try {
     if (streetsLayer) streetsLayer.show = !!show;

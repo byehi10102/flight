@@ -233,6 +233,33 @@ html, body {
   border-bottom: none;
 }
 
+#zoom-controls {
+  position: fixed;
+  right: 20px;
+  bottom: 90px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: auto;
+  z-index: 70;
+}
+
+#zoom-controls button {
+  width: 44px;
+  height: 44px;
+  font-size: 24px;
+  line-height: 1;
+  background: rgba(0, 0, 0, 0.75);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  border-radius: 8px;
+  color: #fff;
+  cursor: pointer;
+}
+
+#zoom-controls button:hover {
+  background: rgba(0, 120, 255, 0.7);
+}
+
 #confirmSpawnBtn {
   position: absolute;
   bottom: 60px;
