@@ -455,10 +455,10 @@ html, body {
   letter-spacing: 2px;
 }
 
-/* Minimap */
+/* Minimap (above the corner attitude panel) */
 #minimap-container {
   position: absolute;
-  bottom: 16px;
+  bottom: 226px;
   right: 16px;
   width: 180px;
   height: 180px;
@@ -536,10 +536,10 @@ html, body {
   background: #0f0;
 }
 
-#pitch-lines {
+#attitude-panel {
   position: fixed;
-  right: 20px;
-  bottom: 230px;
+  right: 16px;
+  bottom: 16px;
   width: 200px;
   height: 200px;
   overflow: hidden;
@@ -548,6 +548,29 @@ html, body {
   border-radius: 8px;
   pointer-events: none;
   z-index: 41;
+}
+
+#pitch-lines {
+  position: absolute;
+  inset: 0;
+}
+
+#pitch-ref {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  top: 50%;
+  height: 0;
+  border-top: 2px solid #ff0;
+  pointer-events: none;
+}
+
+#pitch-ref span {
+  position: absolute;
+  right: 2px;
+  top: -14px;
+  font-size: 10px;
+  color: #ff0;
 }
 
 #pitch-lines .pitch-line {

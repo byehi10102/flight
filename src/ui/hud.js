@@ -89,8 +89,19 @@ export class Hud {
       line.innerText = String(i);
       pitchLines.appendChild(line);
     }
-    horizon.appendChild(pitchLines);
-    ui.appendChild(horizon);
+
+    // Attitude panel: fixed bottom-right corner box holding the sliding
+    // ladder plus a static center reference line so pitch reads against it.
+    const panel = document.createElement("div");
+    panel.id = "attitude-panel";
+    panel.appendChild(pitchLines);
+    const refLine = document.createElement("div");
+    refLine.id = "pitch-ref";
+    const refLabel = document.createElement("span");
+    refLabel.innerText = "0";
+    refLine.appendChild(refLabel);
+    panel.appendChild(refLine);
+    ui.appendChild(panel);
   }
 
   // ── Compass tape: 5° steps, 4px/deg, N/E/S/W labels (ref-flight) ──

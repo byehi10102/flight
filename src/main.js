@@ -9,6 +9,7 @@ import { PlaneController } from "./plane/planeController.js";
 import { PlaneModel } from "./plane/planeModel.js";
 import { Hud } from "./ui/hud.js";
 import { EngineAudio } from "./flight/engine.js";
+import { particles } from "./utils/particles.js";
 import { reverseGeocode, calculateDistance } from "./utils/geo.js";
 
 const States = {
@@ -185,6 +186,7 @@ function initThree() {
   scene.add(directionalLight);
 
   planeModel = new PlaneModel(scene);
+  particles.init(scene);
   planeModel.load().then(() => {
     loadingStatus.model = true;
     updateLoadingUI();
@@ -484,6 +486,7 @@ function confirmSpawn() {
     controller.reset();
     physics = new PlanePhysics();
     physics.reset(state.lon, state.lat, state.alt, state.heading, state.pitch, state.roll);
+    particles.clear();
     planeModel.reset();
 
     if (spawnInstruction) spawnInstruction.classList.add("hidden");
@@ -668,10 +671,24 @@ function checkCrash() {
   const cartographic = Cesium.Cartographic.fromDegrees(state.lon, state.lat);
   const terrainHeight = viewer.scene.globe.getHeight(cartographic);
   if (terrainHeight !== undefined && state.alt <= terrainHeight + 5) {
+    // Crash: detonate at the plane's on-screen position (ref-flight style
+    // explosion), hide the wreck, and hold the fireball on screen briefly
+    // before dropping to the pause menu.
     currentState = States.PAUSED;
-    if (uiContainer) uiContainer.classList.add("hidden");
-    if (threeContainer) threeContainer.classList.add("hidden");
-    if (pauseMenu) pauseMenu.classList.remove("hidden");
+    try {
+      // Only detonate once per wreck (resume-after-crash re-triggers this
+      // check while still inside the terrain).
+      if (!planeModel?.model || planeModel.model.visible !== false) {
+        const at = planeModel?.model?.position?.clone?.() ?? null;
+        particles.spawnExplosion(at, { big: true, count: 48, smokeCount: 10 });
+        if (planeModel?.model) planeModel.model.visible = false;
+      }
+    } catch (e) { /* explosion is cosmetic; never break the crash flow */ }
+    setTimeout(() => {
+      if (uiContainer) uiContainer.classList.add("hidden");
+      if (threeContainer) threeContainer.classList.add("hidden");
+      if (pauseMenu) pauseMenu.classList.remove("hidden");
+    }, 1600);
   }
 }
 
@@ -707,6 +724,12 @@ function animate() {
         setSunForTime(viewer, 12, state.lat, state.lon);
       } catch (e) { /* sun is cosmetic; never break the frame */ }
     }
+
+    // Crash-explosion particles keep animating even while paused so the
+    // fireball plays out behind the delayed pause menu.
+    try {
+      if (particles.list.length > 0) particles.update(dt);
+    } catch (e) { /* cosmetic */ }
 
     // Render the plane overlay. The Three.js camera stays at the origin with
     // a fixed FOV; the Cesium camera does the world-space tracking.

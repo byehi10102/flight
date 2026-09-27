@@ -81,7 +81,7 @@ export function applyBaseWorld(viewer) {
   viewer.scene.globe.depthTestAgainstTerrain = true;
   viewer.scene.globe.enableLighting = true;
   viewer.scene.globe.atmosphereLightIntensity = 10;
-  viewer.scene.globe.baseColor = Color.fromCssColorString("#0b1622");
+  viewer.scene.globe.baseColor = Color.fromCssColorString("#1a3a5c");
 
   viewer.scene.highDynamicRange = false;
   viewer.scene.postProcessStages.fxaa.enabled = true;

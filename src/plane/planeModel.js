@@ -195,5 +195,6 @@ export class PlaneModel {
     this.currentBoostZOffset = 0;
     this.lastIsBoosting = false;
     this.prevSpeed = 0;
+    if (this.model) this.model.visible = true;
   }
 }
