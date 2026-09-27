@@ -879,10 +879,16 @@ function update(dt) {
 
   // Realistic altitude: height above the terrain below (AGL), not sea
   // level, so skimming the ground reads near zero instead of ~900 ft.
+  // Uses the accurate sampler (cached fine-DEM samples warms via request(),
+  // resident tiles near the ground) — raw globe.getHeight() from altitude
+  // interpolates coarse tiles and can be off by kilometers.
   try {
+    groundSampler.request(state.lat, state.lon);
     const cartoNow = Cesium.Cartographic.fromDegrees(state.lon, state.lat);
     const terrainH = viewer.scene.globe.getHeight(cartoNow);
-    state.agl = terrainH === undefined ? state.alt : Math.max(0, state.alt - terrainH);
+    const ground =
+      groundSampler.get(state.lat, state.lon, terrainH === undefined ? state.alt : terrainH);
+    state.agl = Math.max(0, state.alt - ground);
   } catch (e) {
     state.agl = state.alt;
   }
