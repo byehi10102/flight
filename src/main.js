@@ -615,9 +615,11 @@ function getSpawnPinImage() {
   const cy = 128;
   const r = 104;
   // Teardrop body path (reused for fill + shading clip).
+  // NOTE: clockwise (anticlockwise=false) so the arc sweeps OVER THE TOP;
+  // the other direction draws only a bottom cap + tail (down arrow, no bulb).
   const bodyPath = () => {
     g.beginPath();
-    g.arc(cx, cy, r, Math.PI * 0.75, Math.PI * 0.25, true);
+    g.arc(cx, cy, r, Math.PI * 0.75, Math.PI * 0.25, false);
     g.lineTo(cx, 344);
     g.closePath();
   };
