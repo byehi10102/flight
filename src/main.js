@@ -2,7 +2,7 @@ import * as THREE from "three";
 import * as Cesium from "cesium";
 import "cesium/Build/Cesium/Widgets/widgets.css";
 import { CONFIG } from "./core/config.js";
-import { createViewer, attachTerrain, setSunForTime, initMiniViewer, getMiniViewer, setMinimapCamera } from "./core/viewer.js";
+import { createViewer, attachTerrain, setSunForTime, initMiniViewer, getMiniViewer, setMinimapCamera, setStreetsVisible } from "./core/viewer.js";
 import { GroundSampler } from "./core/ground.js";
 import { PlanePhysics } from "./plane/planePhysics.js";
 import { PlaneController } from "./plane/planeController.js";
@@ -10,7 +10,7 @@ import { PlaneModel } from "./plane/planeModel.js";
 import { Hud } from "./ui/hud.js";
 import { EngineAudio } from "./flight/engine.js";
 import { particles } from "./utils/particles.js";
-import { reverseGeocode, calculateDistance } from "./utils/geo.js";
+import { reverseGeocode, reverseGeocodeDetailed, calculateDistance } from "./utils/geo.js";
 
 const States = {
   MENU: "MENU",
@@ -229,6 +229,7 @@ function enterSpawnPicking(useVignette = true) {
     if (threeContainer) threeContainer.classList.add("hidden");
     if (uiContainer) uiContainer.classList.add("hidden");
     currentState = States.PICK_SPAWN;
+    setStreetsVisible(true);
     if (confirmSpawnBtn) confirmSpawnBtn.classList.add("hidden");
     if (searchResults) searchResults.style.display = "none";
     if (locationSearch) locationSearch.value = "";
@@ -269,6 +270,7 @@ function enterSpawnPicking(useVignette = true) {
 }
 
 function exitSpawnPicking() {
+  setStreetsVisible(false);
   if (spawnInstruction) spawnInstruction.classList.add("hidden");
   if (confirmSpawnBtn) confirmSpawnBtn.classList.add("hidden");
   if (mainMenu) mainMenu.classList.remove("hidden");
@@ -357,9 +359,13 @@ function selectSearchResult(lon, lat, name) {
   state.lon = lon;
   state.lat = lat;
   state.alt = 1500;
-  pendingSpawnName = name.split(",")[0].toUpperCase();
+  // Nominatim display_name is already hierarchical: place, city, county,
+  // state, postcode, country — show the meaningful slice of it.
+  const nameParts = name.split(",").map((s) => s.trim()).filter(Boolean);
+  const detailed = nameParts.slice(0, 4).join(", ").toUpperCase();
+  pendingSpawnName = nameParts.slice(0, 2).join(", ").toUpperCase();
 
-  if (instructionText) instructionText.textContent = pendingSpawnName;
+  if (instructionText) instructionText.textContent = detailed;
 
   groundSampler.seed([[lat, lon]]).then(() => {
     const ground = groundSampler.get(lat, lon, 0);
@@ -440,9 +446,9 @@ function setupSpawnPicker() {
         state.alt = ground + 1500;
       }).catch(() => {});
 
-      reverseGeocode(lon, lat).then((name) => {
-        pendingSpawnName = name;
-        if (name && instructionText) instructionText.textContent = name;
+      reverseGeocodeDetailed(lon, lat).then((place) => {
+        pendingSpawnName = place.short;
+        if (instructionText) instructionText.textContent = place.label;
       }).catch(() => {});
 
       if (spawnMarker) viewer.entities.remove(spawnMarker);
@@ -505,6 +511,7 @@ function getSpawnPinImage() {
 function confirmSpawn() {
   // Radial (see-through center) fade, NOT solid black — the spawn flight
   // itself must stay visible while the camera dives onto the city.
+  setStreetsVisible(false);
   if (vignette) {
     vignette.classList.remove("solid");
     vignette.style.opacity = "1";

@@ -78,6 +78,18 @@ export function applyBaseWorld(viewer) {
   layer.maximumLevel = CONFIG.imagery.maximumLevel;
   try { layer.anisotropy = 16; } catch (e) { /* older Cesium */ }
 
+  // Street map (same tiles as the fallback base, on top): hidden while
+  // flying, shown in the spawn picker so it reads like Google/Apple Maps —
+  // streets, landmark labels, pan/zoom.
+  const streets = new UrlTemplateImageryProvider({
+    url: CONFIG.imagery.fallbackUrl,
+    subdomains: CONFIG.imagery.fallbackSubdomains,
+    credit: CONFIG.imagery.fallbackAttribution,
+    maximumLevel: CONFIG.imagery.fallbackMaximumLevel,
+  });
+  streetsLayer = viewer.imageryLayers.addImageryProvider(streets, 2);
+  streetsLayer.show = false;
+
   // ── Quality: LOD, AA and atmosphere ──────────────────────────────────────
   viewer.scene.globe.maximumScreenSpaceError = 2;
   viewer.scene.globe.skipLevelOfDetail = true;
@@ -208,7 +220,14 @@ export { Cartographic, CesiumMath, CesiumViewer };
 // Same real satellite imagery as the main globe, top-down over the jet. The
 // 2D canvas overlay (player wedge, spawn pin, compass labels) draws on top.
 let miniViewer = null;
+let streetsLayer = null;
 
+/** Street-map overlay for the spawn picker (Google/Apple-Maps feel). */
+export function setStreetsVisible(show) {
+  try {
+    if (streetsLayer) streetsLayer.show = !!show;
+  } catch (e) { /* cosmetic */ }
+}
 export function initMiniViewer(containerId) {
   if (miniViewer) return miniViewer;
   try {
