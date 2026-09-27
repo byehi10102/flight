@@ -25,8 +25,8 @@ export const CONFIG = {
     mass: 38300,               // kg (CRJ-900)
     wingArea: 104.9,           // m²
     maxThrust: 147000,         // N (2 × 73.5 kN)
-    maxSpeed: 250,             // m/s (~485 knots)
-    minSpeed: 66,              // m/s (stall speed)
+    maxSpeed: 1000,             // m/s — matches ref-flight PlanePhysics
+    minSpeed: 100,              // m/s — matches ref-flight PlanePhysics
     densitySeaLevel: 1.225,    // kg/m³
     temperatureSeaLevel: 288.15, // K
     gravity: 9.80665,
