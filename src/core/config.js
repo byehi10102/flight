@@ -37,8 +37,8 @@ export const CONFIG = {
     stallAngle: 0.28,          // rad (~16 degrees)
     cd0: 0.025,                // parasitic drag
     inducedDragFactor: 0.045,  // induced drag factor
-    // Control rates (rad/s)
-    pitchRate: 0.8,
+    // Control rates (rad/s) — matches ref-flight planePhysics
+    pitchRate: 1.2,
     rollRate: 2.5,
     yawRate: 0.5,
     maxBank: 0.85,             // rad (~48.7 degrees)

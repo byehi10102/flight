@@ -577,8 +577,16 @@ function update(dt) {
   );
 
   // Update Three.js plane model (rotates around origin)
+  // Pass speed + throttle so the model can do ref-flight acceleration
+  // inertia and jet-flame scaling.
   planeModel.update(
-    { boostDuration: physicsResult.boostDuration, boostTimeRemaining: physicsResult.boostTimeRemaining, boostRotations: physicsResult.boostRotations },
+    {
+      boostDuration: physicsResult.boostDuration,
+      boostTimeRemaining: physicsResult.boostTimeRemaining,
+      boostRotations: physicsResult.boostRotations,
+      speed: physicsResult.speed,
+      throttle: input.throttle,
+    },
     input,
     dt,
     physicsResult.isBoosting

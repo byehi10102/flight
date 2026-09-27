@@ -1,9 +1,12 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { CONFIG } from "../core/config.js";
+import { JetFlame } from "./jetFlame.js";
 
-// The plane is placed behind the camera (negative Z) and slightly below.
-// The camera looks down -Z, so the plane appears centered in the lower half.
+// The Three.js camera stays at the origin looking down -Z.
+// The plane sits at (0, -0.8, -2.75) — in front of the camera, slightly
+// below — so the view is a chase cam from directly behind the tail.
+// This matches ref-flight (dimartarmizi/web-flight-simulator) exactly.
 const BASE_PLANE_POS = new THREE.Vector3(0, -0.8, -2.75);
 
 /**
@@ -23,6 +26,8 @@ export class PlaneModel {
     this.currentBoostZOffset = 0;
     this.boostRollDirection = 1;
     this.lastIsBoosting = false;
+    this.jetFlames = [];
+    this.prevSpeed = 0;
   }
 
   async load() {
@@ -52,6 +57,19 @@ export class PlaneModel {
           this.model.position.copy(BASE_PLANE_POS);
           this.model.scale.set(CONFIG.aircraft.modelScale, CONFIG.aircraft.modelScale, CONFIG.aircraft.modelScale);
 
+          // Jet exhaust flames — same offsets as ref-flight so the flames sit
+          // in the tailpipes (+Z is behind the jet when nose points -Z).
+          const flameL = new JetFlame();
+          const flameR = new JetFlame();
+          flameL.group.position.set(-0.4, -0.065, 5);
+          flameR.group.position.set(0.4, -0.065, 5);
+          this.model.add(flameL.group);
+          this.model.add(flameR.group);
+          this.jetFlames.push(flameL, flameR);
+          this.model.traverse((child) => {
+            child.layers.set(1);
+          });
+
           this.ready = true;
           resolve(this.model);
         },
@@ -67,7 +85,16 @@ export class PlaneModel {
   update(state, input, dt, isBoosting) {
     if (!this.model) return;
 
-    // Boost visual effects
+    // Acceleration inertia (ref-flight main.js): accelerating pushes the
+    // visual model forward, decelerating pulls it back. Frozen while
+    // dragging so look-around doesn't slide the jet.
+    const speed = state.speed ?? this.prevSpeed;
+    const accel = dt > 0 ? (speed - this.prevSpeed) / dt : 0;
+    this.prevSpeed = speed;
+    const accelInertia = input.isDragging ? 0 : Math.max(-0.5, Math.min(1.5, accel * 0.001));
+    let targetZ = BASE_PLANE_POS.z - accelInertia;
+
+    // Boost visual effects (copied from ref-flight)
     if (isBoosting && !this.lastIsBoosting) {
       this.boostRollDirection = Math.random() > 0.5 ? 1 : -1;
     }
@@ -76,7 +103,6 @@ export class PlaneModel {
     if (isBoosting) {
       const T = state.boostDuration;
       const p = Math.max(0, Math.min(1, 1 - state.boostTimeRemaining / T));
-      const totalRotationRad = Math.PI * 2 * state.boostRotations * this.boostRollDirection;
 
       if (p < 0.2) {
         const localP = p / 0.2;
@@ -87,13 +113,13 @@ export class PlaneModel {
         boostZOffset = -1.5;
         const easedP = localP < 0.5
           ? 4 * localP * localP * localP
-          : 1 - Math.pow(2 * localP + 2, 3) / 2;
-        this.boostRoll = easedP * Math.PI * 2 * state.boostRotations * this.boostRollDirection;
+          : 1 - Math.pow(-2 * localP + 2, 3) / 2;
+        this.boostRoll = easedP * (Math.PI * 2 * state.boostRotations) * this.boostRollDirection;
       } else {
         const localP = (p - 0.8) / 0.2;
         const easedReturn = localP * localP * (3 - 2 * localP);
         boostZOffset = -1.5 + easedReturn * 0.7;
-        this.boostRoll = Math.PI * 2 * state.boostRotations * this.boostRollDirection;
+        this.boostRoll = (Math.PI * 2 * state.boostRotations) * this.boostRollDirection;
       }
     } else {
       this.boostRoll = 0;
@@ -103,27 +129,27 @@ export class PlaneModel {
 
     const zLerp = isBoosting ? 10.0 * dt : 2.0 * dt;
     this.currentBoostZOffset += (boostZOffset - this.currentBoostZOffset) * zLerp;
-    const targetZ = BASE_PLANE_POS.z - this.currentBoostZOffset;
+    targetZ += this.currentBoostZOffset;
 
-    // Idle wobble
+    // Idle wobble (ref-flight magnitudes)
     const time = performance.now() * 0.001;
-    const idleX = Math.sin(time * 0.8) * 0.05;
-    const idleY = Math.cos(time * 0.6) * 0.03;
-    const idleRotX = Math.sin(time * 0.5) * 0.02;
-    const idleRotY = Math.cos(time * 0.4) * 0.02;
-    const idleRotZ = Math.sin(time * 0.7) * 0.03;
+    const idleX = Math.sin(time * 0.8) * 0.035;
+    const idleY = Math.cos(time * 0.6) * 0.025;
+    const idleRotX = Math.sin(time * 0.5) * 0.015;
+    const idleRotY = Math.cos(time * 0.4) * 0.015;
+    const idleRotZ = Math.sin(time * 0.7) * 0.025;
 
-    // Visual offset based on input
+    // Visual offset based on input (ref-flight factors)
     const targetX = input.isDragging
       ? BASE_PLANE_POS.x
-      : BASE_PLANE_POS.x - input.roll * 0.8 - input.yaw * 0.15 + idleX;
+      : BASE_PLANE_POS.x - input.roll * 0.6 - input.yaw * 0.12 + idleX;
     const targetY = input.isDragging
       ? BASE_PLANE_POS.y
-      : BASE_PLANE_POS.y - input.pitch * 0.15 + idleY;
+      : BASE_PLANE_POS.y - input.pitch * 0.1 + idleY;
 
-    let targetRotZ = input.isDragging ? 0 : THREE.MathUtils.degToRad(-input.roll * 20) + idleRotZ;
-    const targetRotX = input.isDragging ? 0 : THREE.MathUtils.degToRad(input.pitch * 12) + idleRotX;
-    const targetRotY = input.isDragging ? 0 : THREE.MathUtils.degToRad(-input.yaw * 5) + idleRotY;
+    let targetRotZ = input.isDragging ? 0 : THREE.MathUtils.degToRad(-input.roll * 15) + idleRotZ;
+    const targetRotX = input.isDragging ? 0 : THREE.MathUtils.degToRad(input.pitch * 10) + idleRotX;
+    const targetRotY = input.isDragging ? 0 : THREE.MathUtils.degToRad(-input.yaw * 4) + idleRotY;
 
     const lerpFactor = isBoosting ? 3.0 * dt : 5.0 * dt;
     this.visualOffset.x += (targetX - this.visualOffset.x) * lerpFactor;
@@ -152,6 +178,14 @@ export class PlaneModel {
 
     const combinedQ = orbitQ.clone().invert().multiply(flightLagQ);
     this.model.quaternion.copy(combinedQ);
+
+    // Afterburner flames follow throttle / boost, as in ref-flight
+    if (this.jetFlames.length > 0) {
+      const throttle = state.throttle ?? input.throttle ?? 0;
+      for (const flame of this.jetFlames) {
+        flame.update(throttle, isBoosting, time, dt);
+      }
+    }
   }
 
   reset() {
@@ -160,5 +194,6 @@ export class PlaneModel {
     this.boostRoll = 0;
     this.currentBoostZOffset = 0;
     this.lastIsBoosting = false;
+    this.prevSpeed = 0;
   }
 }
