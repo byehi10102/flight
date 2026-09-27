@@ -78,7 +78,7 @@ export class PlanePhysics {
 			targetSpeed = this.maxSpeed * this.boostMultiplier;
 		}
 
-		this.speed += (targetSpeed - this.speed) * dt * (this.isBoosting ? 4 : 2);
+		this.speed += (targetSpeed - this.speed) * dt * (this.isBoosting ? 6 : 2);
 
 		const controlEffectiveness = this.speed > this.minSpeed ? 1 : (this.speed / this.minSpeed);
 

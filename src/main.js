@@ -917,6 +917,18 @@ function update(dt) {
     Cesium.Math.toDegrees(finalHPR.roll)
   );
 
+  // Boost FOV kick: widening the frustum while boosting is what makes the
+  // extra speed VISIBLE as terrain rushes past faster.
+  try {
+    const frustum = viewer.camera.frustum;
+    if (frustum && typeof frustum.fovy === "number") {
+      const baseFov = Math.PI / 3;
+      const targetFov = physicsResult.isBoosting ? baseFov * 1.32 : baseFov;
+      const cur = frustum.fovy;
+      frustum.fovy = cur + (targetFov - cur) * Math.min(1, dt * 5);
+    }
+  } catch (e) { /* FOV kick is cosmetic */ }
+
   // Update Three.js plane model (rotates around origin)
   // Pass speed + throttle so the model can do ref-flight acceleration
   // inertia and jet-flame scaling.
