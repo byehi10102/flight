@@ -23,8 +23,8 @@ const States = {
 let currentState = States.MENU;
 
 const state = {
-  lon: 106.8272,
-  lat: -6.1754,
+  lon: -117.9143,
+  lat: 33.8366,
   alt: 1000,
   agl: 1000,
   heading: 0,
@@ -73,7 +73,7 @@ const locationSearch = document.getElementById("locationSearch");
 const searchResults = document.getElementById("search-results");
 const instructionText = document.getElementById("instruction-text");
 
-const loadingStatus = { model: false, cesium: false, globe: false, terrain: false, location: false, failed: false };
+const loadingStatus = { model: false, cesium: false, globe: false, terrain: false, failed: false };
 
 function updateLoadingUI() {
   if (!loadingIndicator || !loadingText || !startBtn) return;
@@ -81,7 +81,7 @@ function updateLoadingUI() {
     loadingIndicator.classList.add("hidden");
     return;
   }
-  const isAllLoaded = loadingStatus.model && loadingStatus.cesium && loadingStatus.globe && loadingStatus.terrain && loadingStatus.location;
+  const isAllLoaded = loadingStatus.model && loadingStatus.cesium && loadingStatus.globe && loadingStatus.terrain;
   if (loadingStatus.failed) {
     loadingText.textContent = "Loading Failed. Please Refresh.";
   } else if (!isAllLoaded) {
@@ -89,7 +89,6 @@ function updateLoadingUI() {
     else if (!loadingStatus.cesium) loadingText.textContent = "Loading Satellite Imagery...";
     else if (!loadingStatus.globe) loadingText.textContent = "Loading Globe Surface...";
     else if (!loadingStatus.terrain) loadingText.textContent = "Loading Terrain Data...";
-    else if (!loadingStatus.location) loadingText.textContent = "Finding Your Location...";
   }
   if (!isAllLoaded || loadingStatus.failed) {
     loadingText.textContent = loadingText.textContent || "Loading...";
@@ -911,63 +910,9 @@ initialCameraView = {
   },
 };
 
-// ── Default spawn = the player's actual location ───────────────────────────
-// Browser geolocation first (exact), IP lookup fallback like ref-flight.
-// Async on purpose: whatever resolves before START FLIGHT wins; otherwise
-// the Jakarta default stands.
-function initUserLocation() {
-  // The START button stays disabled until this settles (see loadingStatus),
-  // so the spawn map can never open on the Jakarta default first.
-  let settled = false;
-  const settle = () => {
-    if (settled) return;
-    settled = true;
-    loadingStatus.location = true;
-    updateLoadingUI();
-  };
-  const apply = (lat, lon) => {
-    if (Number.isFinite(lat) && Number.isFinite(lon) && lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180) {
-      resolved = true;
-      state.lat = lat;
-      state.lon = lon;
-      groundSampler?.seed?.([[lat, lon]]).catch(() => {});
-    }
-    settle();
-  };
-  const ipFallback = async () => {
-    if (settled) return;
-    try {
-      const res = await fetch("https://ipapi.co/json/");
-      const data = await res.json();
-      if (data?.latitude && data?.longitude) {
-        apply(data.latitude, data.longitude);
-        return;
-      }
-    } catch (e) { /* default stands */ }
-    settle();
-  };
-  try {
-    if ("geolocation" in navigator) {
-      navigator.geolocation.getCurrentPosition(
-        (pos) => apply(pos.coords.latitude, pos.coords.longitude),
-        () => ipFallback(),
-        { timeout: 10000, maximumAge: 600000 }
-      );
-      // If the user never answers the permission prompt, geolocation never
-      // calls back — fall back to IP lookup instead of Jakarta forever.
-      setTimeout(() => ipFallback(), 12000);
-    } else {
-      ipFallback();
-    }
-  } catch (e) {
-    ipFallback();
-  }
-}
-
 initThree();
 setupSpawnPicker();
 setupSearch();
-initUserLocation();
 preloadTerrain();
 setSunForTime(viewer, 12, state.lat, state.lon);
 
