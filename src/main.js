@@ -555,37 +555,50 @@ function confirmSpawn() {
 
     currentState = States.TRANSITIONING;
 
-    // Spawn flight (ref-flight style): cinematic dive straight to the
-    // spawn point in the plane's own attitude.
+    // Spawn flight (ref-flight style, two phases): pull up high first so
+    // confirming always plays the dive-down-onto-the-spawn swoop, then drop
+    // onto the spawn point in the plane's own attitude.
+    const diveToSpawn = () => {
+      viewer.camera.flyTo({
+        destination: Cesium.Cartesian3.fromDegrees(state.lon, state.lat, state.alt),
+        orientation: {
+          heading: Cesium.Math.toRadians(state.heading),
+          pitch: Cesium.Math.toRadians(state.pitch),
+          roll: Cesium.Math.toRadians(state.roll),
+        },
+        duration: 2.4,
+        easingFunction: Cesium.EasingFunction.QUADRATIC_IN_OUT,
+        complete: () => {
+          setTimeout(() => {
+            flightStartTime = Date.now();
+            if (uiContainer) uiContainer.classList.remove("hidden");
+            if (threeContainer) threeContainer.classList.remove("hidden");
+            currentState = States.FLYING;
+            hud.resetTime();
+            hud.resetScore();
+            if (state.spawnName) hud.showRegion(`SPAWN · ${state.spawnName}`);
+            if (vignette) {
+              vignette.style.opacity = "0";
+              vignette.classList.remove("solid");
+            }
+          }, 300);
+        },
+      });
+    };
     viewer.camera.flyTo({
-      destination: Cesium.Cartesian3.fromDegrees(state.lon, state.lat, state.alt),
-      orientation: {
-        heading: Cesium.Math.toRadians(state.heading),
-        pitch: Cesium.Math.toRadians(state.pitch),
-        roll: Cesium.Math.toRadians(state.roll),
-      },
-      duration: 2.0,
+      destination: Cesium.Cartesian3.fromDegrees(
+        state.lon, state.lat, Math.max(viewer.camera.positionCartographic?.height || 0, state.alt + 6000)
+      ),
+      duration: 1.0,
       easingFunction: Cesium.EasingFunction.QUADRATIC_IN_OUT,
       complete: () => {
-        setTimeout(() => {
-          flightStartTime = Date.now();
-          if (uiContainer) uiContainer.classList.remove("hidden");
-          if (threeContainer) threeContainer.classList.remove("hidden");
-          currentState = States.FLYING;
-          hud.resetTime();
-          hud.resetScore();
-          if (state.spawnName) hud.showRegion(`SPAWN · ${state.spawnName}`);
-          if (vignette) {
-            vignette.style.opacity = "0";
-            vignette.classList.remove("solid");
-          }
-        }, 300);
+        if (currentState === States.TRANSITIONING) diveToSpawn();
       },
     });
 
-    // Safety net: the flight's complete callback can be skipped if the
-    // camera animation is interrupted, which would leave the player
-    // stranded behind the transition vignette. Force FLYING after 4s.
+    // Safety net: a camera flight's complete callback can be skipped if the
+    // animation is interrupted, which would leave the player stranded behind
+    // the transition vignette. Force FLYING after the two-phase flight.
     setTimeout(() => {
       if (currentState !== States.TRANSITIONING) return;
       flightStartTime = Date.now();
@@ -598,7 +611,7 @@ function confirmSpawn() {
         vignette.style.opacity = "0";
         vignette.classList.remove("solid");
       }
-    }, 4000);
+    }, 6500);
   }, 500);
 }
 

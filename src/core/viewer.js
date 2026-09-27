@@ -3,6 +3,7 @@ import {
   EllipsoidTerrainProvider,
   UrlTemplateImageryProvider,
   Cartographic,
+  Cartesian3,
   Color,
   Math as CesiumMath,
   Viewer as CesiumViewer,
@@ -151,34 +152,35 @@ export async function attachTerrain(viewer) {
   }
 }
 
-/** Sun position driven by a single "hour of day" scalar, 0–24. */
+/** Permanent noon at the aircraft: parks the sun just off-overhead so every
+ *  part of the globe renders in daylight with relief shading. The old version
+ *  only changed brightness — Cesium's light direction stayed fixed, so half
+ *  the planet still rendered night. */
 export function setSunForTime(viewer, hours, latitude = 45, longitude = 0, date = new Date()) {
-  const dayFraction = ((hours % 24) + 24) % 24 / 24;
-  const phi = CesiumMath.toRadians(latitude);
-
-  // Solar declination for the actual day of year (Cooper's equation).
-  const start = Date.UTC(date.getUTCFullYear(), 0, 0);
-  const dayOfYear = Math.floor((date.getTime() - start) / 86400000);
-  const declination = 0.006918
-    - 0.399912 * Math.cos((2 * Math.PI * dayOfYear) / 365)
-    + 0.070257 * Math.sin((2 * Math.PI * dayOfYear) / 365)
-    - 0.006758 * Math.cos((4 * Math.PI * dayOfYear) / 365)
-    + 0.000907 * Math.sin((4 * Math.PI * dayOfYear) / 365)
-    - 0.002697 * Math.cos((6 * Math.PI * dayOfYear) / 365)
-    + 0.00148 * Math.sin((6 * Math.PI * dayOfYear) / 365);
-
-  const hourAngle = CesiumMath.toRadians(dayFraction * 2 * Math.PI - Math.PI);
-  const altitude = Math.asin(
-    Math.sin(declination) * Math.sin(phi) +
-      Math.cos(declination) * Math.cos(phi) * Math.cos(hourAngle),
-  );
-
-  if (altitude <= 0.02) {
-    viewer.scene.light.intensity = 0.05;
-    return altitude;
+  try {
+    const surfacePoint = Cartesian3.fromDegrees(longitude, latitude, 0);
+    const normal = Cartesian3.normalize(surfacePoint, new Cartesian3());
+    // East for the tilt that keeps terrain relief readable.
+    const east = Cartesian3.normalize(
+      Cartesian3.cross(Cartesian3.UNIT_Z, normal, new Cartesian3()),
+      new Cartesian3()
+    );
+    // Toward-sun vector: mostly overhead, tipped ~25° east.
+    const toSun = Cartesian3.normalize(
+      Cartesian3.add(
+        Cartesian3.multiplyByScalar(normal, 1.0, new Cartesian3()),
+        Cartesian3.multiplyByScalar(east, 0.45, new Cartesian3()),
+        new Cartesian3()
+      ),
+      new Cartesian3()
+    );
+    viewer.scene.light.direction = Cartesian3.negate(toSun, new Cartesian3());
+    viewer.scene.light.intensity = 2.2;
+    return 0.5;
+  } catch (e) {
+    viewer.scene.light.intensity = 2.1;
+    return 0;
   }
-  viewer.scene.light.intensity = 0.35 + 2.2 * Math.sin(altitude);
-  return altitude;
 }
 
 export { Cartographic, CesiumMath, CesiumViewer };
