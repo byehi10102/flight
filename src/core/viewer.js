@@ -219,11 +219,12 @@ export { Cartographic, CesiumMath, CesiumViewer };
 // 2D canvas overlay (player wedge, spawn pin, compass labels) draws on top.
 let miniViewer = null;
 let streetsLayer = null;
+let referenceLayer = null;
 
 /** Reference-labels overlay for the spawn picker (satellite stays visible). */
 export function setStreetsVisible(show) {
   try {
-    if (streetsLayer) streetsLayer.show = !!show;
+    if (referenceLayer) referenceLayer.show = !!show;
   } catch (e) { /* cosmetic */ }
 }
 export function initMiniViewer(containerId) {

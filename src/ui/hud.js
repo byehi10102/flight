@@ -403,6 +403,22 @@ export class Hud {
         ctx.fillStyle = "#f00";
         ctx.font = "bold 9px monospace";
         ctx.fillText("SPAWN", cx + px, cy + py - 10);
+      } else {
+        // Spawn is off the map: red arrow on the rim pointing back at it.
+        const a = Math.atan2(px, -py);
+        const ex = cx + Math.sin(a) * (radius - 12);
+        const ey = cy - Math.cos(a) * (radius - 12);
+        ctx.save();
+        ctx.translate(ex, ey);
+        ctx.rotate(a);
+        ctx.fillStyle = "#f00";
+        ctx.beginPath();
+        ctx.moveTo(0, -9);
+        ctx.lineTo(7, 7);
+        ctx.lineTo(-7, 7);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
       }
     }
 

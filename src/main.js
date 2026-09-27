@@ -582,34 +582,60 @@ function clearNotablePlaces() {
 let spawnPinImage = null;
 function getSpawnPinImage() {
   if (spawnPinImage) return spawnPinImage;
+  // Glossy 3D map pin on a transparent background (256x336 for crispness).
   const c = document.createElement("canvas");
-  c.width = 128;
-  c.height = 168;
+  c.width = 256;
+  c.height = 336;
   const g = c.getContext("2d");
-  const grad = g.createLinearGradient(0, 0, 0, 168);
-  grad.addColorStop(0, "#f04444");
-  grad.addColorStop(1, "#a80000");
-  g.fillStyle = grad;
-  g.strokeStyle = "#7a0000";
-  g.lineWidth = 4;
-  // Teardrop body: round head + tapering tail.
+  const cx = 128;
+  const cy = 116;
+  const r = 92;
+  // Teardrop body.
   g.beginPath();
-  g.arc(64, 58, 46, Math.PI * 0.72, Math.PI * 0.28);
-  g.lineTo(64, 156);
+  g.arc(cx, cy, r, Math.PI * 0.75, Math.PI * 0.25, true);
+  g.lineTo(cx, 312);
   g.closePath();
+  const body = g.createRadialGradient(cx - 45, cy - 55, 10, cx, cy + 30, 200);
+  body.addColorStop(0, "#ff7b7b");
+  body.addColorStop(0.45, "#e01515");
+  body.addColorStop(1, "#8a0000");
+  g.fillStyle = body;
   g.fill();
+  g.strokeStyle = "#6e0000";
+  g.lineWidth = 6;
   g.stroke();
-  // Punched hole with a light inner ring, like a real map pin.
+  // Punched see-through hole with a metallic ring.
   g.globalCompositeOperation = "destination-out";
   g.beginPath();
-  g.arc(64, 58, 20, 0, Math.PI * 2);
+  g.arc(cx, cy, 40, 0, Math.PI * 2);
   g.fill();
   g.globalCompositeOperation = "source-over";
-  g.strokeStyle = "rgba(255,255,255,0.85)";
-  g.lineWidth = 5;
+  const ring = g.createLinearGradient(cx - 50, cy - 50, cx + 50, cy + 50);
+  ring.addColorStop(0, "#f4f4f4");
+  ring.addColorStop(0.5, "#9a9a9a");
+  ring.addColorStop(1, "#e0e0e0");
+  g.strokeStyle = ring;
+  g.lineWidth = 12;
   g.beginPath();
-  g.arc(64, 58, 23, 0, Math.PI * 2);
+  g.arc(cx, cy, 46, 0, Math.PI * 2);
   g.stroke();
+  g.strokeStyle = "rgba(0,0,0,0.45)";
+  g.lineWidth = 3;
+  g.beginPath();
+  g.arc(cx, cy, 40, 0, Math.PI * 2);
+  g.stroke();
+  // Specular highlight for the glossy 3D read.
+  g.save();
+  g.translate(cx - 52, cy - 52);
+  g.rotate(-0.5);
+  const spec = g.createRadialGradient(0, 0, 2, 0, 0, 46);
+  spec.addColorStop(0, "rgba(255,255,255,0.75)");
+  spec.addColorStop(1, "rgba(255,255,255,0)");
+  g.fillStyle = spec;
+  g.beginPath();
+  g.ellipse(0, 0, 26, 46, 0, 0, Math.PI * 2);
+  g.fill();
+  g.restore();
   spawnPinImage = c.toDataURL("image/png");
   return spawnPinImage;
 }
@@ -635,9 +661,20 @@ function confirmSpawn() {
       spawnIndicator = null;
     }
 
-    // Spawn-origin indicator: a floating 3D-style map pin billboard hovering
-    // in the sky over the launch point, plus label. Faces the camera from
-    // any angle; culled past ~150 km so it never clutters distant views.
+    // Spawn heading comes from the picker camera — read it BEFORE placing
+    // anything so the pin and the forward offset agree.
+    try {
+      const cam = viewer.camera;
+      if (cam && typeof cam.heading === "number") {
+        state.heading = Cesium.Math.toDegrees(cam.heading);
+      }
+    } catch (e) {
+      state.heading = 0;
+    }
+
+    // Spawn-origin indicator: a BIG glossy 3D map pin floating over the
+    // launch point (ground level), plus label. Faces the camera from any
+    // angle; culled past ~150 km.
     state.spawnName =
       pendingSpawnName ||
       `SPAWN ${Math.abs(state.lat).toFixed(2)}°${state.lat >= 0 ? "N" : "S"} ` +
@@ -645,13 +682,17 @@ function confirmSpawn() {
     state.spawnLon = state.lon;
     state.spawnLat = state.lat;
     try {
+      const carto = Cesium.Cartographic.fromDegrees(state.lon, state.lat);
+      const groundH = viewer.scene.globe.getHeight(carto);
       spawnIndicator = viewer.entities.add({
-        position: Cesium.Cartesian3.fromDegrees(state.lon, state.lat, state.alt),
+        position: Cesium.Cartesian3.fromDegrees(
+          state.lon, state.lat, groundH === undefined ? 0 : groundH
+        ),
         billboard: {
           image: getSpawnPinImage(),
           sizeInMeters: true,
-          width: 220,
-          height: 289,
+          width: 550,
+          height: 721,
           verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
           distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 150000),
           disableDepthTestDistance: Number.POSITIVE_INFINITY,
@@ -662,12 +703,22 @@ function confirmSpawn() {
           style: Cesium.LabelStyle.FILL_AND_OUTLINE,
           outlineWidth: 2,
           verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
-          pixelOffset: new Cesium.Cartesian2(0, -190),
+          pixelOffset: new Cesium.Cartesian2(0, -380),
           disableDepthTestDistance: Number.POSITIVE_INFINITY,
           distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 150000),
         },
       });
     } catch (e) { /* indicator is cosmetic */ }
+
+    // Spawn the plane ~1 km AHEAD of the pin along the spawn heading, so the
+    // big indicator can never cover the screen on arrival.
+    try {
+      const hRad = Cesium.Math.toRadians(state.heading || 0);
+      const R = 6371000;
+      const latR = Cesium.Math.toRadians(state.lat);
+      state.lat += Cesium.Math.toDegrees((1000 * Math.cos(hRad)) / R);
+      state.lon += Cesium.Math.toDegrees((1000 * Math.sin(hRad)) / (R * Math.cos(latR)));
+    } catch (e) { /* offset is cosmetic */ }
 
     const ctrl = viewer.scene.screenSpaceCameraController;
     ctrl.enableRotate = false;
