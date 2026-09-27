@@ -48,6 +48,7 @@ let initialCameraView = null;
 let flightStartTime = 0;
 let lastCrashCheck = 0;
 let minimapUpdateTimer = 0;
+let sunUpdateTimer = 0;
 let geocodeTimer = 0;
 let lastGeocodePos = { lon: 0, lat: 0 };
 let currentRegionName = null;
@@ -209,7 +210,10 @@ function setCameraToPlane(lon, lat, alt, heading, pitch, roll) {
 
 // ── Spawn picker ─────────────────────────────────────────────────────────────
 function enterSpawnPicking(useVignette = true) {
-  if (vignette && useVignette) vignette.style.opacity = "1";
+  if (vignette && useVignette) {
+    vignette.classList.add("solid");
+    vignette.style.opacity = "1";
+  }
   const delay = useVignette ? 500 : 0;
 
   setTimeout(() => {
@@ -242,7 +246,10 @@ function enterSpawnPicking(useVignette = true) {
       destination: Cesium.Cartesian3.fromDegrees(state.lon, state.lat, 15000),
       duration: 2.0,
       complete: () => {
-        if (vignette) vignette.style.opacity = "0";
+        if (vignette) {
+          vignette.style.opacity = "0";
+          vignette.classList.remove("solid");
+        }
       },
     });
   }, delay);
@@ -442,7 +449,10 @@ function setupSpawnPicker() {
 
 // ── Confirm spawn with transition animation ──────────────────────────────────
 function confirmSpawn() {
-  if (vignette) vignette.style.opacity = "1";
+  if (vignette) {
+    vignette.classList.add("solid");
+    vignette.style.opacity = "1";
+  }
 
   setTimeout(() => {
     if (spawnMarker) {
@@ -498,7 +508,10 @@ function confirmSpawn() {
           if (uiContainer) uiContainer.classList.remove("hidden");
           if (threeContainer) threeContainer.classList.remove("hidden");
           currentState = States.FLYING;
-          if (vignette) vignette.style.opacity = "0";
+          if (vignette) {
+            vignette.style.opacity = "0";
+            vignette.classList.remove("solid");
+          }
         }, 300);
       },
     });
@@ -512,7 +525,10 @@ function confirmSpawn() {
       if (uiContainer) uiContainer.classList.remove("hidden");
       if (threeContainer) threeContainer.classList.remove("hidden");
       currentState = States.FLYING;
-      if (vignette) vignette.style.opacity = "0";
+      if (vignette) {
+        vignette.style.opacity = "0";
+        vignette.classList.remove("solid");
+      }
     }, 4000);
   }, 500);
 }
@@ -672,6 +688,7 @@ function animate() {
       update(dt);
     }
 
+    state.isFlying = currentState === States.FLYING;
     if (hud) hud.update(state, now);
     audio.update({ throttle: state.throttle, speed: state.speed });
 
@@ -679,6 +696,16 @@ function animate() {
     if (minimapUpdateTimer > 0.1) {
       minimapUpdateTimer = 0;
       hud.updateMinimap(state);
+    }
+
+    // Permanent daytime: re-pin the sun high at the aircraft's position
+    // twice a second so flying across the globe never leaves you in the dark.
+    sunUpdateTimer += dt;
+    if (sunUpdateTimer > 0.5) {
+      sunUpdateTimer = 0;
+      try {
+        setSunForTime(viewer, 12, state.lat, state.lon);
+      } catch (e) { /* sun is cosmetic; never break the frame */ }
     }
 
     // Render the plane overlay. The Three.js camera stays at the origin with

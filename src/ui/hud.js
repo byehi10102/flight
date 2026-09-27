@@ -188,9 +188,9 @@ export class Hud {
     this.smoothedThrottle += ((state.throttle || 0) - this.smoothedThrottle) * (lerpFactor * 0.4);
     this.smoothedYaw += ((state.yaw || 0) - this.smoothedYaw) * lerpFactor;
 
-    // ── Boost vignette ──
+    // ── Boost vignette (flight only; transitions own the solid fade) ──
     const isBoosting = state.isBoosting || false;
-    if (this.vignette) {
+    if (this.vignette && state.isFlying) {
       this.vignette.style.opacity = isBoosting ? "1" : "0";
     }
 
@@ -305,11 +305,12 @@ export class Hud {
     }
 
     // ── Horizon follows smoothed attitude ──
+    // The pitch ladder lives in its own bottom-right panel (out of the
+    // center view); roll rotates the panel, pitch slides it vertically.
     const pitchLines = document.getElementById("pitch-lines");
-    const horizon = document.getElementById("horizon-container");
-    if (pitchLines && horizon) {
-      horizon.style.transform = `translate(-50%, -50%) rotate(${-this.smoothedRoll}deg)`;
-      pitchLines.style.transform = `translateY(${this.smoothedPitch * 6}px)`;
+    if (pitchLines) {
+      pitchLines.style.transform =
+        `rotate(${-this.smoothedRoll}deg) translateY(${this.smoothedPitch * 2}px)`;
     }
   }
 

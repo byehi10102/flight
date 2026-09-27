@@ -77,7 +77,7 @@ export function applyBaseWorld(viewer) {
   viewer.scene.globe.preloadSiblings = true;
   viewer.scene.globe.loadingDescendantLimit = 20;
 
-  viewer.scene.globe.showWaterEffect = false;
+  viewer.scene.globe.showWaterEffect = true;
   viewer.scene.globe.depthTestAgainstTerrain = true;
   viewer.scene.globe.enableLighting = true;
   viewer.scene.globe.atmosphereLightIntensity = 10;
