@@ -24,10 +24,10 @@ let currentState = States.MENU;
 
 // Flight speeds are MPH throughout (500 cruise, 5000 max on W, 10000 on
 // boost); world movement needs m/s. WORLD_SPEED_SCALE is the arcade lever:
-// HUD still shows true MPH, but the jet covers tiles 1.75x faster so 5k/10k
+// HUD still shows true MPH, but the jet covers tiles 1.8x faster so 5k/10k
 // feel like they should.
 const MPH_TO_MPS = 0.44704;
-const WORLD_SPEED_SCALE = 1.75;
+const WORLD_SPEED_SCALE = 1.8;
 
 const state = {
   lon: -117.9143,
@@ -984,6 +984,21 @@ function confirmSpawn() {
 
     currentState = States.TRANSITIONING;
 
+    // Tile warm-up: at 1.8x arcade speed the jet outruns fresh tiles, so
+    // prime the terrain cache in a ~12 km box around the spawn plus the
+    // flight-path ahead while the pull-up plays. High-detail imagery then
+    // streams during the flight instead of after arrival.
+    try {
+      const pts = [];
+      for (let dy = -5; dy <= 5; dy++) {
+        for (let dx = -5; dx <= 5; dx++) {
+          pts.push([state.lat + dy * 0.01, state.lon + dx * 0.01]);
+        }
+      }
+      groundSampler.seed(pts).catch(() => {});
+      viewer.scene.requestRender();
+    } catch (e) { /* warm-up is best-effort */ }
+
     // Spawn flight (ref-flight style, two phases): pull up high first so
     // confirming always plays the dive-down-onto-the-spawn swoop, then drop
     // onto the spawn point in the plane's own attitude. Both legs scale with
@@ -1029,6 +1044,33 @@ function confirmSpawn() {
         },
       });
     };
+    // Hold-for-tiles: perch above the spawn until the globe reports its
+    // tiles loaded (or 2.5 s pass), so the dive lands on high-detail
+    // terrain instead of soft placeholders that sharpen mid-flight.
+    const waitForTilesThenDive = () => {
+      const start = performance.now();
+      const budgetMs = 2500;
+      if (loadingIndicator && loadingText) {
+        loadingText.textContent = "Loading high-detail terrain...";
+        loadingIndicator.classList.remove("hidden");
+      }
+      const poll = () => {
+        if (gen !== transitionGen) return;
+        if (currentState !== States.TRANSITIONING) return;
+        let ready = false;
+        try {
+          ready = viewer.scene.globe.tilesLoaded === true;
+        } catch (e) { ready = true; }
+        if (ready || performance.now() - start > budgetMs) {
+          if (loadingIndicator) loadingIndicator.classList.add("hidden");
+          diveToSpawn();
+        } else {
+          try { viewer.scene.requestRender(); } catch (e) { /* cosmetic */ }
+          setTimeout(poll, 150);
+        }
+      };
+      poll();
+    };
     viewer.camera.flyTo({
       destination: Cesium.Cartesian3.fromDegrees(
         state.lon, state.lat, Math.max(startH, state.alt + 6000)
@@ -1036,13 +1078,14 @@ function confirmSpawn() {
       duration: phase1dur,
       easingFunction: Cesium.EasingFunction.QUADRATIC_IN_OUT,
       complete: () => {
-        if (currentState === States.TRANSITIONING) diveToSpawn();
+        if (currentState === States.TRANSITIONING) waitForTilesThenDive();
       },
     });
 
     // Safety net: a camera flight's complete callback can be skipped if the
     // animation is interrupted. Silent backstop only — sized just past the
-    // scaled flight above, so it never visibly cuts a healthy transition.
+    // scaled flight plus the tile hold above, so it never visibly cuts a
+    // healthy transition.
     setTimeout(() => {
       if (gen !== transitionGen) return;
       if (currentState !== States.TRANSITIONING) return;
@@ -1059,7 +1102,7 @@ function confirmSpawn() {
         vignette.style.opacity = "0";
         vignette.classList.remove("solid");
       }
-    }, Math.round((phase1dur + phase2dur + 2.0) * 1000));
+    }, Math.round((phase1dur + phase2dur + 2.0 + 2.5) * 1000));
   }, 500);
 }
 
