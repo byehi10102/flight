@@ -2,8 +2,8 @@
  * HUD — ported from dimartarmizi/web-flight-simulator src/ui/hud.js
  * (flight-display parts only: horizon + pitch ladder, compass tape,
  * speed/alt/heading/coords, region + pull-up warnings, tactical minimap,
- * UI tilt/shake). Weapon/NPC systems omitted — this repo has no weapon or
- * NPC systems, so those calls are guarded out. The tactical minimap pairs a
+ * weapon readout, UI tilt/shake). NPC/lock systems omitted — this repo has
+ * no NPC systems, so lock calls are guarded out. The tactical minimap pairs a
  * live Cesium top-down view (like ref-flight) with the canvas overlay.
  *
  * Public API kept compatible with src/main.js:
@@ -28,6 +28,11 @@ export class Hud {
     this.statusEl = document.getElementById("hud-status");
     this.boostFill = document.getElementById("boost-fill");
     this.boostLabel = document.getElementById("boost-label");
+    this.weaponBar = null;
+    this.weaponName = null;
+    this.weaponAmmo = null;
+    this.weaponHeat = null;
+    this.weaponFlares = null;
     this.uiContainer = document.getElementById("uiContainer");
     this.vignette = document.getElementById("transition-vignette");
 
@@ -54,6 +59,51 @@ export class Hud {
 
     this.createHorizon();
     this.createCompass();
+    this.createWeaponBar();
+  }
+
+  // ── Weapon readout: active weapon + ammo/heat + flare count ──
+  createWeaponBar() {
+    if (document.getElementById("weapon-bar")) return;
+    const ui = document.getElementById("uiContainer");
+    if (!ui) return;
+    const bar = document.createElement("div");
+    bar.id = "weapon-bar";
+    bar.innerHTML =
+      '<span id="weapon-name">M61A1</span>' +
+      '<span id="weapon-ammo">INF</span>' +
+      '<div id="weapon-heat"><div id="weapon-heat-fill"></div></div>' +
+      '<span id="weapon-flares">FLR 30</span>';
+    ui.appendChild(bar);
+    this.weaponBar = bar;
+    this.weaponName = bar.querySelector("#weapon-name");
+    this.weaponAmmo = bar.querySelector("#weapon-ammo");
+    this.weaponHeat = bar.querySelector("#weapon-heat-fill");
+    this.weaponFlares = bar.querySelector("#weapon-flares");
+  }
+
+  updateWeapons(ws) {
+    if (!this.weaponBar || !ws) return;
+    const cur = ws.getCurrentWeapon ? ws.getCurrentWeapon() : null;
+    if (!cur) return;
+    if (this.weaponName) this.weaponName.textContent = cur.id === "gun" ? "M61A1" : "AIM-9";
+    if (this.weaponAmmo) {
+      if (cur.id === "gun" && ws.isGunOverheated) {
+        this.weaponAmmo.textContent = "OVERHEAT";
+      } else if (cur.ammo === Infinity) {
+        this.weaponAmmo.textContent = "INF";
+      } else {
+        this.weaponAmmo.textContent = String(cur.ammo).padStart(2, "0");
+      }
+    }
+    if (this.weaponHeat) {
+      this.weaponHeat.style.width = `${Math.round((ws.gunHeat || 0) * 100)}%`;
+    }
+    if (this.weaponFlares) {
+      this.weaponFlares.textContent = `FLR ${ws.flareWeapon ? ws.flareWeapon.ammo : 0}`;
+    }
+    const warn = (ws.emptyWarningTimers && (ws.emptyWarningTimers[cur.id] > 0)) || (cur.id === "gun" && ws.isGunOverheated);
+    this.weaponBar.classList.toggle("overheated", !!warn);
   }
 
   // ── Horizon: crosshair + pitch ladder, rotated/translated by attitude ──
@@ -331,6 +381,9 @@ export class Hud {
         ? "BOOST"
         : charge >= 0.999 ? "BOOST READY" : `CHARGING ${Math.round(charge * 100)}%`;
     }
+
+    // ── Weapon readout ──
+    if (state.weaponSystem) this.updateWeapons(state.weaponSystem);
 
     // ── Horizon follows smoothed attitude ──
     // The pitch ladder lives in its own bottom-right panel (out of the

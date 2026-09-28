@@ -71,7 +71,7 @@ export const CONFIG = {
 
   // ── Boost (afterburner) ───────────────────────────────────────────────────
   boost: {
-    duration: 5.0,
+    duration: 3.0,
     multiplier: 1.5,
     rotations: 2,
   },

@@ -7,6 +7,7 @@ import { GroundSampler } from "./core/ground.js";
 import { PlanePhysics } from "./plane/planePhysics.js";
 import { PlaneController } from "./plane/planeController.js";
 import { PlaneModel } from "./plane/planeModel.js";
+import { WeaponSystem } from "./weapon/weaponSystem.js";
 import { Hud } from "./ui/hud.js";
 import { particles } from "./utils/particles.js";
 import { soundManager } from "./utils/soundManager.js";
@@ -55,6 +56,8 @@ const state = {
 // ── Three.js overlay ─────────────────────────────────────────────────────────
 let scene, camera, renderer, threeContainer;
 let planeModel;
+let weaponSystem = null;
+let lastWeaponIndex = -1;
 let physics = new PlanePhysics();
 let controller = new PlaneController();
 let hud = new Hud();
@@ -222,6 +225,8 @@ function initThree() {
 
   planeModel = new PlaneModel(scene);
   particles.init(scene);
+  weaponSystem = new WeaponSystem(scene);
+  state.weaponSystem = weaponSystem;
   initSounds().catch((err) => console.error("Failed to init sounds:", err));
   planeModel.load().then(() => {
     loadingStatus.model = true;
@@ -256,6 +261,10 @@ async function initSounds() {
     soundManager.loadSound("warning", "/sounds/warning.mp3", false, 0.6),
     soundManager.loadSound("glitch-1", "/sounds/glitch-transition-1.mp3", false, 0.25),
     soundManager.loadSound("glitch-2", "/sounds/glitch-transition-2.mp3", false, 0.25),
+    soundManager.loadSound("weapon-warning", "/sounds/weapon-warning-1.mp3", false, 1.0),
+    soundManager.loadSound("weapon-switch", "/sounds/weapon-switch.mp3", false, 0.75),
+    soundManager.loadSound("missile-fire", "/sounds/missile-firing-1.mp3", false, 0.75),
+    soundManager.loadSound("m61-firing", "/sounds/m61-firing.mp3", true, 0.75),
   ]);
   loadingStatus.audio = true;
   updateLoadingUI();
@@ -1039,6 +1048,11 @@ function confirmSpawn() {
     physics.reset(state.lon, state.lat, state.alt, state.heading, state.pitch, state.roll);
     particles.clear();
     planeModel.reset();
+    if (weaponSystem) {
+      weaponSystem.clear();
+      weaponSystem.resetAmmo();
+    }
+    lastWeaponIndex = -1;
 
     if (spawnInstruction) spawnInstruction.classList.add("hidden");
     if (confirmSpawnBtn) confirmSpawnBtn.classList.add("hidden");
@@ -1201,6 +1215,24 @@ function update(dt) {
   state.yaw = input.yaw;
   state.isBoosting = physicsResult.isBoosting;
   state.boostCharge = physicsResult.boostCharge;
+
+  // ── Weapons (ref-flight: 1/2 select, F/Enter fire, Q toggle, V flares) ──
+  // Overlay-local launch points from the jet's on-screen position.
+  if (weaponSystem && planeModel?.model) {
+    const nosePos = planeModel.model.position.clone();
+    nosePos.z -= 1.2;
+    const tailPos = planeModel.model.position.clone();
+    tailPos.z += 0.8;
+    tailPos.y -= 0.3;
+    if (typeof input.weaponIndex === "number" && input.weaponIndex >= 0 && input.weaponIndex !== lastWeaponIndex) {
+      lastWeaponIndex = input.weaponIndex;
+      weaponSystem.selectWeapon(input.weaponIndex);
+    }
+    if (input.toggleWeapon) weaponSystem.toggleWeapon();
+    if (input.fire) weaponSystem.fire(nosePos);
+    if (input.fireFlare) weaponSystem.fireFlare(tailPos);
+    weaponSystem.update(dt, nosePos, tailPos, input);
+  }
 
   // ── Flight sounds (ref-flight behavior) ──
   if (soundManager.isPlaying("jet-engine")) {

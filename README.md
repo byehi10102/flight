@@ -36,6 +36,9 @@ npm run build      # production bundle in dist/
 | **A** / **D** | Yaw (rudder) |
 | **Space** | Afterburner (needs a full boost meter) |
 | **Mouse drag** | Look around (springs back on release) |
+| **1** / **2** | Select M61A1 cannon / AIM-9 Sidewinder |
+| **F** or **Enter** | Fire active weapon |
+| **V** | Pop flare countermeasures |
 | **M** | Mute / unmute |
 | **Esc** / **P** | Pause / resume in place |
 
@@ -50,7 +53,7 @@ Speeds are **MPH**, shown raw on the HUD:
 
 Physics runs in fixed 1/60 s substeps of real elapsed time, so the jet covers
 true distance at any frame rate (verified identical ground track at 60 fps and
-10 fps). The boost meter drains across one 5 s burn, cuts at zero, recharges
+10 fps). The boost meter drains across one 3 s burn, cuts at zero, recharges
 to full in ~3 s, and only fires on a full meter.
 
 ## HUD
@@ -165,6 +168,13 @@ revert removed the roads overlay, pinch/trackpad zoom buttons and the
 - **Boost meter** — drains across the burn, cuts at zero, recharges in
   ~3 s, fires only when full. (Ref itself has no boost widget; built fresh
   in its visual language and verified by sim.)
+- **Weapons (ref-flight)** — M61A1 cannon (infinite, heats to overheat),
+  AIM-9 Sidewinder ×50 from alternating rails with smoke trails and
+  fuse-out airbursts, MJU-7A flares ×30 in 6-round pulses; `1`/`2` select,
+  `F` fires, `V` pops flares, HUD bar shows weapon/ammo/heat/flares.
+  Missiles dumb-fire straight: ref-flight homes them onto locked NPCs and
+  this repo has no NPCs, so the lock gate is omitted (documented in
+  `src/weapon/weaponSystem.js`).
 - **Sound suite** — all 28 ref samples wired (engine/wind/throttle/boost/
   strain loops, PULL UP, spawn/zoom/crash stingers, UI clicks, pause/mute);
   procedural engine removed.

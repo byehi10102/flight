@@ -570,6 +570,48 @@ html, body {
   box-shadow: 0 0 12px rgba(255, 255, 0, 0.9);
 }
 
+/* Weapon readout (ref-flight weapon panel, compact) */
+#weapon-bar {
+  position: absolute;
+  bottom: 100px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: "Consolas", monospace;
+  font-size: 11px;
+  letter-spacing: 2px;
+  color: #0f0;
+  text-shadow: 0 0 4px rgba(0, 255, 0, 0.5);
+  background: rgba(0, 0, 0, 0.45);
+  border: 1px solid rgba(0, 255, 0, 0.35);
+  border-radius: 5px;
+  padding: 4px 12px;
+  pointer-events: none;
+}
+
+#weapon-bar.overheated {
+  color: #f00;
+  border-color: rgba(255, 0, 0, 0.6);
+  text-shadow: 0 0 4px rgba(255, 0, 0, 0.6);
+}
+
+#weapon-heat {
+  width: 70px;
+  height: 6px;
+  background: rgba(0, 0, 0, 0.6);
+  border: 1px solid rgba(0, 255, 0, 0.4);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+#weapon-heat-fill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, #ffcc00, #ff3300);
+}
+
 /* Minimap (above the corner attitude panel) */
 #minimap-container {
   position: absolute;
