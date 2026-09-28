@@ -2,11 +2,11 @@ import * as THREE from 'three';
 
 export class PlanePhysics {
 	constructor() {
-		// Speeds are MPH: 250 cruises visibly, W tops 1500, boost hits 3000.
+		// Speeds are MPH: 500 cruises fast, W tops 3000, boost hits 6000.
 		// main.js converts to m/s for world movement via MPH_TO_MPS.
-		this.speed = 250;
-		this.maxSpeed = 1500;
-		this.minSpeed = 250;
+		this.speed = 500;
+		this.maxSpeed = 3000;
+		this.minSpeed = 500;
 		this.throttle = 0.5;
 		this.enginePower = 1.2;
 		this.drag = 0.005;
@@ -77,7 +77,7 @@ export class PlanePhysics {
 			targetSpeed = this.maxSpeed * this.boostMultiplier;
 		}
 
-		this.speed += (targetSpeed - this.speed) * dt * (this.isBoosting ? 6 : 2);
+		this.speed += (targetSpeed - this.speed) * dt * (this.isBoosting ? 8 : 3);
 
 		const controlEffectiveness = this.speed > this.minSpeed ? 1 : (this.speed / this.minSpeed);
 
