@@ -8,8 +8,8 @@ import { PlanePhysics } from "./plane/planePhysics.js";
 import { PlaneController } from "./plane/planeController.js";
 import { PlaneModel } from "./plane/planeModel.js";
 import { Hud } from "./ui/hud.js";
-import { EngineAudio } from "./flight/engine.js";
 import { particles } from "./utils/particles.js";
+import { soundManager } from "./utils/soundManager.js";
 import { reverseGeocode, reverseGeocodeDetailed, calculateDistance } from "./utils/geo.js";
 
 const States = {
@@ -55,9 +55,15 @@ let planeModel;
 let physics = new PlanePhysics();
 let controller = new PlaneController();
 let hud = new Hud();
-let audio = new EngineAudio();
 let clock = new THREE.Clock();
 let groundSampler;
+// Sound state (ref-flight suite: engine/wind loops, warnings, UI).
+let lastThrottleLevel = 0;
+let lastBoostSound = false;
+let lastGPWSWarningTime = 0;
+let gpwsActive = false;
+let soundMuted = false;
+const GPWS_COOLDOWN = 1800;
 let spawnMarker = null;
 let spawnIndicator = null;
 let pendingSpawnName = null;
@@ -93,7 +99,7 @@ const locationSearch = document.getElementById("locationSearch");
 const searchResults = document.getElementById("search-results");
 const instructionText = document.getElementById("instruction-text");
 
-const loadingStatus = { model: false, cesium: false, globe: false, terrain: false, failed: false };
+const loadingStatus = { model: false, cesium: false, globe: false, terrain: false, audio: false, failed: false };
 
 function updateLoadingUI() {
   if (!loadingIndicator || !loadingText || !startBtn) return;
@@ -101,11 +107,12 @@ function updateLoadingUI() {
     loadingIndicator.classList.add("hidden");
     return;
   }
-  const isAllLoaded = loadingStatus.model && loadingStatus.cesium && loadingStatus.globe && loadingStatus.terrain;
+  const isAllLoaded = loadingStatus.model && loadingStatus.audio && loadingStatus.cesium && loadingStatus.globe && loadingStatus.terrain;
   if (loadingStatus.failed) {
     loadingText.textContent = "Loading Failed. Please Refresh.";
   } else if (!isAllLoaded) {
     if (!loadingStatus.model) loadingText.textContent = "Loading Aircraft Model...";
+    else if (!loadingStatus.audio) loadingText.textContent = "Loading Audio...";
     else if (!loadingStatus.cesium) loadingText.textContent = "Loading Satellite Imagery...";
     else if (!loadingStatus.globe) loadingText.textContent = "Loading Globe Surface...";
     else if (!loadingStatus.terrain) loadingText.textContent = "Loading Terrain Data...";
@@ -211,6 +218,7 @@ function initThree() {
 
   planeModel = new PlaneModel(scene);
   particles.init(scene);
+  initSounds().catch((err) => console.error("Failed to init sounds:", err));
   planeModel.load().then(() => {
     loadingStatus.model = true;
     updateLoadingUI();
@@ -219,6 +227,54 @@ function initThree() {
     loadingStatus.failed = true;
     updateLoadingUI();
   });
+}
+
+// ── Sound suite (ref-flight samples, /sounds/*.mp3) ──────────────────────────
+async function initSounds() {
+  soundManager.init(camera);
+  await Promise.all([
+    soundManager.loadSound("boost", "/sounds/boost.mp3", false, 0.35),
+    soundManager.loadSound("throttle", "/sounds/throttle.mp3", false, 0.4),
+    soundManager.loadSound("explode", "/sounds/explode.mp3", false, 0.75),
+    soundManager.loadSound("explosion-1", "/sounds/explosion-1.mp3", false, 0.8),
+    soundManager.loadSound("explosion-2", "/sounds/explosion-2.mp3", false, 0.8),
+    soundManager.loadSound("explosion-3", "/sounds/explosion-3.mp3", false, 0.8),
+    soundManager.loadSound("ambient-crash", "/sounds/ambient.mp3", true, 0.5),
+    soundManager.loadSound("jet-engine", "/sounds/jet-engine.mp3", true, 0.5),
+    soundManager.loadSound("spawn", "/sounds/spawn.mp3", false, 0.5),
+    soundManager.loadSound("roll", "/sounds/roll.mp3", true, 0.75),
+    soundManager.loadSound("pitch", "/sounds/pitch.mp3", true, 0.75),
+    soundManager.loadSound("button-click", "/sounds/button-click.mp3", false, 1.0),
+    soundManager.loadSound("button-hover", "/sounds/button-hover.mp3", false, 0.25),
+    soundManager.loadSound("zoom-in", "/sounds/zoom-in.mp3", false, 0.5),
+    soundManager.loadSound("wind", "/sounds/wind.mp3", true, 0.25),
+    soundManager.loadSound("terrain-pull-up", "/sounds/terrain-pull-up.mp3", false, 0.9),
+    soundManager.loadSound("warning", "/sounds/warning.mp3", false, 0.6),
+    soundManager.loadSound("glitch-1", "/sounds/glitch-transition-1.mp3", false, 0.25),
+    soundManager.loadSound("glitch-2", "/sounds/glitch-transition-2.mp3", false, 0.25),
+  ]);
+  loadingStatus.audio = true;
+  updateLoadingUI();
+  setupButtonSounds();
+}
+
+function stopAllFlyingSounds(fadeOut = 0.5) {
+  soundManager.stopAll(fadeOut);
+}
+
+function setupButtonSounds() {
+  document.addEventListener("mouseover", (e) => {
+    const target = e.target.closest("button, .menu-btn");
+    if (target && !target._hovered) {
+      soundManager.play("button-hover");
+      target._hovered = true;
+      target.addEventListener("mouseleave", () => { target._hovered = false; }, { once: true });
+    }
+  }, true);
+  document.addEventListener("click", (e) => {
+    const target = e.target.closest("button, .menu-btn");
+    if (target) soundManager.play("button-click");
+  }, true);
 }
 
 // ── Cesium camera: positioned at the plane, looking forward ────────────────
@@ -238,6 +294,9 @@ function setCameraToPlane(lon, lat, alt, heading, pitch, roll) {
 function enterSpawnPicking(useVignette = true) {
   transitionGen++;
   const gen = transitionGen;
+  stopAllFlyingSounds(0.3);
+  soundManager.play("zoom-in");
+  soundManager.play("wind", 1.0);
   try {
     viewer.camera.cancelFlight();
   } catch (e) { /* no flight in progress */ }
@@ -297,6 +356,7 @@ function enterSpawnPicking(useVignette = true) {
 
 function exitSpawnPicking() {
   transitionGen++;
+  stopAllFlyingSounds(0.3);
   try {
     viewer.camera.cancelFlight();
   } catch (e) { /* no flight in progress */ }
@@ -726,11 +786,14 @@ function confirmSpawn() {
   // itself must stay visible while the camera dives onto the city.
   transitionGen++;
   const gen = transitionGen;
+  soundManager.resumeAll();
+  stopAllFlyingSounds(0.3);
   try {
     viewer.camera.cancelFlight();
   } catch (e) { /* no flight in progress */ }
   setStreetsVisible(false);
   clearNotablePlaces();
+  soundManager.play("spawn");
   if (vignette) {
     vignette.classList.remove("solid");
     vignette.style.opacity = "1";
@@ -865,6 +928,8 @@ function confirmSpawn() {
             currentState = States.FLYING;
             hud.resetTime();
             hud.resetScore();
+            soundManager.play("jet-engine", 1.0);
+            soundManager.play("wind", 1.0);
             if (state.spawnName) hud.showRegion(`SPAWN · ${state.spawnName}`);
           try {
             getMiniViewer()?.resize();
@@ -926,6 +991,29 @@ function update(dt) {
   state.yaw = input.yaw;
   state.isBoosting = physicsResult.isBoosting;
   state.boostCharge = physicsResult.boostCharge;
+
+  // ── Flight sounds (ref-flight behavior) ──
+  if (soundManager.isPlaying("jet-engine")) {
+    const speedFactor = Math.max(0, Math.min(1, (state.speed - 500) / 5500));
+    soundManager.setVolume("jet-engine", 0.5 + speedFactor * 0.1);
+    soundManager.setVolume("wind", 0.1 + speedFactor * 0.35);
+  }
+  if (state.isBoosting && !lastBoostSound) soundManager.play("boost");
+  lastBoostSound = state.isBoosting;
+  if (state.throttle > lastThrottleLevel + 0.01 && !soundManager.isPlaying("throttle")) {
+    soundManager.play("throttle");
+  }
+  lastThrottleLevel = state.throttle;
+  if (Math.abs(input.pitch) > 0.5) {
+    if (!soundManager.isPlaying("pitch")) soundManager.play("pitch", 0.1);
+  } else if (soundManager.isPlaying("pitch")) {
+    soundManager.stop("pitch", 0.1);
+  }
+  if (Math.abs(input.roll) > 0.5 || Math.abs(input.yaw) > 0.5) {
+    if (!soundManager.isPlaying("roll")) soundManager.play("roll", 0.1);
+  } else if (soundManager.isPlaying("roll")) {
+    soundManager.stop("roll", 0.1);
+  }
   state.stallFactor = 0;
   state.onGround = false;
 
@@ -1063,6 +1151,19 @@ function checkGPWS() {
     }
   }
   hud.setPullUpWarning(showWarning);
+
+  // Audible "PULL UP" with cooldown (ref-flight GPWS behavior).
+  if (showWarning) {
+    const now = Date.now();
+    if (!gpwsActive || (now - lastGPWSWarningTime > GPWS_COOLDOWN && !soundManager.isPlaying("terrain-pull-up"))) {
+      soundManager.play("terrain-pull-up");
+      lastGPWSWarningTime = now;
+    }
+    gpwsActive = true;
+  } else if (gpwsActive) {
+    soundManager.stop("terrain-pull-up", 0.1);
+    gpwsActive = false;
+  }
 }
 
 function checkCrash() {
@@ -1074,12 +1175,22 @@ function checkCrash() {
 
   const cartographic = Cesium.Cartographic.fromDegrees(state.lon, state.lat);
   const terrainHeight = viewer.scene.globe.getHeight(cartographic);
-  if (terrainHeight !== undefined && state.alt <= terrainHeight + 5) {
+  const ground = groundSampler.get(state.lat, state.lon, terrainHeight ?? state.alt);
+  if (state.alt <= ground + 5) {
+    // Crash: snap onto the ground so the readout is true zero (or the
+    // mountain's height in hill ranges) instead of a stale few feet.
+    state.alt = ground;
+    state.agl = 0;
     // Crash: detonate at the plane's on-screen position (ref-flight style
     // explosion), hide the wreck, and hold the fireball on screen briefly
     // before dropping to the pause menu.
     currentState = States.PAUSED;
     const gen = transitionGen;
+    stopAllFlyingSounds(0.1);
+    setTimeout(() => {
+      soundManager.play("explode");
+      soundManager.play("ambient-crash");
+    }, 50);
     try {
       // Only detonate once per wreck (resume-after-crash re-triggers this
       // check while still inside the terrain).
@@ -1146,7 +1257,6 @@ function animate() {
 
     state.isFlying = currentState === States.FLYING;
     if (hud) hud.update(state, now);
-    audio.update({ throttle: state.throttle, speed: state.speed });
 
     minimapUpdateTimer += dt;
     if (minimapUpdateTimer > 0.1) {
@@ -1250,26 +1360,29 @@ document.getElementById("restartBtn").addEventListener("click", () => {
   enterSpawnPicking(true);
 });
 
-let audioStarted = false;
-function startAudioOnce() {
-  if (!audioStarted) {
-    audioStarted = true;
-    audio.start();
-  }
-}
-window.addEventListener("keydown", startAudioOnce, { once: true });
-window.addEventListener("mousedown", startAudioOnce, { once: true });
+// Web Audio starts suspended until a user gesture — resume on first input.
+const resumeAudio = () => {
+  try {
+    if (soundManager.listener.context.state === "suspended") {
+      soundManager.listener.context.resume();
+    }
+  } catch (e) { /* audio not ready */ }
+};
+window.addEventListener("mousedown", resumeAudio);
+window.addEventListener("keydown", resumeAudio);
 
 window.addEventListener("keydown", (e) => {
   const key = e.key.toLowerCase();
   if (key === "escape" || key === "p") {
     if (currentState === States.FLYING) {
       currentState = States.PAUSED;
+      soundManager.pauseAll();
       if (uiContainer) uiContainer.classList.add("hidden");
       if (threeContainer) threeContainer.classList.add("hidden");
       if (pauseMenu) pauseMenu.classList.remove("hidden");
     } else if (currentState === States.PAUSED) {
       currentState = States.FLYING;
+      soundManager.resumeAll();
       if (pauseMenu) pauseMenu.classList.add("hidden");
       if (uiContainer) uiContainer.classList.remove("hidden");
       if (threeContainer) threeContainer.classList.remove("hidden");
@@ -1278,7 +1391,10 @@ window.addEventListener("keydown", (e) => {
     }
   }
   if (key === "m" && currentState === States.FLYING) {
-    audio.toggle();
+    soundMuted = !soundMuted;
+    try {
+      soundManager.listener.setMasterVolume(soundMuted ? 0.0 : 1.0);
+    } catch (e) { /* audio not ready */ }
   }
 });
 
