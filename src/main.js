@@ -417,32 +417,102 @@ function setupSearch() {
   });
 }
 
-async function performSearch(query) {
+let searchSeq = 0;
+
+async function fetchJsonOk(url, timeoutMs = 8000) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
+    const res = await fetch(url, { signal: ctrl.signal });
+    if (!res.ok) {
+      const err = new Error(`HTTP ${res.status}`);
+      err.status = res.status;
+      throw err;
+    }
+    return await res.json();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function photonToItems(data) {
+  const feats = data?.features || [];
+  return feats.slice(0, 5).map((f) => {
+    const p = f.properties || {};
+    const coords = f.geometry?.coordinates || [0, 0];
+    const bits = [p.name, p.city || p.town || p.village, p.state, p.country].filter(Boolean);
+    return {
+      display_name: bits.join(", ") || "Unknown place",
+      lon: String(coords[0]),
+      lat: String(coords[1]),
+    };
+  });
+}
+
+async function performSearch(query) {
+  const seq = ++searchSeq;
+  const stillCurrent = () => seq === searchSeq && currentState === States.PICK_SPAWN;
+  const showStatus = (text) => {
+    if (!stillCurrent()) return;
     searchResults.style.display = "block";
-    searchResults.innerHTML = '<div class="search-result-item">Searching...</div>';
-
-    const response = await fetch(
-      `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=5`
-    );
-    const data = await response.json();
-
+    searchResults.innerHTML = `<div class="search-result-item search-status">${text}</div>`;
+  };
+  const renderItems = (items) => {
+    if (!stillCurrent()) return;
     searchResults.innerHTML = "";
-    if (data.length === 0) {
-      searchResults.innerHTML = '<div class="search-result-item">No results found</div>';
+    if (!items.length) {
+      searchResults.innerHTML = '<div class="search-result-item">No results found — try a bigger nearby city</div>';
       return;
     }
-
-    data.forEach((item) => {
+    items.forEach((item) => {
       const div = document.createElement("div");
       div.className = "search-result-item";
       div.textContent = item.display_name;
       div.addEventListener("click", () => selectSearchResult(parseFloat(item.lon), parseFloat(item.lat), item.display_name));
       searchResults.appendChild(div);
     });
+    searchResults.style.display = "block";
+  };
+
+  try {
+    showStatus("Searching…");
+    const url =
+      `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=5`;
+    let data;
+    try {
+      data = await fetchJsonOk(url);
+    } catch (err) {
+      // Nominatim throttles aggressively (429/403 with no JSON body): one
+      // polite retry, then the keyless Photon fallback for the same query.
+      if (err?.status === 429 || err?.status === 403) {
+        showStatus("Map server is busy — retrying…");
+        await new Promise((r) => setTimeout(r, 1200));
+        if (!stillCurrent()) return;
+        try {
+          data = await fetchJsonOk(url);
+        } catch (retryErr) {
+          showStatus("Trying backup map server…");
+          const photon = await fetchJsonOk(
+            `https://photon.komoot.io/api/?q=${encodeURIComponent(query)}&limit=5`
+          );
+          renderItems(photonToItems(photon));
+          return;
+        }
+      } else {
+        throw err;
+      }
+    }
+    renderItems(Array.isArray(data) ? data : []);
   } catch (error) {
     console.error("Search error:", error);
-    searchResults.innerHTML = '<div class="search-result-item">Search unavailable</div>';
+    // Never wipe good results for a failed keystroke: if the list already
+    // holds places, leave it; otherwise say so plainly.
+    if (!stillCurrent()) return;
+    const hasPlaces = searchResults.querySelector(".search-result-item:not(.search-status)");
+    if (!hasPlaces) {
+      searchResults.style.display = "block";
+      searchResults.innerHTML = '<div class="search-result-item">Search is offline right now — check connection and retry</div>';
+    }
   }
 }
 
@@ -553,24 +623,32 @@ function setupSpawnPicker() {
     }
   }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
 
-  // Guaranteed zoom (wheel/pinch can be finicky across browsers): +/- buttons.
-  const zoomStep = (dir) => {
-    try {
-      if (currentState !== States.PICK_SPAWN) return;
-      const h = viewer.camera.positionCartographic?.height || 10000;
-      const amt = Math.max(100, h * 0.35);
-      if (dir > 0) viewer.camera.zoomOut(amt);
-      else viewer.camera.zoomIn(amt);
-    } catch (e) { /* cosmetic */ }
-  };
+  // Double-click dives toward the clicked point (third zoom path).
+  handler.setInputAction((click) => {
+    if (currentState !== States.PICK_SPAWN) return;
+    pickerZoom(-1);
+  }, Cesium.ScreenSpaceEventType.LEFT_DOUBLE_CLICK);
+
   document.getElementById("zoomInBtn")?.addEventListener("click", (e) => {
     e.stopPropagation();
-    zoomStep(-1);
+    pickerZoom(-1);
   });
   document.getElementById("zoomOutBtn")?.addEventListener("click", (e) => {
     e.stopPropagation();
-    zoomStep(1);
+    pickerZoom(1);
   });
+}
+
+// Module-level picker zoom shared by buttons, double-click and keyboard.
+// Amount scales with height: street detail up close, regions far out.
+function pickerZoom(dir) {
+  try {
+    if (currentState !== States.PICK_SPAWN) return;
+    const h = viewer.camera.positionCartographic?.height || 10000;
+    const amt = Math.max(100, h * 0.35);
+    if (dir > 0) viewer.camera.zoomOut(amt);
+    else viewer.camera.zoomIn(amt);
+  } catch (e) { /* cosmetic */ }
 }
 
 // ── Spawn selection shared by map clicks, landmark pins and search ──────────
@@ -905,7 +983,13 @@ function confirmSpawn() {
 
     // Spawn flight (ref-flight style, two phases): pull up high first so
     // confirming always plays the dive-down-onto-the-spawn swoop, then drop
-    // onto the spawn point in the plane's own attitude.
+    // onto the spawn point in the plane's own attitude. Both legs scale with
+    // the actual drop distance, so a globe-view descent and a 2 km hop each
+    // play smooth — no violent plunge, no instant pop.
+    const startH = viewer.camera.positionCartographic?.height || state.alt + 6000;
+    const drop = Math.max(0, startH - state.alt);
+    const phase1dur = Math.min(2.0, Math.max(0.6, 0.4 + drop / 20000));
+    const phase2dur = Math.min(4.5, Math.max(1.8, 1.2 + drop / 6000));
     const diveToSpawn = () => {
       // The airplane fades in as the dive begins so it appears mid-flight.
       if (threeContainer) threeContainer.classList.remove("hidden");
@@ -916,7 +1000,7 @@ function confirmSpawn() {
           pitch: Cesium.Math.toRadians(state.pitch),
           roll: Cesium.Math.toRadians(state.roll),
         },
-        duration: 2.4,
+        duration: phase2dur,
         easingFunction: Cesium.EasingFunction.QUADRATIC_IN_OUT,
         complete: () => {
           if (gen !== transitionGen) return;
@@ -944,9 +1028,9 @@ function confirmSpawn() {
     };
     viewer.camera.flyTo({
       destination: Cesium.Cartesian3.fromDegrees(
-        state.lon, state.lat, Math.max(viewer.camera.positionCartographic?.height || 0, state.alt + 6000)
+        state.lon, state.lat, Math.max(startH, state.alt + 6000)
       ),
-      duration: 1.0,
+      duration: phase1dur,
       easingFunction: Cesium.EasingFunction.QUADRATIC_IN_OUT,
       complete: () => {
         if (currentState === States.TRANSITIONING) diveToSpawn();
@@ -954,8 +1038,8 @@ function confirmSpawn() {
     });
 
     // Safety net: a camera flight's complete callback can be skipped if the
-    // animation is interrupted, which would leave the player stranded behind
-    // the transition vignette. Force FLYING after the two-phase flight.
+    // animation is interrupted. Silent backstop only — sized just past the
+    // scaled flight above, so it never visibly cuts a healthy transition.
     setTimeout(() => {
       if (gen !== transitionGen) return;
       if (currentState !== States.TRANSITIONING) return;
@@ -972,7 +1056,7 @@ function confirmSpawn() {
         vignette.style.opacity = "0";
         vignette.classList.remove("solid");
       }
-    }, 6500);
+    }, Math.round((phase1dur + phase2dur + 2.0) * 1000));
   }, 500);
 }
 
@@ -1396,6 +1480,9 @@ window.addEventListener("keydown", (e) => {
       soundManager.listener.setMasterVolume(soundMuted ? 0.0 : 1.0);
     } catch (e) { /* audio not ready */ }
   }
+  // Picker zoom keys (+/-/=: location search input stops propagation).
+  if (currentState === States.PICK_SPAWN && (key === "+" || key === "=")) pickerZoom(-1);
+  if (currentState === States.PICK_SPAWN && (key === "-" || key === "_")) pickerZoom(1);
 });
 
 window.addEventListener("resize", () => {
