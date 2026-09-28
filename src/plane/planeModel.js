@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { CONFIG } from "../core/config.js";
 import { JetFlame } from "./jetFlame.js";
+import { WingVapor } from "./wingVapor.js";
 
 // The Three.js camera stays at the origin looking down -Z.
 // The plane sits at (0, -0.8, -2.75) — in front of the camera, slightly
@@ -27,6 +28,7 @@ export class PlaneModel {
     this.boostRollDirection = 1;
     this.lastIsBoosting = false;
     this.jetFlames = [];
+    this.vapor = null;
     this.prevSpeed = 0;
   }
 
@@ -69,6 +71,12 @@ export class PlaneModel {
           this.model.traverse((child) => {
             child.layers.set(1);
           });
+
+          // Wingtip vapor, sized from the measured airframe.
+          try {
+            const size = box.getSize(new THREE.Vector3());
+            this.vapor = new WingVapor(this.model, size);
+          } catch (e) { /* vapor is cosmetic */ }
 
           this.ready = true;
           resolve(this.model);
@@ -183,6 +191,18 @@ export class PlaneModel {
         flame.update(throttle, isBoosting, time, dt);
       }
     }
+
+    // Wingtip vapor: strongest in hard maneuvers, present at high speed,
+    // hard-on in boost. Frozen while dragging so look-around stays clean.
+    if (this.vapor) {
+      const speedFactor = Math.max(0, Math.min(1, ((state.speed ?? 500) - 500) / 9500));
+      const maneuver = Math.min(1,
+        Math.abs(input.roll || 0) + Math.abs(input.pitch || 0) * 0.7 + Math.abs(input.yaw || 0) * 0.5);
+      const target = input.isDragging
+        ? 0
+        : Math.min(1, maneuver * 0.9 + speedFactor * 0.55 + (isBoosting ? 0.45 : 0));
+      this.vapor.update(dt, target, time);
+    }
   }
 
   reset() {
@@ -192,6 +212,7 @@ export class PlaneModel {
     this.currentBoostZOffset = 0;
     this.lastIsBoosting = false;
     this.prevSpeed = 0;
+    if (this.vapor) this.vapor.reset();
     if (this.model) this.model.visible = true;
   }
 }

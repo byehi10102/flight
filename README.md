@@ -51,7 +51,7 @@ Speeds are **MPH**, shown raw on the HUD:
 Physics runs in fixed 1/60 s substeps of real elapsed time, so the jet covers
 true distance at any frame rate (verified identical ground track at 60 fps and
 10 fps). The boost meter drains across one 5 s burn, cuts at zero, recharges
-to full in ~1.5 s, and only fires on a full meter.
+to full in ~3 s, and only fires on a full meter.
 
 ## HUD
 
@@ -163,7 +163,7 @@ revert removed the roads overlay, pinch/trackpad zoom buttons and the
 - **Minimap accuracy pass** — meter-true grid, one shared smoothed heading
   for map + overlay, per-frame map tracking, ref zoom model, live-FOV wedge.
 - **Boost meter** — drains across the burn, cuts at zero, recharges in
-  ~1.5 s, fires only when full. (Ref itself has no boost widget; built fresh
+  ~3 s, fires only when full. (Ref itself has no boost widget; built fresh
   in its visual language and verified by sim.)
 - **Sound suite** — all 28 ref samples wired (engine/wind/throttle/boost/
   strain loops, PULL UP, spawn/zoom/crash stingers, UI clicks, pause/mute);

@@ -27,7 +27,7 @@ export class PlanePhysics {
 		this.boostMultiplier = 2.0;
 		this.boostRotations = 2;
 		this.boostPressed = false;
-		// Boost meter 0..1: drains across one boost, refills in ~1.5s, and a
+		// Boost meter 0..1: drains across one boost, refills in ~3s, and a
 		// new boost needs a full meter.
 		this.boostCharge = 1;
 
@@ -83,7 +83,7 @@ export class PlanePhysics {
 			targetSpeed = this.maxSpeed * this.boostMultiplier;
 			this.boostCharge = Math.max(0, this.boostCharge - dt / this.boostDuration);
 		} else {
-			this.boostCharge = Math.min(1, this.boostCharge + dt / 1.5);
+			this.boostCharge = Math.min(1, this.boostCharge + dt / 3.0);
 		}
 
 		this.speed += (targetSpeed - this.speed) * dt * (this.isBoosting ? 8 : 3);
