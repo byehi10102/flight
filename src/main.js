@@ -76,6 +76,10 @@ let pendingSpawnName = null;
 let initialCameraView = null;
 let flightStartTime = 0;
 let lastCrashCheck = 0;
+let lastCrashPos = null;
+// True while the 4 s pre-spawn loading sign owns the loading indicator, so
+// the tile-progress handler doesn't overwrite or hide it mid-wait.
+let spawnPending = false;
 let minimapUpdateTimer = 0;
 let sunUpdateTimer = 0;
 // Fixed-step sim: physics/movement advance in 1/60s slices of REAL elapsed
@@ -159,7 +163,7 @@ const unregisterGlobeTracker = viewer.scene.postRender.addEventListener(() => {
 });
 
 viewer.scene.globe.tileLoadProgressEvent.addEventListener((queueLength) => {
-  if (loadingIndicator && loadingText && currentState === States.PICK_SPAWN) {
+  if (loadingIndicator && loadingText && currentState === States.PICK_SPAWN && !spawnPending) {
     if (queueLength > 0) {
       loadingText.textContent = "Loading Terrain...";
       loadingIndicator.classList.remove("hidden");
@@ -300,6 +304,7 @@ function setCameraToPlane(lon, lat, alt, heading, pitch, roll) {
 // ── Spawn picker ─────────────────────────────────────────────────────────────
 function enterSpawnPicking(useVignette = true) {
   transitionGen++;
+  spawnPending = false;
   const gen = transitionGen;
   stopAllFlyingSounds(0.3);
   soundManager.play("zoom-in");
@@ -944,8 +949,13 @@ function confirmSpawn() {
     loadingText.textContent = "Loading...";
     loadingIndicator.classList.remove("hidden");
   }
+  // Own the 4 s wait: no double-clicks, and the tile-progress handler
+  // leaves the sign alone until the flight setup takes over.
+  spawnPending = true;
+  if (confirmSpawnBtn) confirmSpawnBtn.classList.add("hidden");
 
   setTimeout(() => {
+    spawnPending = false;
     if (gen !== transitionGen) return;
     if (spawnMarker) {
       viewer.entities.remove(spawnMarker);
@@ -1035,6 +1045,7 @@ function confirmSpawn() {
 
     controller.reset();
     state.minimapHeading = state.heading;
+    lastCrashPos = null;
     physics = new PlanePhysics();
     physics.reset(state.lon, state.lat, state.alt, state.heading, state.pitch, state.roll);
     particles.clear();
@@ -1336,7 +1347,7 @@ function update(dt) {
   try {
     const frustum = viewer.camera.frustum;
     if (frustum && typeof frustum.fovy === "number") {
-      const baseFov = Math.PI / 3;
+      const baseFov = CONFIG.camera.fov * Math.PI / 180;
       const speedFactor = Math.max(0, Math.min(1, (state.speed - 500) / 9500));
       const targetFov = baseFov * (1 + speedFactor * 0.18 + (physicsResult.isBoosting ? 0.14 : 0));
       const cur = frustum.fovy;
@@ -1391,10 +1402,11 @@ function movePosition(lon, lat, alt, heading, pitch, distance) {
 function checkGPWS() {
   if (currentState !== States.FLYING) return;
   const cartographic = Cesium.Cartographic.fromDegrees(state.lon, state.lat);
-  const terrainHeight = viewer.scene.globe.getHeight(cartographic);
-  if (terrainHeight === undefined) return;
-
-  const agl = state.alt - terrainHeight;
+  const resident = viewer.scene.globe.getHeight(cartographic);
+  if (resident === undefined) return;
+  // Sampled elevation like the AGL readout — the coarse resident tile alone
+  // can be kilometers off over ridges and would mute the warning.
+  const agl = state.alt - groundSampler.get(state.lat, state.lon, resident);
   const pitchRad = Cesium.Math.toRadians(state.pitch);
   const verticalSpeed = state.speed * MPH_TO_MPS * WORLD_SPEED_SCALE * Math.sin(pitchRad);
 
@@ -1424,17 +1436,39 @@ function checkGPWS() {
 function checkCrash() {
   if (currentState !== States.FLYING) return;
   const now = Date.now();
-  if (now - lastCrashCheck < 100) return;
+  if (now - lastCrashCheck < 50) return;
   lastCrashCheck = now;
+
+  // Path anchor updates every check (even inside takeoff grace) so the
+  // first real sweep never drags a segment across the map.
+  const cur = { lon: state.lon, lat: state.lat };
+  const prev = lastCrashPos && Number.isFinite(lastCrashPos.lon) ? lastCrashPos : cur;
+  lastCrashPos = cur;
   if (now - flightStartTime < 3000) return;
 
-  const cartographic = Cesium.Cartographic.fromDegrees(state.lon, state.lat);
-  const terrainHeight = viewer.scene.globe.getHeight(cartographic);
-  const ground = groundSampler.get(state.lat, state.lon, terrainHeight ?? state.alt);
-  if (state.alt <= ground + 5) {
+  // Segmented sweep: at boost speeds one sample per check (~400 m apart)
+  // can tunnel straight through narrow ridges, so test up to 8 sub-samples
+  // back along the path (~200 m apart) and crash on the first hit.
+  const segDist = calculateDistance(prev.lon, prev.lat, cur.lon, cur.lat);
+  const segs = Math.min(8, Math.max(1, Math.ceil(segDist / 200)));
+  let hitGround = null;
+  for (let i = 0; i <= segs; i++) {
+    const f = i / segs;
+    const lon = prev.lon + (cur.lon - prev.lon) * f;
+    const lat = prev.lat + (cur.lat - prev.lat) * f;
+    let ground;
+    try {
+      const cartographic = Cesium.Cartographic.fromDegrees(lon, lat);
+      const terrainHeight = viewer.scene.globe.getHeight(cartographic);
+      ground = groundSampler.get(lat, lon, terrainHeight ?? state.alt);
+    } catch (e) { continue; }
+    if (state.alt <= ground + 5) { hitGround = ground; break; }
+  }
+  if (hitGround === null) return;
+  {
     // Crash: snap onto the ground so the readout is true zero (or the
     // mountain's height in hill ranges) instead of a stale few feet.
-    state.alt = ground;
+    state.alt = hitGround;
     state.agl = 0;
     // Crash: detonate at the plane's on-screen position (ref-flight style
     // explosion), hide the wreck, and hold the fireball on screen briefly
@@ -1635,7 +1669,12 @@ window.addEventListener("keydown", (e) => {
       if (threeContainer) threeContainer.classList.add("hidden");
       if (pauseMenu) pauseMenu.classList.remove("hidden");
     } else if (currentState === States.PAUSED) {
+      // Wrecked jets can't resume in place — that re-triggers the crash
+      // instantly inside the terrain and loops the menu. Pick a menu option.
+      if (planeModel?.model && planeModel.model.visible === false) return;
       currentState = States.FLYING;
+      // Fresh takeoff grace so resuming low over a ridge doesn't insta-crash.
+      flightStartTime = Date.now();
       soundManager.resumeAll();
       if (pauseMenu) pauseMenu.classList.add("hidden");
       if (uiContainer) uiContainer.classList.remove("hidden");

@@ -39,7 +39,8 @@ export function withOceanDonor(provider) {
           const n = Math.pow(2, level);
           const donorX = Math.floor(n / 12) % n;
           if (donorX === x) throw firstErr;
-          return origRequest(donorX, y, level);
+          // A donor failure must never mask the original error.
+          return origRequest(donorX, y, level).catch(() => { throw firstErr; });
         });
   } catch (e) { /* fallback stays as-is */ }
   return provider;
