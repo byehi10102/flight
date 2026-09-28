@@ -1,30 +1,46 @@
 import * as THREE from "three";
+import * as Cesium from "cesium";
+import { movePosition } from "./math.js";
 import { particles } from "../utils/particles.js";
 import { soundManager } from "../utils/soundManager.js";
 
 /**
- * AIM-9 Sidewinder, adapted from dimartarmizi/web-flight-simulator
+ * AIM-9 Sidewinder, from dimartarmizi/web-flight-simulator
  * src/weapon/missile.js.
  *
- * Mesh recipe copied verbatim (body, nose, band, fins, exhaust flame +
- * core, canvas glow sprite), scaled to overlay-local space. Ref steers
- * toward a locked NPC and positions through the Cesium camera; this repo
- * has no NPC systems, so the missile dumb-fires straight ahead (-Z) with
- * a slight wobble, lays the same growing-smoke trail (in overlay space),
- * and detonates through the shared particles system at fuse-out.
+ * Procedural mesh recipe copied verbatim (body, nose, band, fins, exhaust
+ * flame + core, canvas glow sprite) — no external model, so orientation is
+ * guaranteed: nose +Y mapped onto the flight vector exactly like the ref.
+ * World-space ballistics like the ref: integrates from the firing attitude
+ * and never follows later plane movement. No lock/target tracking: this
+ * repo has no NPC systems, so it dumb-fires straight and detonates at
+ * fuse-out or on terrain — the fireball spawns at the world hit point, so
+ * distant impacts render small and far, not pasted on the jet.
  */
 export class Missile {
-  // nose: THREE.Vector3 overlay-local spawn point (alternating wing rail).
-  constructor(scene, nose) {
+  constructor(scene, viewer, startPos, heading, pitch, speedMps) {
     this.scene = scene;
-    this.pos = nose.clone();
-    this.vel = new THREE.Vector3((Math.random() - 0.5) * 0.8, (Math.random() - 0.5) * 0.4, -15);
-    this.life = 5.0;
-    this.maxLife = 5.0;
+    this.viewer = viewer;
+
+    this.lon = startPos.lon;
+    this.lat = startPos.lat;
+    this.alt = startPos.alt;
+    this.heading = heading;
+    this.pitch = pitch;
+    this.speed = speedMps + 800;
+
+    this.maxLife = 10;
+    this.life = this.maxLife;
     this.active = true;
+
+    this._scratchMatrix = new Cesium.Matrix4();
+    this._scratchCartesian = new Cesium.Cartesian3();
+    this._scratchThreeMatrix = new THREE.Matrix4();
+    this._scratchCameraMatrix = new Cesium.Matrix4();
+
     this.trail = [];
     this.trailTimer = 0;
-    this.wobbleSeed = Math.random() * 10;
+
     this.initMesh();
   }
 
@@ -35,18 +51,24 @@ export class Missile {
     const radius = 0.07;
     const bodyGeom = new THREE.CylinderGeometry(radius, radius, bodyLen, 16);
     const bodyMat = new THREE.MeshStandardMaterial({ color: 0xcccccc, metalness: 0.4, roughness: 0.5 });
-    this.mesh.add(new THREE.Mesh(bodyGeom, bodyMat));
+    const body = new THREE.Mesh(bodyGeom, bodyMat);
+    this.mesh.add(body);
 
     const noseLen = 0.35;
     const noseGeom = new THREE.ConeGeometry(radius, noseLen, 16);
     noseGeom.translate(0, bodyLen / 2 + noseLen / 2, 0);
-    this.mesh.add(new THREE.Mesh(noseGeom, new THREE.MeshStandardMaterial({ color: 0x333333, metalness: 0.8, roughness: 0.3 })));
+    const noseMat = new THREE.MeshStandardMaterial({ color: 0x333333, metalness: 0.8, roughness: 0.3 });
+    const nose = new THREE.Mesh(noseGeom, noseMat);
+    this.mesh.add(nose);
 
     const bandGeom = new THREE.CylinderGeometry(radius + 0.001, radius + 0.001, 0.15, 16);
     bandGeom.translate(0, bodyLen / 2 - 0.4, 0);
-    this.mesh.add(new THREE.Mesh(bandGeom, new THREE.MeshBasicMaterial({ color: 0xffcc00 })));
+    const bandMat = new THREE.MeshBasicMaterial({ color: 0xffcc00 });
+    const band = new THREE.Mesh(bandGeom, bandMat);
+    this.mesh.add(band);
 
     const finMat = new THREE.MeshStandardMaterial({ color: 0x444444, metalness: 0.3, roughness: 0.6 });
+
     const rearFinGeom = new THREE.BoxGeometry(0.35, 0.4, 0.02);
     rearFinGeom.translate(radius + 0.175, 0, 0);
     for (let i = 0; i < 4; i++) {
@@ -56,6 +78,7 @@ export class Missile {
       finGroup.rotation.y = i * (Math.PI / 2);
       this.mesh.add(finGroup);
     }
+
     const frontFinGeom = new THREE.BoxGeometry(0.2, 0.15, 0.015);
     frontFinGeom.translate(radius + 0.1, 0, 0);
     for (let i = 0; i < 4; i++) {
@@ -66,23 +89,26 @@ export class Missile {
       this.mesh.add(finGroup);
     }
 
+    const flameColor = new THREE.Color(1.0, 0.6, 0.2);
     const flameGeom = new THREE.ConeGeometry(radius * 0.9, 1.0, 16, 1, true);
     flameGeom.rotateX(Math.PI);
     flameGeom.translate(0, -0.5, 0);
-    this.flameMesh = new THREE.Mesh(flameGeom, new THREE.MeshBasicMaterial({
-      color: new THREE.Color(1.0, 0.6, 0.2), transparent: true, opacity: 0.8,
+    const flameMat = new THREE.MeshBasicMaterial({
+      color: flameColor, transparent: true, opacity: 0.8,
       side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending
-    }));
+    });
+    this.flameMesh = new THREE.Mesh(flameGeom, flameMat);
     this.flameMesh.position.y = -bodyLen / 2;
     this.mesh.add(this.flameMesh);
 
     const coreGeom = new THREE.ConeGeometry(radius * 0.5, 0.6, 16, 1, true);
     coreGeom.rotateX(Math.PI);
     coreGeom.translate(0, -0.3, 0);
-    this.flameCore = new THREE.Mesh(coreGeom, new THREE.MeshBasicMaterial({
+    const coreMat = new THREE.MeshBasicMaterial({
       color: 0xffffff, transparent: true, opacity: 0.9,
       side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending
-    }));
+    });
+    this.flameCore = new THREE.Mesh(coreGeom, coreMat);
     this.flameMesh.add(this.flameCore);
 
     // Glow sprite recipe copied from ref-flight missile.js.
@@ -101,68 +127,83 @@ export class Missile {
     const glowTexture = new THREE.CanvasTexture(canv);
     glowTexture.minFilter = THREE.LinearFilter;
     glowTexture.magFilter = THREE.LinearFilter;
-    this.flameGlow = new THREE.Sprite(new THREE.SpriteMaterial({
+
+    const spriteMat = new THREE.SpriteMaterial({
       map: glowTexture, color: new THREE.Color(1.0, 0.95, 0.9),
       transparent: true, opacity: 0.98, blending: THREE.AdditiveBlending,
       depthTest: false, depthWrite: false
-    }));
+    });
+    this.flameGlow = new THREE.Sprite(spriteMat);
     this.flameGlow.scale.set(2.2, 2.2, 1.0);
     this.flameGlow.position.y = -bodyLen / 2 - 0.08;
     this.mesh.add(this.flameGlow);
 
-    // Ref geometry points +Y (nose +Y); overlay forward is -Z.
-    this.mesh.quaternion.setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2);
-    // World-meter recipe shrunk to overlay scale (jet reads ~2 units).
-    this.mesh.scale.setScalar(0.18);
-    this.mesh.position.copy(this.pos);
-    this.mesh.renderOrder = 9;
     this.mesh.traverse((child) => child.layers.set(1));
+    this.mesh.matrixAutoUpdate = false;
     this.scene.add(this.mesh);
   }
 
   spawnPuff() {
-    const m = new THREE.Mesh(
-      new THREE.SphereGeometry(0.09, 8, 6),
-      new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.55, depthWrite: false })
-    );
+    const smokeGeom = new THREE.SphereGeometry(1.0, 12, 12);
     const gray = 0.5 + Math.random() * 0.4;
-    m.material.color.setRGB(gray, gray, gray);
-    m.position.copy(this.pos);
-    m.layers.set(1);
-    m.renderOrder = 8;
-    this.scene.add(m);
-    this.trail.push({ mesh: m, life: 2.2, maxLife: 2.2, seed: 0.8 + Math.random() * 0.5 });
+    const smokeMat = new THREE.MeshBasicMaterial({
+      color: new THREE.Color(gray, gray, gray),
+      transparent: true, opacity: 0.6
+    });
+    const smoke = new THREE.Mesh(smokeGeom, smokeMat);
+    smoke.lon = this.lon;
+    smoke.lat = this.lat;
+    smoke.alt = this.alt;
+    smoke.life = 4.0;
+    smoke.maxLife = 4.0;
+    if (!smoke.randomScale) smoke.randomScale = 0.8 + Math.random() * 0.5;
+    smoke.launchScale = 1.0;
+    smoke.matrixAutoUpdate = false;
+    smoke.traverse((child) => child.layers.set(1));
+    this.scene.add(smoke);
+    this.trail.push(smoke);
   }
 
   updateTrail(dt) {
     if (this.active) {
+      // Time-based puff rate (ref emits every 20 m; at arcade speeds that
+      // would be hundreds per second — ~20/s keeps the same look).
       this.trailTimer += dt;
-      while (this.trailTimer >= 0.08) {
-        this.trailTimer -= 0.08;
+      while (this.trailTimer >= 0.05) {
+        this.trailTimer -= 0.05;
         this.spawnPuff();
       }
     }
+    const viewMatrix = this.viewer.camera.viewMatrix;
     for (let i = this.trail.length - 1; i >= 0; i--) {
       const t = this.trail[i];
       t.life -= dt;
       if (t.life <= 0) {
-        this.scene.remove(t.mesh);
-        t.mesh.geometry.dispose();
-        t.mesh.material.dispose();
+        this.scene.remove(t);
+        t.geometry.dispose();
+        t.material.dispose();
         this.trail.splice(i, 1);
         continue;
       }
-      // Ref growth recipe: launch scale blooming ~15x over life.
-      const s = t.seed * (1.0 + (1.0 - t.life / t.maxLife) * 15.0) * 0.12;
-      t.mesh.scale.set(s, s, s);
-      t.mesh.material.opacity = (t.life / t.maxLife) * 0.5;
+      // Ref growth recipe: bloom ~15x over life.
+      const scale = t.launchScale * t.randomScale * (1.0 + (1.0 - t.life / t.maxLife) * 15.0);
+      t.material.opacity = (t.life / t.maxLife) * 0.5;
+      const pos = Cesium.Cartesian3.fromDegrees(t.lon, t.lat, t.alt, undefined, this._scratchCartesian);
+      const modelMatrix = Cesium.Transforms.eastNorthUpToFixedFrame(pos, undefined, this._scratchMatrix);
+      const cameraSpaceMatrix = Cesium.Matrix4.multiply(viewMatrix, modelMatrix, this._scratchCameraMatrix);
+      for (let j = 0; j < 16; j++) {
+        this._scratchThreeMatrix.elements[j] = cameraSpaceMatrix[j];
+      }
+      t.matrix.copy(this._scratchThreeMatrix);
+      t.matrix.scale(new THREE.Vector3(scale, scale, scale));
+      t.updateMatrixWorld(true);
     }
   }
 
   update(dt) {
     if (!this.active) {
       this.updateTrail(dt);
-      return this.trail.length > 0;
+      return;
     }
     // Exhaust flicker, copied from ref-flight missile.js.
     if (this.flameMesh) {
@@ -175,28 +216,96 @@ export class Missile {
     this.life -= dt;
     if (this.life <= 0) {
       this.detonate();
-      return true;
+      return;
     }
-    const t = performance.now() * 0.001;
-    this.pos.addScaledVector(this.vel, dt);
-    this.pos.x += Math.sin(t * 7 + this.wobbleSeed) * dt * 0.35;
-    this.mesh.position.copy(this.pos);
+    // Fixed firing path: integrated from launch attitude only.
+    const newPos = movePosition(this.lon, this.lat, this.alt, this.heading, this.pitch, this.speed * dt);
+    this.lon = newPos.lon;
+    this.lat = newPos.lat;
+    this.alt = newPos.alt;
+
     this.updateTrail(dt);
-    return true;
+    this.updateThreeMatrix();
+    this.checkTerrainCollision();
+  }
+
+  updateThreeMatrix() {
+    const viewMatrix = this.viewer.camera.viewMatrix;
+    const pos = Cesium.Cartesian3.fromDegrees(this.lon, this.lat, this.alt, undefined, this._scratchCartesian);
+    const enuMatrix = Cesium.Transforms.eastNorthUpToFixedFrame(pos, undefined, this._scratchMatrix);
+
+    const hRad = Cesium.Math.toRadians(this.heading);
+    const pRad = Cesium.Math.toRadians(this.pitch);
+
+    const localForward = new Cesium.Cartesian3(
+      Math.sin(hRad) * Math.cos(pRad),
+      Math.cos(hRad) * Math.cos(pRad),
+      Math.sin(pRad)
+    );
+    const worldForward = Cesium.Matrix4.multiplyByPointAsVector(enuMatrix, localForward, new Cesium.Cartesian3());
+    Cesium.Cartesian3.normalize(worldForward, worldForward);
+    const enuUp = new Cesium.Cartesian3(enuMatrix[8], enuMatrix[9], enuMatrix[10]);
+
+    let worldRight = new Cesium.Cartesian3();
+    if (Math.abs(Cesium.Cartesian3.dot(worldForward, enuUp)) > 0.999) {
+      const enuNorth = new Cesium.Cartesian3(enuMatrix[4], enuMatrix[5], enuMatrix[6]);
+      Cesium.Cartesian3.cross(worldForward, enuNorth, worldRight);
+    } else {
+      Cesium.Cartesian3.cross(worldForward, enuUp, worldRight);
+    }
+    Cesium.Cartesian3.normalize(worldRight, worldRight);
+    const worldUp = new Cesium.Cartesian3();
+    Cesium.Cartesian3.cross(worldRight, worldForward, worldUp);
+
+    const finalModelMatrix = this._scratchMatrix;
+    finalModelMatrix[0] = worldRight.x; finalModelMatrix[1] = worldRight.y; finalModelMatrix[2] = worldRight.z; finalModelMatrix[3] = 0;
+    finalModelMatrix[4] = worldForward.x; finalModelMatrix[5] = worldForward.y; finalModelMatrix[6] = worldForward.z; finalModelMatrix[7] = 0;
+    finalModelMatrix[8] = worldUp.x; finalModelMatrix[9] = worldUp.y; finalModelMatrix[10] = worldUp.z; finalModelMatrix[11] = 0;
+    finalModelMatrix[12] = pos.x; finalModelMatrix[13] = pos.y; finalModelMatrix[14] = pos.z; finalModelMatrix[15] = 1;
+
+    const cameraSpaceMatrix = Cesium.Matrix4.multiply(viewMatrix, finalModelMatrix, this._scratchCameraMatrix);
+    for (let i = 0; i < 16; i++) {
+      this._scratchThreeMatrix.elements[i] = cameraSpaceMatrix[i];
+    }
+    this.mesh.matrix.copy(this._scratchThreeMatrix);
+    this.mesh.updateMatrixWorld(true);
+
+    // Glow distance scaling, copied from ref-flight missile.js.
+    if (this.flameGlow && this.viewer && this.viewer.camera && this.viewer.camera.position) {
+      try {
+        const camPos = this.viewer.camera.position;
+        const dist = Cesium.Cartesian3.distance(pos, camPos) || 1.0;
+        const s = THREE.MathUtils.clamp(dist * 0.0016, 1.0, 80.0);
+        this.flameGlow.scale.set(s, s, 1.0);
+        this.flameGlow.renderOrder = 9999;
+        if (this.flameGlow.material) this.flameGlow.material.opacity = Math.max(0.25, Math.min(1.0, 80.0 / s));
+      } catch (e) { }
+    }
+  }
+
+  checkTerrainCollision() {
+    try {
+      const cartographic = Cesium.Cartographic.fromDegrees(this.lon, this.lat);
+      const terrainHeight = this.viewer.scene.globe.getHeight(cartographic);
+      if (terrainHeight !== undefined && this.alt < terrainHeight) {
+        this.detonate();
+      }
+    } catch (e) { /* cosmetic */ }
   }
 
   detonate() {
+    if (!this.active) return;
     this.active = false;
     try {
-      particles.spawnExplosion(this.pos.clone(), { big: true, count: 36, smokeCount: 8 });
+      particles.spawnExplosionWorld(this.viewer, this.lon, this.lat, this.alt, { big: true, count: 36, smokeCount: 8 });
       soundManager.play("explosion-random");
     } catch (e) { /* explosion is cosmetic */ }
     if (this.mesh) {
       this.scene.remove(this.mesh);
       this.mesh.traverse((child) => {
         child.geometry?.dispose?.();
-        if (Array.isArray(child.material)) child.material.forEach((m) => m.dispose?.());
-        else child.material?.dispose?.();
+        if (Array.isArray(child.material)) child.material.forEach((m) => { m.map?.dispose?.(); m.dispose?.(); });
+        else { child.material?.map?.dispose?.(); child.material?.dispose?.(); }
       });
       this.mesh = null;
     }

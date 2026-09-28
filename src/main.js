@@ -225,7 +225,7 @@ function initThree() {
 
   planeModel = new PlaneModel(scene);
   particles.init(scene);
-  weaponSystem = new WeaponSystem(scene);
+  weaponSystem = new WeaponSystem(scene, viewer, () => planeModel?.model);
   state.weaponSystem = weaponSystem;
   initSounds().catch((err) => console.error("Failed to init sounds:", err));
   planeModel.load().then(() => {
@@ -1217,21 +1217,22 @@ function update(dt) {
   state.boostCharge = physicsResult.boostCharge;
 
   // ── Weapons (ref-flight: 1/2 select, F/Enter fire, Q toggle, V flares) ──
-  // Overlay-local launch points from the jet's on-screen position.
+  // Rounds fly world-space ballistics from the firing attitude; speed is
+  // converted to m/s like all world motion.
   if (weaponSystem && planeModel?.model) {
-    const nosePos = planeModel.model.position.clone();
-    nosePos.z -= 1.2;
-    const tailPos = planeModel.model.position.clone();
-    tailPos.z += 0.8;
-    tailPos.y -= 0.3;
+    const playerState = {
+      lon: state.lon, lat: state.lat, alt: state.alt,
+      heading: state.heading, pitch: state.pitch,
+      speed: (state.speed || 500) * MPH_TO_MPS * WORLD_SPEED_SCALE,
+    };
     if (typeof input.weaponIndex === "number" && input.weaponIndex >= 0 && input.weaponIndex !== lastWeaponIndex) {
       lastWeaponIndex = input.weaponIndex;
       weaponSystem.selectWeapon(input.weaponIndex);
     }
     if (input.toggleWeapon) weaponSystem.toggleWeapon();
-    if (input.fire) weaponSystem.fire(nosePos);
-    if (input.fireFlare) weaponSystem.fireFlare(tailPos);
-    weaponSystem.update(dt, nosePos, tailPos, input);
+    if (input.fire) weaponSystem.fire(playerState);
+    if (input.fireFlare) weaponSystem.fireFlare(playerState);
+    weaponSystem.update(dt, playerState, input);
   }
 
   // ── Flight sounds (ref-flight behavior) ──

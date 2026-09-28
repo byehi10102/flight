@@ -29,10 +29,9 @@ export class Hud {
     this.boostFill = document.getElementById("boost-fill");
     this.boostLabel = document.getElementById("boost-label");
     this.weaponBar = null;
-    this.weaponName = null;
-    this.weaponAmmo = null;
-    this.weaponHeat = null;
+    this.weaponSlots = [];
     this.weaponFlares = null;
+    this._ws = null;
     this.uiContainer = document.getElementById("uiContainer");
     this.vignette = document.getElementById("transition-vignette");
 
@@ -62,7 +61,7 @@ export class Hud {
     this.createWeaponBar();
   }
 
-  // ── Weapon readout: active weapon + ammo/heat + flare count ──
+  // ── Weapon selector tray: two slots, key number, ammo/heat ──
   createWeaponBar() {
     if (document.getElementById("weapon-bar")) return;
     const ui = document.getElementById("uiContainer");
@@ -70,40 +69,57 @@ export class Hud {
     const bar = document.createElement("div");
     bar.id = "weapon-bar";
     bar.innerHTML =
-      '<span id="weapon-name">M61A1</span>' +
-      '<span id="weapon-ammo">INF</span>' +
-      '<div id="weapon-heat"><div id="weapon-heat-fill"></div></div>' +
+      '<div class="weapon-slot" data-index="0">' +
+        '<span class="weapon-key">1</span>' +
+        '<span class="weapon-name">M61A1</span>' +
+        '<span class="weapon-ammo">INF</span>' +
+        '<div class="weapon-heat"><div class="weapon-heat-fill"></div></div>' +
+      "</div>" +
+      '<div class="weapon-slot" data-index="1">' +
+        '<span class="weapon-key">2</span>' +
+        '<span class="weapon-name">AIM-9</span>' +
+        '<span class="weapon-ammo">50</span>' +
+      "</div>" +
       '<span id="weapon-flares">FLR 30</span>';
     ui.appendChild(bar);
     this.weaponBar = bar;
-    this.weaponName = bar.querySelector("#weapon-name");
-    this.weaponAmmo = bar.querySelector("#weapon-ammo");
-    this.weaponHeat = bar.querySelector("#weapon-heat-fill");
+    this.weaponSlots = Array.from(bar.querySelectorAll(".weapon-slot"));
     this.weaponFlares = bar.querySelector("#weapon-flares");
+    // Click a slot to select it (keys 1/2 do the same).
+    this.weaponSlots.forEach((slot) => {
+      slot.addEventListener("click", () => {
+        try { this._ws?.selectWeapon(Number(slot.dataset.index)); } catch (e) { /* cosmetic */ }
+      });
+    });
   }
 
   updateWeapons(ws) {
     if (!this.weaponBar || !ws) return;
+    this._ws = ws;
     const cur = ws.getCurrentWeapon ? ws.getCurrentWeapon() : null;
     if (!cur) return;
-    if (this.weaponName) this.weaponName.textContent = cur.id === "gun" ? "M61A1" : "AIM-9";
-    if (this.weaponAmmo) {
-      if (cur.id === "gun" && ws.isGunOverheated) {
-        this.weaponAmmo.textContent = "OVERHEAT";
-      } else if (cur.ammo === Infinity) {
-        this.weaponAmmo.textContent = "INF";
-      } else {
-        this.weaponAmmo.textContent = String(cur.ammo).padStart(2, "0");
+    this.weaponSlots.forEach((slot, i) => {
+      const w = ws.weapons[i];
+      if (!w) return;
+      const selected = i === ws.selectedWeaponIndex;
+      slot.classList.toggle("selected", selected);
+      const ammoEl = slot.querySelector(".weapon-ammo");
+      if (ammoEl) {
+        if (w.id === "gun" && ws.isGunOverheated) ammoEl.textContent = "OVERHEAT";
+        else if (w.ammo === Infinity) ammoEl.textContent = "INF";
+        else ammoEl.textContent = String(w.ammo).padStart(2, "0");
       }
-    }
-    if (this.weaponHeat) {
-      this.weaponHeat.style.width = `${Math.round((ws.gunHeat || 0) * 100)}%`;
-    }
+      const heatEl = slot.querySelector(".weapon-heat-fill");
+      if (heatEl && w.id === "gun") {
+        heatEl.style.width = `${Math.round((ws.gunHeat || 0) * 100)}%`;
+      }
+      const warn = (ws.emptyWarningTimers && ws.emptyWarningTimers[w.id] > 0) ||
+        (w.id === "gun" && ws.isGunOverheated);
+      slot.classList.toggle("overheated", !!warn);
+    });
     if (this.weaponFlares) {
       this.weaponFlares.textContent = `FLR ${ws.flareWeapon ? ws.flareWeapon.ammo : 0}`;
     }
-    const warn = (ws.emptyWarningTimers && (ws.emptyWarningTimers[cur.id] > 0)) || (cur.id === "gun" && ws.isGunOverheated);
-    this.weaponBar.classList.toggle("overheated", !!warn);
   }
 
   // ── Horizon: crosshair + pitch ladder, rotated/translated by attitude ──

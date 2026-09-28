@@ -169,12 +169,14 @@ revert removed the roads overlay, pinch/trackpad zoom buttons and the
   ~3 s, fires only when full. (Ref itself has no boost widget; built fresh
   in its visual language and verified by sim.)
 - **Weapons (ref-flight)** — M61A1 cannon (infinite, heats to overheat),
-  AIM-9 Sidewinder ×50 from alternating rails with smoke trails and
-  fuse-out airbursts, MJU-7A flares ×30 in 6-round pulses; `1`/`2` select,
-  `F` fires, `V` pops flares, HUD bar shows weapon/ammo/heat/flares.
-  Missiles dumb-fire straight: ref-flight homes them onto locked NPCs and
-  this repo has no NPCs, so the lock gate is omitted (documented in
-  `src/weapon/weaponSystem.js`).
+  AIM-9 Sidewinder ×50 from alternating wing rails with smoke trails,
+  MJU-7A flares ×30 in 6-round pulses; `1`/`2` or the clickable tray
+  selects, `F` fires, `V` pops flares. Rounds fly world-space ballistics
+  from the firing attitude (pitch away after firing — the stream keeps its
+  path and dies on real terrain), and impacts detonate at the world hit
+  point, so distant hits render small and far. Missiles dumb-fire straight:
+  ref-flight homes them onto locked NPCs and this repo has no NPCs, so the
+  lock gate is omitted (documented in `src/weapon/weaponSystem.js`).
 - **Sound suite** — all 28 ref samples wired (engine/wind/throttle/boost/
   strain loops, PULL UP, spawn/zoom/crash stingers, UI clicks, pause/mute);
   procedural engine removed.

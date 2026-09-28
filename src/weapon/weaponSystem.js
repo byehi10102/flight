@@ -1,44 +1,53 @@
 import * as THREE from "three";
+import * as Cesium from "cesium";
 import { Bullet } from "./bullet.js";
 import { Missile } from "./missile.js";
 import { Flare } from "./flare.js";
+import { movePosition } from "./math.js";
 import { soundManager } from "../utils/soundManager.js";
 
 /**
- * Weapon system, adapted from dimartarmizi/web-flight-simulator
+ * Weapon system, from dimartarmizi/web-flight-simulator
  * src/systems/weaponSystem.js.
  *
- * ref-flight data + rules copied exactly: M61A1 cannon (infinite ammo,
- * 0.05 s fire rate, heat → overheat), AIM-9 Sidewinder ×50 (1.0 s rate,
- * alternating wing rails), MJU-7A flares ×30 in 6-round 0.15 s pulses,
- * empty-click warnings, weapon-switch sounds.
+ * ref-flight data + rules kept: M61A1 cannon (infinite ammo, 0.05 s rate,
+ * heat → overheat), AIM-9 Sidewinder ×50 (1.0 s rate, alternating wing
+ * rails), MJU-7A flares ×30 in 6-round 0.15 s pulses, empty-click warnings,
+ * weapon-switch sounds. Launch points come from calculateWeaponPos
+ * (verbatim): gun at the nose, missiles on alternating wing rails,
+ * flares behind the tail. Rounds fly world-space ballistics from the
+ * firing attitude, so later plane movement never bends their path.
  *
- * Divergences forced by architecture (documented, not silent):
- * - ref-flight projectiles fly in world space through the Cesium camera and
- *   home onto locked NPC targets. This repo's Three.js layer is a
- *   camera-locked overlay with no NPC systems, so rounds fly in
- *   overlay-local space straight ahead and missiles dumb-fire (no lock
- *   gate — with no targets a lock could never complete).
- * - ref-flight lock/RWR loop (findPotentialTarget, rwr-tws/lock sounds) is
- *   omitted with the NPCs it tracks.
+ * Omitted with the NPC systems they track: target lock/RWR loop
+ * (findPotentialTarget, rwr-tws/lock sounds). Missiles dumb-fire straight.
  */
 export class WeaponSystem {
-  constructor(scene) {
+  // getPlayerModel: () => THREE.Group (the overlay jet; loads async).
+  constructor(scene, viewer, getPlayerModel) {
     this.scene = scene;
+    this.viewer = viewer;
+    this.getPlayerModel = getPlayerModel;
+
     this.weapons = [
       { id: "gun", name: "M61A1 CANNON", ammo: Infinity, maxAmmo: Infinity, fireRate: 0.05, lastFire: 0 },
       { id: "missile", name: "AIM-9 SIDEWINDER", ammo: 50, maxAmmo: 50, fireRate: 1.0, lastFire: 0, type: "AIM-9" }
     ];
+
     this.flareWeapon = { id: "flare", name: "MJU-7A", ammo: 30, maxAmmo: 30, fireRate: 0.2, lastFire: 0 };
+
     this.selectedWeaponIndex = 0;
     this.projectiles = [];
     this.flares = [];
+
     this.isGunOverheated = false;
     this.gunHeat = 0;
+
     this.flareQueue = 0;
     this.flareInterval = 0.15;
     this.lastFlarePulse = 0;
+
     this.lastMissileSide = false;
+
     this.emptyWarningTimers = { gun: 0, missile: 0, flare: 0 };
     this.lastEmptyWarningSoundTime = 0;
   }
@@ -71,12 +80,12 @@ export class WeaponSystem {
     };
     for (const p of this.projectiles) {
       strip(p.mesh || p.group);
-      for (const t of (p.trail || [])) strip(t.mesh || t);
+      for (const t of (p.trail || [])) strip(t);
     }
     this.projectiles = [];
     for (const f of this.flares) {
       strip(f.group);
-      for (const t of (f.trail || [])) strip(t.mesh || t);
+      for (const t of (f.trail || [])) strip(t);
     }
     this.flares = [];
     this.flareQueue = 0;
@@ -98,10 +107,58 @@ export class WeaponSystem {
     try { soundManager.play("weapon-switch"); } catch (e) { }
   }
 
-  fire(nosePos) {
+  calculateWeaponPos(offset) {
+    const playerModel = this.getPlayerModel ? this.getPlayerModel() : null;
+    if (!playerModel || !this.viewer) return null;
+
+    const scale = playerModel.scale.x;
+    const scaledOffset = offset.clone().multiplyScalar(scale);
+
+    scaledOffset.applyQuaternion(playerModel.quaternion);
+    scaledOffset.add(playerModel.position);
+
+    const planeFov = 75;
+    const worldFov = Cesium.Math.toDegrees(this.viewer.camera.frustum.fovy);
+
+    const factor = Math.tan(Cesium.Math.toRadians(worldFov) * 0.5) / Math.tan(Cesium.Math.toRadians(planeFov) * 0.5);
+
+    scaledOffset.x *= factor;
+    scaledOffset.y *= factor;
+
+    const cam = this.viewer.camera;
+    const right = cam.right;
+    const up = cam.up;
+    const dir = cam.direction;
+
+    const worldOffset = new Cesium.Cartesian3();
+
+    const xVec = Cesium.Cartesian3.multiplyByScalar(right, scaledOffset.x, new Cesium.Cartesian3());
+    const yVec = Cesium.Cartesian3.multiplyByScalar(up, scaledOffset.y, new Cesium.Cartesian3());
+    const zVec = Cesium.Cartesian3.multiplyByScalar(dir, -scaledOffset.z, new Cesium.Cartesian3());
+
+    Cesium.Cartesian3.add(xVec, yVec, worldOffset);
+    Cesium.Cartesian3.add(worldOffset, zVec, worldOffset);
+
+    const camPos = cam.positionWC;
+    const finalPos = new Cesium.Cartesian3();
+    Cesium.Cartesian3.add(camPos, worldOffset, finalPos);
+
+    const carto = Cesium.Cartographic.fromCartesian(finalPos);
+
+    return {
+      lon: Cesium.Math.toDegrees(carto.longitude),
+      lat: Cesium.Math.toDegrees(carto.latitude),
+      alt: carto.height
+    };
+  }
+
+  // playerState: { lon, lat, alt, heading, pitch, speed } with speed in m/s.
+  fire(playerState) {
     const weapon = this.weapons[this.selectedWeaponIndex];
     if (!weapon) return;
+
     const now = performance.now() * 0.001;
+
     if (weapon.ammo <= 0) {
       if (now - this.lastEmptyWarningSoundTime > 2.0) {
         this.emptyWarningTimers[weapon.id] = 1.0;
@@ -112,8 +169,11 @@ export class WeaponSystem {
     }
     if (weapon.id === "gun" && this.isGunOverheated) return;
     if (now - weapon.lastFire < weapon.fireRate) return;
+
     weapon.lastFire = now;
     if (weapon.ammo !== Infinity) weapon.ammo--;
+
+    const startPos = { lon: playerState.lon, lat: playerState.lat, alt: playerState.alt };
 
     if (weapon.id === "gun") {
       this.gunHeat += 0.02;
@@ -121,21 +181,36 @@ export class WeaponSystem {
         this.isGunOverheated = true;
         try { soundManager.play("weapon-warning"); } catch (e) { }
       }
-      this.projectiles.push(new Bullet(this.scene, nosePos));
+
+      const gunOffset = new THREE.Vector3(0, 0, 0);
+      const nosePos = this.calculateWeaponPos(gunOffset) || movePosition(startPos.lon, startPos.lat, startPos.alt, playerState.heading, playerState.pitch, 5);
+
+      const bullet = new Bullet(
+        this.scene, this.viewer, nosePos,
+        playerState.heading, playerState.pitch, playerState.speed
+      );
+      this.projectiles.push(bullet);
     } else if (weapon.id === "missile") {
-      // Alternating wing rails, like ref-flight (no lock gate: no NPCs).
       this.lastMissileSide = !this.lastMissileSide;
       const side = this.lastMissileSide ? 1 : -1;
-      const rail = nosePos.clone();
-      rail.x += 0.55 * side;
-      this.projectiles.push(new Missile(this.scene, rail));
+      const missileOffset = new THREE.Vector3(15.0 * side, -15.0, 0.0);
+
+      const launchPos = this.calculateWeaponPos(missileOffset) || startPos;
+
+      const missile = new Missile(
+        this.scene, this.viewer, launchPos,
+        playerState.heading, playerState.pitch, playerState.speed
+      );
+      this.projectiles.push(missile);
+
       try { soundManager.play("missile-fire"); } catch (e) { }
     }
   }
 
-  fireFlare(tailPos) {
+  fireFlare(playerState) {
     const flareWeapon = this.flareWeapon;
     const now = performance.now() * 0.001;
+
     if (!flareWeapon || flareWeapon.ammo <= 0) {
       if (now - this.lastEmptyWarningSoundTime > 2.0) {
         this.emptyWarningTimers["flare"] = 1.0;
@@ -145,31 +220,48 @@ export class WeaponSystem {
       return;
     }
     if (now - flareWeapon.lastFire < 1.0) return;
+
     flareWeapon.ammo--;
     flareWeapon.lastFire = now;
+
     this.flareQueue = 6;
     this.lastFlarePulse = 0;
   }
 
-  _spawnSingleFlare(tailPos) {
-    this.flares.push(new Flare(this.scene, tailPos));
+  _spawnSingleFlare(playerState) {
+    const flareOffset = new THREE.Vector3(0, -10.0, 6.0);
+    const startPos = this.calculateWeaponPos(flareOffset) || {
+      lon: playerState.lon, lat: playerState.lat, alt: playerState.alt
+    };
+
+    const flare = new Flare(
+      this.scene, this.viewer, startPos,
+      playerState.heading, playerState.pitch, playerState.speed
+    );
+
+    this.flares.push(flare);
   }
 
-  update(dt, nosePos, tailPos, input = null) {
+  update(dt, playerState, input = null) {
     const currentWeapon = this.getCurrentWeapon();
+
     try {
       const isFiringGun = input && input.fire && currentWeapon.id === "gun" && !this.isGunOverheated && currentWeapon.ammo > 0;
       if (isFiringGun) {
-        if (!soundManager.isPlaying("m61-firing")) soundManager.play("m61-firing");
-      } else if (soundManager.isPlaying("m61-firing")) {
-        soundManager.stop("m61-firing");
+        if (!soundManager.isPlaying("m61-firing")) {
+          soundManager.play("m61-firing");
+        }
+      } else {
+        if (soundManager.isPlaying("m61-firing")) {
+          soundManager.stop("m61-firing");
+        }
       }
     } catch (e) { }
 
     if (this.flareQueue > 0) {
       this.lastFlarePulse += dt;
       if (this.lastFlarePulse >= this.flareInterval || this.flareQueue === 6) {
-        this._spawnSingleFlare(tailPos);
+        this._spawnSingleFlare(playerState);
         this.flareQueue--;
         this.lastFlarePulse = 0;
       }

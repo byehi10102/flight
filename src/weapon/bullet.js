@@ -1,33 +1,38 @@
 import * as THREE from "three";
+import * as Cesium from "cesium";
+import { movePosition } from "./math.js";
+import { particles } from "../utils/particles.js";
 
 /**
- * Cannon tracer, adapted from dimartarmizi/web-flight-simulator
- * src/weapon/bullet.js.
+ * Cannon tracer, from dimartarmizi/web-flight-simulator src/weapon/bullet.js.
  *
- * Ref flies bullets in world space (lon/lat/alt) and places their mesh
- * through the Cesium camera matrix. This repo's Three.js layer is a
- * camera-locked overlay (Cesium owns world tracking), so the SAME tracer
- * visuals — red→yellow→white gradient planes + white tip, shader copied
- * verbatim — fly in overlay-local space straight ahead (-Z) from the nose
- * and burn out after ~1.2 s. NPC hit checks are omitted: this repo has no
- * NPC systems.
+ * World-space ballistics like the ref: the round integrates lon/lat/alt
+ * from the firing attitude and NEVER follows later plane movement — pitch
+ * down after firing and the stream keeps its original path. The mesh is
+ * placed through the Cesium camera matrix (ref updateThreeMatrix, kept),
+ * so tracers also collide with real terrain and die with a spark burst
+ * where they hit. NPC hit checks are omitted: this repo has no NPCs.
  */
-const FORWARD = new THREE.Vector3(0, 0, -1);
-
 export class Bullet {
-  // nose: THREE.Vector3 overlay-local spawn point (plane nose).
-  constructor(scene, nose) {
+  constructor(scene, viewer, startPos, heading, pitch, speedMps) {
     this.scene = scene;
-    this.pos = nose.clone();
-    // Slight spread so sustained fire reads as a stream, not one line.
-    this.vel = new THREE.Vector3(
-      (Math.random() - 0.5) * 1.6,
-      (Math.random() - 0.5) * 1.6,
-      -46 - Math.random() * 8
-    );
-    this.life = 1.2;
-    this.maxLife = 1.2;
+    this.viewer = viewer;
+
+    this.lon = startPos.lon;
+    this.lat = startPos.lat;
+    this.alt = startPos.alt;
+    this.heading = heading;
+    this.pitch = pitch;
+    this.speed = speedMps + 1500;
+
+    this.life = 3;
     this.active = true;
+
+    this._scratchMatrix = new Cesium.Matrix4();
+    this._scratchCartesian = new Cesium.Cartesian3();
+    this._scratchThreeMatrix = new THREE.Matrix4();
+    this._scratchCameraMatrix = new Cesium.Matrix4();
+
     this.initMesh();
   }
 
@@ -69,70 +74,115 @@ export class Bullet {
         `,
         transparent: true,
         depthWrite: false,
-        depthTest: false,
         blending: THREE.AdditiveBlending,
         side: THREE.DoubleSide
       });
     };
 
-    // Ref geometry points +Y (its matrix maps +Y to flight direction);
-    // overlay flight direction is -Z, so bake a -90° X rotation and keep
-    // the +Y-forward recipe untouched below it.
-    const align = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2);
-    const mainLen = 4;
+    const mainLen = 20;
 
     this.mesh = new THREE.Group();
 
     const createPlaneMesh = (width, len, opacity, intensity) => {
       const geom = new THREE.PlaneGeometry(width, len, 1, 1);
       geom.translate(0, -len / 2, 0);
-      return new THREE.Mesh(geom, createGradientMaterial(opacity, intensity));
+      const mat = createGradientMaterial(opacity, intensity);
+      return new THREE.Mesh(geom, mat);
     };
 
     for (let i = 0; i < 3; i++) {
-      const p = createPlaneMesh(0.06, mainLen, 1.0, 1.0);
+      const p = createPlaneMesh(0.6, mainLen, 1.0, 1.0);
       p.rotateY((i * Math.PI * 2) / 3);
       this.mesh.add(p);
     }
 
     for (let i = 0; i < 3; i++) {
-      const g = createPlaneMesh(0.16, mainLen * 1.1, 0.35, 0.65);
+      const g = createPlaneMesh(1.6, mainLen * 1.1, 0.35, 0.65);
       g.rotateY((i * Math.PI * 2) / 3 + Math.PI / 6);
       this.mesh.add(g);
     }
 
-    const tipGeom = new THREE.ConeGeometry(0.012, 0.08, 12);
-    tipGeom.translate(0, -0.04, 0);
-    const tip = new THREE.Mesh(
-      tipGeom,
-      new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 1.0, blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false })
-    );
+    const tipGeom = new THREE.ConeGeometry(0.12, 0.8, 12);
+    tipGeom.translate(0, -0.4, 0);
+    const tipMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 1.0, blending: THREE.AdditiveBlending, depthWrite: false });
+    const tip = new THREE.Mesh(tipGeom, tipMat);
     this.mesh.add(tip);
 
-    this.mesh.quaternion.copy(align);
-    this.mesh.position.copy(this.pos);
-    this.mesh.renderOrder = 9;
     this.mesh.traverse((child) => child.layers.set(1));
+    this.mesh.matrixAutoUpdate = false;
     this.scene.add(this.mesh);
   }
 
   update(dt) {
     if (!this.active) return;
+
     this.life -= dt;
     if (this.life <= 0) {
       this.destroy();
       return;
     }
-    this.pos.addScaledVector(this.vel, dt);
-    this.mesh.position.copy(this.pos);
-    const fade = Math.min(1, this.life / (this.maxLife * 0.4));
-    this.mesh.traverse((child) => {
-      if (child.material && child.material.uniforms && child.material.uniforms.opacity) {
-        child.material.uniforms.opacity.value = fade;
-      } else if (child.material && child.material.transparent) {
-        child.material.opacity = fade;
+
+    // Fixed firing path: integrated from launch attitude only.
+    const newPos = movePosition(this.lon, this.lat, this.alt, this.heading, this.pitch, this.speed * dt);
+    this.lon = newPos.lon;
+    this.lat = newPos.lat;
+    this.alt = newPos.alt;
+
+    this.updateThreeMatrix();
+    this.checkTerrainCollision();
+  }
+
+  updateThreeMatrix() {
+    const viewMatrix = this.viewer.camera.viewMatrix;
+    const pos = Cesium.Cartesian3.fromDegrees(this.lon, this.lat, this.alt, undefined, this._scratchCartesian);
+    const enuMatrix = Cesium.Transforms.eastNorthUpToFixedFrame(pos, undefined, this._scratchMatrix);
+
+    const hRad = Cesium.Math.toRadians(this.heading);
+    const pRad = Cesium.Math.toRadians(this.pitch);
+
+    const localForward = new Cesium.Cartesian3(
+      Math.sin(hRad) * Math.cos(pRad),
+      Math.cos(hRad) * Math.cos(pRad),
+      Math.sin(pRad)
+    );
+
+    const worldForward = Cesium.Matrix4.multiplyByPointAsVector(enuMatrix, localForward, new Cesium.Cartesian3());
+    Cesium.Cartesian3.normalize(worldForward, worldForward);
+    const enuUp = new Cesium.Cartesian3(enuMatrix[8], enuMatrix[9], enuMatrix[10]);
+
+    let worldRight = new Cesium.Cartesian3();
+    if (Math.abs(Cesium.Cartesian3.dot(worldForward, enuUp)) > 0.999) {
+      const enuNorth = new Cesium.Cartesian3(enuMatrix[4], enuMatrix[5], enuMatrix[6]);
+      Cesium.Cartesian3.cross(worldForward, enuNorth, worldRight);
+    } else {
+      Cesium.Cartesian3.cross(worldForward, enuUp, worldRight);
+    }
+    Cesium.Cartesian3.normalize(worldRight, worldRight);
+    const worldUp = Cesium.Cartesian3.cross(worldRight, worldForward, new Cesium.Cartesian3());
+
+    const finalModelMatrix = this._scratchMatrix;
+    finalModelMatrix[0] = worldRight.x; finalModelMatrix[1] = worldRight.y; finalModelMatrix[2] = worldRight.z; finalModelMatrix[3] = 0;
+    finalModelMatrix[4] = worldForward.x; finalModelMatrix[5] = worldForward.y; finalModelMatrix[6] = worldForward.z; finalModelMatrix[7] = 0;
+    finalModelMatrix[8] = worldUp.x; finalModelMatrix[9] = worldUp.y; finalModelMatrix[10] = worldUp.z; finalModelMatrix[11] = 0;
+    finalModelMatrix[12] = pos.x; finalModelMatrix[13] = pos.y; finalModelMatrix[14] = pos.z; finalModelMatrix[15] = 1;
+
+    const cameraSpaceMatrix = Cesium.Matrix4.multiply(viewMatrix, finalModelMatrix, this._scratchCameraMatrix);
+    for (let i = 0; i < 16; i++) {
+      this._scratchThreeMatrix.elements[i] = cameraSpaceMatrix[i];
+    }
+    this.mesh.matrix.copy(this._scratchThreeMatrix);
+    this.mesh.updateMatrixWorld(true);
+  }
+
+  checkTerrainCollision() {
+    try {
+      const cartographic = Cesium.Cartographic.fromDegrees(this.lon, this.lat);
+      const terrainHeight = this.viewer.scene.globe.getHeight(cartographic);
+      if (terrainHeight !== undefined && this.alt < terrainHeight) {
+        particles.spawnExplosionWorld(this.viewer, this.lon, this.lat, this.alt, { big: false, count: 10, smokeCount: 2 });
+        this.destroy();
       }
-    });
+    } catch (e) { /* cosmetic */ }
   }
 
   destroy() {
