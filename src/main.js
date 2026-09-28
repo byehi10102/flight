@@ -23,8 +23,11 @@ const States = {
 let currentState = States.MENU;
 
 // Flight speeds are MPH throughout (500 cruise, 5000 max on W, 10000 on
-// boost); world movement needs m/s.
+// boost); world movement needs m/s. WORLD_SPEED_SCALE is the arcade lever:
+// HUD still shows true MPH, but the jet covers tiles 1.75x faster so 5k/10k
+// feel like they should.
 const MPH_TO_MPS = 0.44704;
+const WORLD_SPEED_SCALE = 1.75;
 
 const state = {
   lon: -117.9143,
@@ -1110,7 +1113,7 @@ function update(dt) {
 
   // The aircraft travels wherever the nose points. The horizontal component is
   // scaled by cos(pitch), so it always moves forward as well as up or down.
-  const newPos = movePosition(state.lon, state.lat, state.alt, state.heading, state.pitch, state.speed * MPH_TO_MPS * dt);
+  const newPos = movePosition(state.lon, state.lat, state.alt, state.heading, state.pitch, state.speed * MPH_TO_MPS * WORLD_SPEED_SCALE * dt);
   state.lon = newPos.lon;
   state.lat = newPos.lat;
   state.alt = newPos.alt;
@@ -1228,7 +1231,7 @@ function checkGPWS() {
 
   const agl = state.alt - terrainHeight;
   const pitchRad = Cesium.Math.toRadians(state.pitch);
-  const verticalSpeed = state.speed * MPH_TO_MPS * Math.sin(pitchRad);
+  const verticalSpeed = state.speed * MPH_TO_MPS * WORLD_SPEED_SCALE * Math.sin(pitchRad);
 
   let showWarning = false;
   if (state.pitch < -2) {
