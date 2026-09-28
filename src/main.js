@@ -83,6 +83,7 @@ const SIM_STEP = 1 / 60;
 const SIM_MAX_STEPS = 8;
 let simAcc = 0;
 let geocodeTimer = 0;
+let preloadTimer = 0;
 let transitionGen = 0;
 let lastGeocodePos = { lon: 0, lat: 0 };
 let currentRegionName = null;
@@ -1176,6 +1177,35 @@ function update(dt) {
   } catch (e) {
     state.agl = state.alt;
   }
+
+  // Forward tile preload: twice a second, prime the terrain cache in a ~12 km
+  // fan ahead of the nose (3/6/9/12 km out, ±2 km lateral), so fast flight
+  // lands on sampled elevation instead of outrunning it. Imagery ahead
+  // streams on its own — the forward-looking camera drives it every frame
+  // via setCameraToPlane below; this covers the elevation side.
+  try {
+    preloadTimer += dt;
+    if (preloadTimer > 0.5) {
+      preloadTimer = 0;
+      const hRad = Cesium.Math.toRadians(state.heading || 0);
+      const R = 6371000;
+      const latR = Cesium.Math.toRadians(state.lat);
+      const cosLat = Math.max(0.2, Math.cos(latR));
+      const pts = [];
+      for (const dist of [3000, 6000, 9000, 12000]) {
+        for (const side of [-2000, 0, 2000]) {
+          const fwd = dist;
+          const dLat = (fwd * Math.cos(hRad) - side * Math.sin(hRad)) / R;
+          const dLon = (fwd * Math.sin(hRad) + side * Math.cos(hRad)) / (R * cosLat);
+          pts.push([
+            state.lat + Cesium.Math.toDegrees(dLat),
+            state.lon + Cesium.Math.toDegrees(dLon),
+          ]);
+        }
+      }
+      groundSampler.seed(pts).catch(() => {});
+    }
+  } catch (e) { /* preload is best-effort */ }
 
   checkCrash();
   checkGPWS();
