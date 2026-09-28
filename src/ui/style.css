@@ -100,6 +100,41 @@ html, body {
   cursor: not-allowed;
 }
 
+.menu-settings {
+  margin-top: 18px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.settings-label {
+  font-size: 11px;
+  letter-spacing: 3px;
+  color: #888;
+}
+
+#rangeBtns {
+  display: flex;
+  gap: 8px;
+}
+
+.range-btn {
+  padding: 8px 16px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  color: #fff;
+  font-size: 13px;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.range-btn.active {
+  background: rgba(0, 180, 0, 0.35);
+  border-color: #0f0;
+  color: #0f0;
+}
+
 .controls-help {
   margin-top: 20px;
   font-size: 12px;

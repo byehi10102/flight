@@ -336,12 +336,12 @@ export class Hud {
 
     ctx.clearRect(0, 0, w, h);
 
-    // Range rings (subtle — the real satellite map shows through).
+    // Range rings scaled to the selected range (thirds of the view radius).
     ctx.strokeStyle = "rgba(0, 255, 0, 0.35)";
     ctx.lineWidth = 1;
-    for (let r = 30; r <= 90; r += 30) {
+    for (const rr of [radius / 3, (radius * 2) / 3, radius]) {
       ctx.beginPath();
-      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.arc(cx, cy, rr, 0, Math.PI * 2);
       ctx.stroke();
     }
 
@@ -381,9 +381,9 @@ export class Hud {
     ctx.stroke();
 
     // Original spawn point (red pin) relative to the jet, rotated by heading.
-    // Same zoom scale the main loop drives the real-map camera with.
+    // Same shared zoom the real-map camera uses (state.minimapZoom).
     if (state.spawnLon != null && state.spawnLat != null) {
-      const zoomAlt = 1500 + (state.speed || 0) * 2;
+      const zoomAlt = state.minimapZoom || 2000;
       const ppm = h / (zoomAlt * 1.1547);
       const dxm = (state.spawnLon - state.lon) * 111320 * Math.cos((state.lat * Math.PI) / 180);
       const dym = (state.spawnLat - state.lat) * 111320;

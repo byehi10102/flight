@@ -41,6 +41,9 @@ const state = {
   spawnName: null,
   spawnLon: null,
   spawnLat: null,
+  // Minimap range in meters (1K / 5K / 10K setting, persisted).
+  minimapRange: Number(localStorage.getItem("skywardMinimapRange")) || 1000,
+  minimapZoom: 2000,
 };
 
 // ── Three.js overlay ─────────────────────────────────────────────────────────
@@ -863,7 +866,8 @@ function confirmSpawn() {
             getMiniViewer()?.resize();
             // Snap the real-map minimap onto the spawn immediately so the
             // first frame already matches the 3D world.
-            setMinimapCamera(state.lon, state.lat, 1500 + state.speed * 2, state.heading);
+            state.minimapZoom = state.minimapRange * 1.95 + state.speed * 0.5;
+            setMinimapCamera(state.lon, state.lat, state.minimapZoom, state.heading);
           } catch (e) { /* minimap is cosmetic */ }
             if (vignette) {
               vignette.style.opacity = "0";
@@ -1146,9 +1150,12 @@ function animate() {
     minimapUpdateTimer += dt;
     if (minimapUpdateTimer > 0.1) {
       minimapUpdateTimer = 0;
-      // Real-map minimap tracks the jet (range widens slightly with speed).
+      // One shared zoom model: the real-map camera and the canvas overlay
+      // both derive scale from state.minimapZoom, so they can never disagree.
+      // Range radius fills ~80 of 180px: view height ≈ 2.25×range.
+      const zoomAlt = state.minimapRange * 1.95 + state.speed * 0.5;
+      state.minimapZoom = zoomAlt;
       try {
-        const zoomAlt = 1500 + state.speed * 2;
         setMinimapCamera(state.lon, state.lat, zoomAlt, state.heading);
       } catch (e) { /* minimap is cosmetic */ }
       hud.updateMinimap(state);
@@ -1186,6 +1193,21 @@ function animate() {
 }
 
 // ── UI events ────────────────────────────────────────────────────────────────
+// Minimap range setting (home page): 1K / 5K / 10K meters, default 1K.
+document.querySelectorAll("#rangeBtns .range-btn").forEach((btn) => {
+  if (Number(btn.dataset.range) === state.minimapRange) btn.classList.add("active");
+  else btn.classList.remove("active");
+  btn.addEventListener("click", () => {
+    state.minimapRange = Number(btn.dataset.range) || 1000;
+    try {
+      localStorage.setItem("skywardMinimapRange", String(state.minimapRange));
+    } catch (e) { /* storage unavailable */ }
+    document.querySelectorAll("#rangeBtns .range-btn").forEach((b) =>
+      b.classList.toggle("active", b === btn)
+    );
+  });
+});
+
 startBtn.addEventListener("click", () => {
   if (mainMenu) mainMenu.classList.add("hidden");
   enterSpawnPicking(false);
