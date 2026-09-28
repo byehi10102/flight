@@ -60,6 +60,13 @@ let flightStartTime = 0;
 let lastCrashCheck = 0;
 let minimapUpdateTimer = 0;
 let sunUpdateTimer = 0;
+// Fixed-step sim: physics/movement advance in 1/60s slices of REAL elapsed
+// time (up to 5 per frame), so the jet covers true MPH distance even when
+// the frame rate sags. The old clamped single-step ran the whole sim in
+// slow motion on slow machines.
+const SIM_STEP = 1 / 60;
+const SIM_MAX_STEPS = 8;
+let simAcc = 0;
 let geocodeTimer = 0;
 let transitionGen = 0;
 let lastGeocodePos = { lon: 0, lat: 0 };
@@ -1092,14 +1099,24 @@ function checkCrash() {
 // ── Render loop ──────────────────────────────────────────────────────────────
 function animate() {
   requestAnimationFrame(animate);
-  // Clamp dt so a backgrounded tab doesn't teleport the aircraft kilometres
-  // in a single frame when it regains focus.
-  const dt = Math.min(clock ? clock.getDelta() : 0.016, 0.05);
+  // Wall-clock frame time (cosmetic systems use this directly). Flight
+  // physics below consumes it in fixed slices instead, so motion never
+  // dilates — a backgrounded tab just drops the backlog past 0.25s.
+  let dt = clock ? clock.getDelta() : 0.016;
+  if (!Number.isFinite(dt) || dt < 0) dt = 0.016;
+  dt = Math.min(dt, 0.25);
   const now = performance.now();
 
   if (currentState === States.FLYING || currentState === States.PAUSED || currentState === States.TRANSITIONING) {
     if (currentState === States.FLYING) {
-      update(dt);
+      simAcc += dt;
+      let steps = 0;
+      while (simAcc >= SIM_STEP && steps < SIM_MAX_STEPS) {
+        update(SIM_STEP);
+        simAcc -= SIM_STEP;
+        steps++;
+      }
+      if (steps === SIM_MAX_STEPS) simAcc = 0;
     } else if (currentState === States.TRANSITIONING && planeModel?.model) {
       // Keep the jet breathing (idle wobble, flames) through the spawn dive
       // so it never freezes a frame before flight starts.
