@@ -61,6 +61,7 @@ let lastCrashCheck = 0;
 let minimapUpdateTimer = 0;
 let sunUpdateTimer = 0;
 let geocodeTimer = 0;
+let transitionGen = 0;
 let lastGeocodePos = { lon: 0, lat: 0 };
 let currentRegionName = null;
 let terrainReady = false;
@@ -222,6 +223,11 @@ function setCameraToPlane(lon, lat, alt, heading, pitch, roll) {
 
 // ── Spawn picker ─────────────────────────────────────────────────────────────
 function enterSpawnPicking(useVignette = true) {
+  transitionGen++;
+  const gen = transitionGen;
+  try {
+    viewer.camera.cancelFlight();
+  } catch (e) { /* no flight in progress */ }
   if (vignette && useVignette) {
     vignette.classList.add("solid");
     vignette.style.opacity = "1";
@@ -229,6 +235,7 @@ function enterSpawnPicking(useVignette = true) {
   const delay = useVignette ? 500 : 0;
 
   setTimeout(() => {
+    if (gen !== transitionGen) return;
     if (spawnInstruction) spawnInstruction.classList.remove("hidden");
     if (threeContainer) threeContainer.classList.add("hidden");
     if (uiContainer) uiContainer.classList.add("hidden");
@@ -265,6 +272,7 @@ function enterSpawnPicking(useVignette = true) {
       destination: Cesium.Cartesian3.fromDegrees(state.lon, state.lat, 15000),
       duration: 2.0,
       complete: () => {
+        if (gen !== transitionGen) return;
         if (vignette) {
           vignette.style.opacity = "0";
           vignette.classList.remove("solid");
@@ -275,6 +283,10 @@ function enterSpawnPicking(useVignette = true) {
 }
 
 function exitSpawnPicking() {
+  transitionGen++;
+  try {
+    viewer.camera.cancelFlight();
+  } catch (e) { /* no flight in progress */ }
   setStreetsVisible(false);
   clearNotablePlaces();
   if (spawnInstruction) spawnInstruction.classList.add("hidden");
@@ -699,6 +711,11 @@ function getSpawnPinImage() {
 function confirmSpawn() {
   // Radial (see-through center) fade, NOT solid black — the spawn flight
   // itself must stay visible while the camera dives onto the city.
+  transitionGen++;
+  const gen = transitionGen;
+  try {
+    viewer.camera.cancelFlight();
+  } catch (e) { /* no flight in progress */ }
   setStreetsVisible(false);
   clearNotablePlaces();
   if (vignette) {
@@ -707,6 +724,7 @@ function confirmSpawn() {
   }
 
   setTimeout(() => {
+    if (gen !== transitionGen) return;
     if (spawnMarker) {
       viewer.entities.remove(spawnMarker);
       spawnMarker = null;
@@ -824,7 +842,9 @@ function confirmSpawn() {
         duration: 2.4,
         easingFunction: Cesium.EasingFunction.QUADRATIC_IN_OUT,
         complete: () => {
+          if (gen !== transitionGen) return;
           setTimeout(() => {
+            if (gen !== transitionGen) return;
             flightStartTime = Date.now();
             if (uiContainer) uiContainer.classList.remove("hidden");
             if (threeContainer) threeContainer.classList.remove("hidden");
@@ -861,6 +881,7 @@ function confirmSpawn() {
     // animation is interrupted, which would leave the player stranded behind
     // the transition vignette. Force FLYING after the two-phase flight.
     setTimeout(() => {
+      if (gen !== transitionGen) return;
       if (currentState !== States.TRANSITIONING) return;
       flightStartTime = Date.now();
       if (uiContainer) uiContainer.classList.remove("hidden");
@@ -1046,6 +1067,7 @@ function checkCrash() {
     // explosion), hide the wreck, and hold the fireball on screen briefly
     // before dropping to the pause menu.
     currentState = States.PAUSED;
+    const gen = transitionGen;
     try {
       // Only detonate once per wreck (resume-after-crash re-triggers this
       // check while still inside the terrain).
@@ -1056,6 +1078,10 @@ function checkCrash() {
       }
     } catch (e) { /* explosion is cosmetic; never break the crash flow */ }
     setTimeout(() => {
+      // Stale guard: a respawn/restart started after this crash must not be
+      // yanked back to the menu by the old timer.
+      if (gen !== transitionGen) return;
+      if (currentState !== States.PAUSED) return;
       if (uiContainer) uiContainer.classList.add("hidden");
       if (threeContainer) threeContainer.classList.add("hidden");
       if (pauseMenu) pauseMenu.classList.remove("hidden");
@@ -1074,6 +1100,26 @@ function animate() {
   if (currentState === States.FLYING || currentState === States.PAUSED || currentState === States.TRANSITIONING) {
     if (currentState === States.FLYING) {
       update(dt);
+    } else if (currentState === States.TRANSITIONING && planeModel?.model) {
+      // Keep the jet breathing (idle wobble, flames) through the spawn dive
+      // so it never freezes a frame before flight starts.
+      try {
+        planeModel.update(
+          {
+            boostDuration: CONFIG.boost.duration,
+            boostTimeRemaining: 0,
+            boostRotations: CONFIG.boost.rotations,
+            speed: 0,
+            throttle: 0,
+          },
+          {
+            pitch: 0, roll: 0, yaw: 0, throttle: 0,
+            cameraYaw: 0, cameraPitch: 0, isDragging: false,
+          },
+          dt,
+          false
+        );
+      } catch (e) { /* cosmetic */ }
     }
 
     state.isFlying = currentState === States.FLYING;
