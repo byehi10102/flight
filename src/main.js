@@ -925,6 +925,7 @@ function update(dt) {
   state.throttle = input.throttle;
   state.yaw = input.yaw;
   state.isBoosting = physicsResult.isBoosting;
+  state.boostCharge = physicsResult.boostCharge;
   state.stallFactor = 0;
   state.onGround = false;
 

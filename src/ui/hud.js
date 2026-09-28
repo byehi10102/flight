@@ -26,6 +26,8 @@ export class Hud {
     this.scoreEl = document.getElementById("score");
     this.localDatetimeEl = document.getElementById("local-datetime");
     this.statusEl = document.getElementById("hud-status");
+    this.boostFill = document.getElementById("boost-fill");
+    this.boostLabel = document.getElementById("boost-label");
     this.uiContainer = document.getElementById("uiContainer");
     this.vignette = document.getElementById("transition-vignette");
 
@@ -315,6 +317,19 @@ export class Hud {
       if (this.fpsEl) this.fpsEl.textContent = Math.round(fps);
       this._fpsFrames = 0;
       this._fpsLast = t;
+    }
+
+    // ── Boost meter: drains across one boost, refills right after ──
+    const charge = Math.max(0, Math.min(1, state.boostCharge ?? 1));
+    if (this.boostFill) {
+      this.boostFill.style.width = `${Math.round(charge * 100)}%`;
+      this.boostFill.classList.toggle("low", charge < 0.3);
+      this.boostFill.classList.toggle("draining", !!state.isBoosting);
+    }
+    if (this.boostLabel) {
+      this.boostLabel.innerText = state.isBoosting
+        ? "BOOST"
+        : charge >= 0.999 ? "BOOST READY" : `CHARGING ${Math.round(charge * 100)}%`;
     }
 
     // ── Horizon follows smoothed attitude ──

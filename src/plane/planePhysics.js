@@ -27,12 +27,15 @@ export class PlanePhysics {
 		this.boostMultiplier = 2.0;
 		this.boostRotations = 2;
 		this.boostPressed = false;
+		// Boost meter 0..1: drains across one boost, refills in ~1.5s, and a
+		// new boost needs a full meter.
+		this.boostCharge = 1;
 
 		this.quaternion = new THREE.Quaternion();
 	}
 
 	boost() {
-		if (this.boostTimeRemaining <= 0) {
+		if (this.boostTimeRemaining <= 0 && this.boostCharge >= 0.999) {
 			this.isBoosting = true;
 			this.boostTimeRemaining = this.boostDuration;
 		}
@@ -42,6 +45,9 @@ export class PlanePhysics {
 		this.heading = heading || 0;
 		this.pitch = pitch || 0;
 		this.roll = roll || 0;
+		this.isBoosting = false;
+		this.boostTimeRemaining = 0;
+		this.boostCharge = 1;
 
 		const euler = new THREE.Euler(
 			THREE.MathUtils.degToRad(this.pitch),
@@ -75,6 +81,9 @@ export class PlanePhysics {
 
 		if (this.isBoosting) {
 			targetSpeed = this.maxSpeed * this.boostMultiplier;
+			this.boostCharge = Math.max(0, this.boostCharge - dt / this.boostDuration);
+		} else {
+			this.boostCharge = Math.min(1, this.boostCharge + dt / 1.5);
 		}
 
 		this.speed += (targetSpeed - this.speed) * dt * (this.isBoosting ? 8 : 3);
@@ -109,7 +118,8 @@ export class PlanePhysics {
 			isBoosting: this.isBoosting,
 			boostTimeRemaining: this.boostTimeRemaining,
 			boostDuration: this.boostDuration,
-			boostRotations: this.boostRotations
+			boostRotations: this.boostRotations,
+			boostCharge: this.boostCharge
 		};
 	}
 }

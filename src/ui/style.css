@@ -517,6 +517,50 @@ html, body {
   letter-spacing: 2px;
 }
 
+/* Boost meter */
+#boost-container {
+  position: absolute;
+  bottom: 52px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 220px;
+  text-align: center;
+}
+
+#boost-label {
+  font-size: 11px;
+  font-family: "Consolas", monospace;
+  letter-spacing: 2px;
+  color: #0f0;
+  text-shadow: 0 0 4px rgba(0, 255, 0, 0.5);
+  margin-bottom: 4px;
+}
+
+.boost-track {
+  height: 10px;
+  background: rgba(0, 0, 0, 0.6);
+  border: 1px solid rgba(0, 255, 0, 0.5);
+  border-radius: 5px;
+  overflow: hidden;
+}
+
+#boost-fill {
+  height: 100%;
+  width: 100%;
+  background: linear-gradient(90deg, #00aa00, #0f0);
+  box-shadow: 0 0 8px rgba(0, 255, 0, 0.8);
+  transition: width 0.1s linear;
+}
+
+#boost-fill.low {
+  background: linear-gradient(90deg, #aa0000, #f00);
+  box-shadow: 0 0 8px rgba(255, 0, 0, 0.8);
+}
+
+#boost-fill.draining {
+  box-shadow: 0 0 12px rgba(255, 255, 0, 0.9);
+}
+
 /* Minimap (above the corner attitude panel) */
 #minimap-container {
   position: absolute;
