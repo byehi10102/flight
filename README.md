@@ -50,7 +50,7 @@ Speeds are **MPH**, shown raw on the HUD:
 
 Physics runs in fixed 1/60 s substeps of real elapsed time, so the jet covers
 true distance at any frame rate (verified identical ground track at 60 fps and
-10 fps). The boost meter drains across one 2.5 s burn, cuts at zero, recharges
+10 fps). The boost meter drains across one 5 s burn, cuts at zero, recharges
 to full in ~1.5 s, and only fires on a full meter.
 
 ## HUD

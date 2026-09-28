@@ -22,7 +22,7 @@ const States = {
 
 let currentState = States.MENU;
 
-// Flight speeds are MPH throughout (100 slow cruise, 1000 max on W, 2000 on
+// Flight speeds are MPH throughout (500 cruise, 5000 max on W, 10000 on
 // boost); world movement needs m/s.
 const MPH_TO_MPS = 0.44704;
 
@@ -1161,13 +1161,16 @@ function update(dt) {
     Cesium.Math.toDegrees(finalHPR.roll)
   );
 
-  // Boost FOV kick: widening the frustum while boosting is what makes the
-  // extra speed VISIBLE as terrain rushes past faster.
+  // Speed-visible camera: FOV widens continuously with TRUE speed so 5000
+  // mph already rushes and 10000 mph screams — boost adds an extra kick.
+  // World motion itself is untouched: movePosition() below converts MPH to
+  // m/s linearly every substep, so the ground track is already real.
   try {
     const frustum = viewer.camera.frustum;
     if (frustum && typeof frustum.fovy === "number") {
       const baseFov = Math.PI / 3;
-      const targetFov = physicsResult.isBoosting ? baseFov * 1.32 : baseFov;
+      const speedFactor = Math.max(0, Math.min(1, (state.speed - 500) / 9500));
+      const targetFov = baseFov * (1 + speedFactor * 0.18 + (physicsResult.isBoosting ? 0.14 : 0));
       const cur = frustum.fovy;
       frustum.fovy = cur + (targetFov - cur) * Math.min(1, dt * 5);
     }

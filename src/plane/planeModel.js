@@ -85,14 +85,11 @@ export class PlaneModel {
   update(state, input, dt, isBoosting) {
     if (!this.model) return;
 
-    // Acceleration inertia (ref-flight main.js): accelerating pushes the
-    // visual model forward, decelerating pulls it back. Frozen while
-    // dragging so look-around doesn't slide the jet.
+    // W/throttle must NOT shove the jet around on screen — only the boost
+    // gets a forward punch (boostZOffset below). So no accel-inertia slide.
     const speed = state.speed ?? this.prevSpeed;
-    const accel = dt > 0 ? (speed - this.prevSpeed) / dt : 0;
     this.prevSpeed = speed;
-    const accelInertia = input.isDragging ? 0 : Math.max(-0.5, Math.min(1.5, accel * 0.001));
-    let targetZ = BASE_PLANE_POS.z - accelInertia;
+    let targetZ = BASE_PLANE_POS.z;
 
     // Boost visual effects (copied from ref-flight)
     if (isBoosting && !this.lastIsBoosting) {
