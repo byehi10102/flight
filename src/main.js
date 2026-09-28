@@ -28,6 +28,9 @@ let currentState = States.MENU;
 // feel like they should.
 const MPH_TO_MPS = 0.44704;
 const WORLD_SPEED_SCALE = 1.8;
+// Spawn pin reveal distance: the pin drops in once the jet is this far
+// from the spawn point (500 ft), so it never covers the screen on arrival.
+const PIN_REVEAL_M = 152.4;
 
 const state = {
   lon: -117.9143,
@@ -954,7 +957,7 @@ function confirmSpawn() {
     }
 
     // Spawn heading comes from the picker camera — read it BEFORE placing
-    // anything so the pin and the forward offset agree.
+    // anything so the pin and the dive agree.
     try {
       const cam = viewer.camera;
       if (cam && typeof cam.heading === "number") {
@@ -977,6 +980,10 @@ function confirmSpawn() {
       const carto = Cesium.Cartographic.fromDegrees(state.lon, state.lat);
       const groundH = viewer.scene.globe.getHeight(carto);
       spawnIndicator = viewer.entities.add({
+        // Hidden until the jet is 500 ft out (revealed in update): the jet
+        // spawns exactly on the chosen point, so a visible pin would fill
+        // the screen on arrival.
+        show: false,
         position: Cesium.Cartesian3.fromDegrees(
           state.lon, state.lat, groundH === undefined ? 0 : groundH
         ),
@@ -1002,16 +1009,9 @@ function confirmSpawn() {
       });
     } catch (e) { /* indicator is cosmetic */ }
 
-    // Spawn the plane ~1 km AHEAD of the pin along the spawn heading, so the
-    // big indicator can never cover the screen on arrival.
-    try {
-      const hRad = Cesium.Math.toRadians(state.heading || 0);
-      const R = 6371000;
-      const latR = Cesium.Math.toRadians(state.lat);
-      state.lat += Cesium.Math.toDegrees((1000 * Math.cos(hRad)) / R);
-      state.lon += Cesium.Math.toDegrees((1000 * Math.sin(hRad)) / (R * Math.cos(latR)));
-    } catch (e) { /* offset is cosmetic */ }
-
+    // The jet spawns exactly on the chosen point — no forward offset — and
+    // the dive animation lands dead on it. The hidden pin drops in at
+    // 500 ft (see update) to mark where you launched.
     const ctrl = viewer.scene.screenSpaceCameraController;
     ctrl.enableRotate = false;
     ctrl.enableTranslate = false;
@@ -1289,6 +1289,15 @@ function update(dt) {
       groundSampler.seed(pts).catch(() => {});
     }
   } catch (e) { /* preload is best-effort */ }
+
+  // Pin drop: the spawn pin stays hidden through the dive and pops in once
+  // the jet is 500 ft out, marking the exact launch point behind you.
+  try {
+    if (spawnIndicator && spawnIndicator.show === false && state.spawnLon !== null) {
+      const distFromSpawn = calculateDistance(state.lon, state.lat, state.spawnLon, state.spawnLat);
+      if (distFromSpawn > PIN_REVEAL_M) spawnIndicator.show = true;
+    }
+  } catch (e) { /* indicator is cosmetic */ }
 
   checkCrash();
   checkGPWS();
