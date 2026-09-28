@@ -23,6 +23,28 @@ export function getViewer() {
   return mainViewer;
 }
 
+/**
+ * Open-ocean tile gaps (failed tiles at high zoom, seen over parts of the
+ * Atlantic): re-request a failed tile from the same zoom/row over the
+ * mid-Pacific instead of rendering a gap. Donor failures rethrow so
+ * Cesium's normal parent-tile fallback still applies.
+ */
+export function withOceanDonor(provider) {
+  try {
+    const origRequest = provider.requestImage.bind(provider);
+    provider.requestImage = (x, y, level) =>
+      Promise.resolve()
+        .then(() => origRequest(x, y, level))
+        .catch((firstErr) => {
+          const n = Math.pow(2, level);
+          const donorX = Math.floor(n / 12) % n;
+          if (donorX === x) throw firstErr;
+          return origRequest(donorX, y, level);
+        });
+  } catch (e) { /* fallback stays as-is */ }
+  return provider;
+}
+
 export function createViewer(container) {
   const viewer = new Viewer(container, {
     animation: false,
@@ -76,11 +98,11 @@ export function applyBaseWorld(viewer) {
   });
   viewer.imageryLayers.addImageryProvider(base, 0);
 
-  const imagery = new UrlTemplateImageryProvider({
+  const imagery = withOceanDonor(new UrlTemplateImageryProvider({
     url: CONFIG.imagery.url,
     credit: new URL(CONFIG.imagery.attribution, window.location.href).href,
     maximumLevel: CONFIG.imagery.maximumLevel,
-  });
+  }));
   const layer = viewer.imageryLayers.addImageryProvider(imagery, 1);
   layer.maximumLevel = CONFIG.imagery.maximumLevel;
   try { layer.anisotropy = 16; } catch (e) { /* older Cesium */ }
@@ -278,10 +300,10 @@ export function initMiniViewer(containerId) {
       maximumLevel: CONFIG.imagery.fallbackMaximumLevel,
     });
     miniViewer.imageryLayers.addImageryProvider(base, 0);
-    const imagery = new UrlTemplateImageryProvider({
+    const imagery = withOceanDonor(new UrlTemplateImageryProvider({
       url: CONFIG.imagery.url,
       maximumLevel: CONFIG.imagery.maximumLevel,
-    });
+    }));
     miniViewer.imageryLayers.addImageryProvider(imagery, 1);
 
     const ctrl = miniViewer.scene.screenSpaceCameraController;

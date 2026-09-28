@@ -29,8 +29,8 @@ let currentState = States.MENU;
 const MPH_TO_MPS = 0.44704;
 const WORLD_SPEED_SCALE = 1.8;
 // Spawn pin reveal distance: the pin drops in once the jet is this far
-// from the spawn point (500 ft), so it never covers the screen on arrival.
-const PIN_REVEAL_M = 152.4;
+// from the spawn point (100 ft), so it never covers the screen on arrival.
+const PIN_REVEAL_M = 30.48;
 
 const state = {
   lon: -117.9143,
@@ -1291,7 +1291,7 @@ function update(dt) {
   } catch (e) { /* preload is best-effort */ }
 
   // Pin drop: the spawn pin stays hidden through the dive and pops in once
-  // the jet is 500 ft out, marking the exact launch point behind you.
+  // the jet is 100 ft out, marking the exact launch point behind you.
   try {
     if (spawnIndicator && spawnIndicator.show === false && state.spawnLon !== null) {
       const distFromSpawn = calculateDistance(state.lon, state.lat, state.spawnLon, state.spawnLat);

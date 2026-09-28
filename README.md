@@ -20,7 +20,7 @@ npm run build      # production bundle in dist/
    full address: city, county, state, country.
 3. Click **SPAWN HERE** — the camera pulls up, dives onto the spawn point, and
    the jet fades in mid-dive.
-4. Fly. The jet spawns exactly on your point; once you're 500 ft out, a red
+4. Fly. The jet spawns exactly on your point; once you're 100 ft out, a red
    3D map pin drops onto the launch point so you can navigate back to
    it (also shown on the minimap, with a rim arrow when it is off-screen).
 5. Hit terrain and you crash: fireball, then the pause menu. **RESPAWN AT
@@ -151,7 +151,7 @@ revert removed the roads overlay, pinch/trackpad zoom buttons and the
   fallback labels where geocoding has no address.
 - **Spawn pin** — red pin → big glossy 3D billboard (distance-culled past
   ~150 km); the jet lands dead on the chosen point and the pin drops in at
-  500 ft, so it never covers the screen on arrival; exact
+  100 ft, so it never covers the screen on arrival; exact
   artwork supported via `public/spawn-pin.png`.
 - **Default spawn: Anaheim, CA** (33.8366°N, 117.9143°W) after GPS/IP lookup
   proved unreliable in this environment.
