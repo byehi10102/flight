@@ -17,6 +17,12 @@ import { CONFIG } from "./config.js";
  * one keyless imagery provider, no token anywhere. Everything else in the app
  * layers on top of this.
  */
+let mainViewer = null;
+
+export function getViewer() {
+  return mainViewer;
+}
+
 export function createViewer(container) {
   const viewer = new Viewer(container, {
     animation: false,
@@ -48,6 +54,7 @@ export function createViewer(container) {
   // Freeze the simulation clock: we pin the time ourselves for permanent
   // daylight, so a ticking clock must never drag the sun into night.
   viewer.clock.shouldAnimate = false;
+  mainViewer = viewer;
   return viewer;
 }
 

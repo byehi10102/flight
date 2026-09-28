@@ -2,13 +2,15 @@
  * HUD — ported from dimartarmizi/web-flight-simulator src/ui/hud.js
  * (flight-display parts only: horizon + pitch ladder, compass tape,
  * speed/alt/heading/coords, region + pull-up warnings, tactical minimap,
- * UI tilt/shake). Weapon/NPC/Cesium-minimap systems omitted — this repo
- * has no weapon or NPC systems, so those calls are guarded out.
+ * UI tilt/shake). Weapon/NPC systems omitted — this repo has no weapon or
+ * NPC systems, so those calls are guarded out. The tactical minimap pairs a
+ * live Cesium top-down view (like ref-flight) with the canvas overlay.
  *
  * Public API kept compatible with src/main.js:
  *   update(state, now), showRegion(name), setPullUpWarning(bool),
  *   updateMinimap(state), resetScore(), resetTime(), resizeMinimap()
  */
+import { getViewer } from "../core/viewer.js";
 export class Hud {
   constructor() {
     this.speedEl = document.getElementById("speed");
@@ -345,34 +347,50 @@ export class Hud {
       ctx.stroke();
     }
 
-    // Heading-rotated grid (tactical feel from ref-flight, canvas only)
+    // Heading-rotated, meter-true grid (ref-flight): each line is exactly
+    // one range-unit (rangeKm × 1000 m), so grid matches the world scale.
+    // `heading` is the SAME smoothed value driving the real-map camera.
+    const heading = state.minimapHeading ?? this.smoothedHeading;
+    const rangeKm = (state.minimapRange || 1000) / 1000;
+    const zoomAlt = state.minimapZoom || rangeKm * 1500;
+    const verticalMeters = zoomAlt * 1.1547;
+    const pixelsPerMeter = h / verticalMeters;
+    const metersPerGrid = rangeKm * 1000;
+    const gridSize = (metersPerGrid * h) / verticalMeters;
     ctx.save();
     ctx.translate(cx, cy);
-    ctx.rotate((-this.smoothedHeading * Math.PI) / 180);
+    ctx.rotate((-heading * Math.PI) / 180);
     ctx.strokeStyle = "rgba(0, 255, 0, 0.35)";
-    const gridSize = 30;
-    const limit = radius * 2;
-    for (let x = 0; x <= limit; x += gridSize) {
-      ctx.beginPath(); ctx.moveTo(x, -limit); ctx.lineTo(x, limit); ctx.stroke();
-      if (x > 0) { ctx.beginPath(); ctx.moveTo(-x, -limit); ctx.lineTo(-x, limit); ctx.stroke(); }
+    const gridLimit = radius * 2;
+    for (let x = 0; x <= gridLimit; x += gridSize) {
+      ctx.beginPath(); ctx.moveTo(x, -gridLimit); ctx.lineTo(x, gridLimit); ctx.stroke();
+      if (x > 0) { ctx.beginPath(); ctx.moveTo(-x, -gridLimit); ctx.lineTo(-x, gridLimit); ctx.stroke(); }
     }
-    for (let y = 0; y <= limit; y += gridSize) {
-      ctx.beginPath(); ctx.moveTo(-limit, y); ctx.lineTo(limit, y); ctx.stroke();
-      if (y > 0) { ctx.beginPath(); ctx.moveTo(-limit, -y); ctx.lineTo(limit, -y); ctx.stroke(); }
+    for (let y = 0; y <= gridLimit; y += gridSize) {
+      ctx.beginPath(); ctx.moveTo(-gridLimit, y); ctx.lineTo(gridLimit, y); ctx.stroke();
+      if (y > 0) { ctx.beginPath(); ctx.moveTo(-gridLimit, -y); ctx.lineTo(gridLimit, -y); ctx.stroke(); }
     }
     ctx.restore();
 
-    // FOV wedge + crosshair
+    // FOV wedge from the LIVE main-camera frustum (follows the boost FOV
+    // kick), falling back to 45° if the viewer is unreachable.
     ctx.strokeStyle = "rgba(0, 255, 0, 0.7)";
     ctx.lineWidth = 1.2;
+    let halfHFov = Math.PI / 4;
+    try {
+      const mainViewer = getViewer();
+      if (mainViewer?.camera?.frustum) {
+        const fovy = mainViewer.camera.frustum.fovy;
+        const aspect = window.innerWidth / window.innerHeight;
+        halfHFov = Math.atan(Math.tan(fovy / 2) * aspect);
+      }
+    } catch (e) { /* fallback stands */ }
+    const len = w + h;
     ctx.beginPath();
     ctx.moveTo(cx, cy);
-    const halfFov = Math.PI / 4;
-    const len = w + h;
+    ctx.lineTo(cx - Math.sin(halfHFov) * len, cy - Math.cos(halfHFov) * len);
     ctx.moveTo(cx, cy);
-    ctx.lineTo(cx - Math.sin(halfFov) * len, cy - Math.cos(halfFov) * len);
-    ctx.moveTo(cx, cy);
-    ctx.lineTo(cx + Math.sin(halfFov) * len, cy - Math.cos(halfFov) * len);
+    ctx.lineTo(cx + Math.sin(halfHFov) * len, cy - Math.cos(halfHFov) * len);
     ctx.stroke();
     ctx.strokeStyle = "rgba(0, 255, 0, 0.3)";
     ctx.beginPath();
@@ -383,11 +401,10 @@ export class Hud {
     // Original spawn point (red pin) relative to the jet, rotated by heading.
     // Same shared zoom the real-map camera uses (state.minimapZoom).
     if (state.spawnLon != null && state.spawnLat != null) {
-      const zoomAlt = state.minimapZoom || 2000;
-      const ppm = h / (zoomAlt * 1.1547);
+      const ppm = pixelsPerMeter;
       const dxm = (state.spawnLon - state.lon) * 111320 * Math.cos((state.lat * Math.PI) / 180);
       const dym = (state.spawnLat - state.lat) * 111320;
-      const hdg = (this.smoothedHeading * Math.PI) / 180;
+      const hdg = (heading * Math.PI) / 180;
       const rx = dxm * Math.cos(hdg) - dym * Math.sin(hdg);
       const ry = -dxm * Math.sin(hdg) - dym * Math.cos(hdg);
       const px = rx * ppm;
@@ -446,7 +463,7 @@ export class Hud {
       { label: "S", angle: 180 },
       { label: "W", angle: 270 },
     ].forEach((dir) => {
-      const rel = ((dir.angle - this.smoothedHeading) * Math.PI) / 180;
+      const rel = ((dir.angle - heading) * Math.PI) / 180;
       const sinA = Math.sin(rel);
       const cosA = Math.cos(rel);
       let dx, dy;
@@ -466,7 +483,7 @@ export class Hud {
     ctx.stroke();
 
     // Heading readout
-    const headingDeg = ((this.smoothedHeading % 360) + 360) % 360;
+    const headingDeg = ((heading % 360) + 360) % 360;
     ctx.fillStyle = "#0f0";
     ctx.font = "10px monospace";
     ctx.fillText(`${Math.round(headingDeg).toString().padStart(3, "0")}`, cx, 12);

@@ -44,6 +44,9 @@ const state = {
   // Minimap range in meters (1K / 5K / 10K setting, persisted).
   minimapRange: Number(localStorage.getItem("skywardMinimapRange")) || 1000,
   minimapZoom: 2000,
+  // Single smoothed heading feeding BOTH the real-map camera and the canvas
+  // overlay, so the two can never disagree mid-turn (ref-flight parity).
+  minimapHeading: 0,
 };
 
 // ── Three.js overlay ─────────────────────────────────────────────────────────
@@ -825,6 +828,7 @@ function confirmSpawn() {
     }
 
     controller.reset();
+    state.minimapHeading = state.heading;
     physics = new PlanePhysics();
     physics.reset(state.lon, state.lat, state.alt, state.heading, state.pitch, state.roll);
     particles.clear();
@@ -864,10 +868,6 @@ function confirmSpawn() {
             if (state.spawnName) hud.showRegion(`SPAWN · ${state.spawnName}`);
           try {
             getMiniViewer()?.resize();
-            // Snap the real-map minimap onto the spawn immediately so the
-            // first frame already matches the 3D world.
-            state.minimapZoom = state.minimapRange * 1.95 + state.speed * 0.5;
-            setMinimapCamera(state.lon, state.lat, state.minimapZoom, state.heading);
           } catch (e) { /* minimap is cosmetic */ }
             if (vignette) {
               vignette.style.opacity = "0";
@@ -1150,15 +1150,27 @@ function animate() {
     minimapUpdateTimer += dt;
     if (minimapUpdateTimer > 0.1) {
       minimapUpdateTimer = 0;
-      // One shared zoom model: the real-map camera and the canvas overlay
-      // both derive scale from state.minimapZoom, so they can never disagree.
-      // Range radius fills ~80 of 180px: view height ≈ 2.25×range.
-      const zoomAlt = state.minimapRange * 1.95 + state.speed * 0.5;
+      hud.updateMinimap(state);
+    }
+
+    // Minimap truth (ref-flight parity): smooth one shared heading, derive
+    // one shared zoom, and re-aim the real-map camera EVERY frame so the map
+    // never lags the world in turns. The canvas overlay reads the same two
+    // values from state.
+    {
+      let diff = state.heading - state.minimapHeading;
+      while (diff < -180) diff += 360;
+      while (diff > 180) diff -= 360;
+      state.minimapHeading += diff * Math.min(1, dt * 8);
+      while (state.minimapHeading <= -180) state.minimapHeading += 360;
+      while (state.minimapHeading > 180) state.minimapHeading -= 360;
+      const rangeKm = (state.minimapRange || 1000) / 1000;
+      let zoomAlt = rangeKm * 1500 + state.speed * (rangeKm * 2);
+      if (state.isBoosting) zoomAlt *= 1.2;
       state.minimapZoom = zoomAlt;
       try {
-        setMinimapCamera(state.lon, state.lat, zoomAlt, state.heading);
+        setMinimapCamera(state.lon, state.lat, zoomAlt, state.minimapHeading);
       } catch (e) { /* minimap is cosmetic */ }
-      hud.updateMinimap(state);
     }
 
     // Permanent daytime: re-pin the sun high at the aircraft's position
