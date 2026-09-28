@@ -881,6 +881,23 @@ function confirmSpawn() {
     vignette.style.opacity = "1";
   }
 
+  // 4 s loading beat: the sign shows while tiles stream, THEN the spawn
+  // flight plays. Seeds here (not after the wait) so the 4 s do real work.
+  try {
+    const pre = [];
+    for (let dy = -5; dy <= 5; dy++) {
+      for (let dx = -5; dx <= 5; dx++) {
+        pre.push([state.lat + dy * 0.01, state.lon + dx * 0.01]);
+      }
+    }
+    groundSampler.seed(pre).catch(() => {});
+    viewer.scene.requestRender();
+  } catch (e) { /* warm-up is best-effort */ }
+  if (loadingIndicator && loadingText) {
+    loadingText.textContent = "Loading...";
+    loadingIndicator.classList.remove("hidden");
+  }
+
   setTimeout(() => {
     if (gen !== transitionGen) return;
     if (spawnMarker) {
@@ -1122,7 +1139,7 @@ function confirmSpawn() {
         vignette.classList.remove("solid");
       }
     }, Math.round((phase1dur + phase2dur + 2.0 + 6.0) * 1000));
-  }, 500);
+  }, 4000);
 }
 
 // ── Flight update ────────────────────────────────────────────────────────────
@@ -1368,20 +1385,19 @@ function checkCrash() {
     state.agl = 0;
     // Crash: detonate at the plane's on-screen position (ref-flight style
     // explosion), hide the wreck, and hold the fireball on screen briefly
-    // before dropping to the pause menu.
+    // before dropping to the pause menu. Detonation is synchronous with
+    // impact — no delays before the flash or the sound.
     currentState = States.PAUSED;
     const gen = transitionGen;
     stopAllFlyingSounds(0.1);
-    setTimeout(() => {
-      soundManager.play("explode");
-      soundManager.play("ambient-crash");
-    }, 50);
+    soundManager.play("explode");
+    soundManager.play("ambient-crash");
     try {
       // Only detonate once per wreck (resume-after-crash re-triggers this
       // check while still inside the terrain).
       if (!planeModel?.model || planeModel.model.visible !== false) {
         const at = planeModel?.model?.position?.clone?.() ?? null;
-        particles.spawnExplosion(at, { big: true, count: 48, smokeCount: 10 });
+        particles.spawnExplosion(at, { big: true, count: 72, smokeCount: 16 });
         if (planeModel?.model) planeModel.model.visible = false;
       }
     } catch (e) { /* explosion is cosmetic; never break the crash flow */ }
@@ -1393,7 +1409,7 @@ function checkCrash() {
       if (uiContainer) uiContainer.classList.add("hidden");
       if (threeContainer) threeContainer.classList.add("hidden");
       if (pauseMenu) pauseMenu.classList.remove("hidden");
-    }, 1600);
+    }, 1000);
   }
 }
 

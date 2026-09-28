@@ -33,8 +33,8 @@ export const particles = {
     const big = opts.big !== false;
     const origin = center?.clone?.() ?? new THREE.Vector3(0, -0.8, -2.75);
 
-    // White flash
-    const flashSize = big ? 2.2 : 1.2;
+    // White flash (bigger, holds a beat longer so impact reads instantly)
+    const flashSize = big ? 3.0 : 1.6;
     const flash = new THREE.Mesh(
       new THREE.SphereGeometry(flashSize, 12, 10),
       new THREE.MeshBasicMaterial({
@@ -43,18 +43,38 @@ export const particles = {
     );
     flash.position.copy(origin);
     flash.layers.set(1);
-    flash.life = 0.22;
-    flash.maxLife = 0.22;
+    flash.life = 0.3;
+    flash.maxLife = 0.3;
     flash._expand = true;
-    flash._expandAmount = big ? 2.5 : 1.5;
+    flash._expandAmount = big ? 3.0 : 1.5;
     this.scene.add(flash);
     this.list.push(flash);
 
-    // Fireballs (orange HSL, additive)
+    // Shockwave ring, face-on to the chase camera, expanding + fading.
+    // The generic update() loop below drives life/opacity/growth.
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(0.9, 1.0, 48),
+      new THREE.MeshBasicMaterial({
+        color: 0xffddaa, blending: THREE.AdditiveBlending, transparent: true,
+        opacity: 0.9, side: THREE.DoubleSide, depthWrite: false,
+      })
+    );
+    ring.position.copy(origin);
+    ring.layers.set(1);
+    ring.life = 0.5;
+    ring.maxLife = 0.5;
+    ring._expand = true;
+    ring._expandAmount = big ? 7.0 : 4.0;
+    this.scene.add(ring);
+    this.list.push(ring);
+
+    // Fireballs (orange HSL, additive) with a white-hot core fraction
     const fireCount = opts.count || (big ? 48 : 24);
     for (let i = 0; i < fireCount; i++) {
-      const size = (big ? 0.25 : 0.15) + Math.random() * (big ? 0.9 : 0.4);
-      const color = new THREE.Color().setHSL(0.08 - Math.random() * 0.05, 1.0, 0.5 + Math.random() * 0.2);
+      const size = (big ? 0.25 : 0.15) + Math.random() * (big ? 1.1 : 0.4);
+      const color = i % 3 === 0
+        ? new THREE.Color().setHSL(0.12, 1.0, 0.75 + Math.random() * 0.15)
+        : new THREE.Color().setHSL(0.08 - Math.random() * 0.05, 1.0, 0.5 + Math.random() * 0.2);
       const m = new THREE.Mesh(
         new THREE.SphereGeometry(size, 8, 6),
         new THREE.MeshBasicMaterial({
