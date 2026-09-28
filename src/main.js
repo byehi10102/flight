@@ -453,6 +453,18 @@ function photonToItems(data) {
   });
 }
 
+function openMeteoToItems(data) {
+  const results = data?.results || [];
+  return results.slice(0, 5).map((r) => {
+    const bits = [r.name, r.admin1, r.country].filter(Boolean);
+    return {
+      display_name: bits.join(", ") || "Unknown place",
+      lon: String(r.longitude),
+      lat: String(r.latitude),
+    };
+  });
+}
+
 async function performSearch(query) {
   const seq = ++searchSeq;
   const stillCurrent = () => seq === searchSeq && currentState === States.PICK_SPAWN;
@@ -478,39 +490,61 @@ async function performSearch(query) {
     searchResults.style.display = "block";
   };
 
+  // Three keyless providers in order; ANY failure cascades to the next, so
+  // one throttled or blocked host can never take search down by itself.
+  // Nominatim answers rate limits with HTML (no JSON body), which is why
+  // the old code died with "unavailable" instead of falling through.
   try {
     showStatus("Searching…");
-    const url =
-      `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=5`;
-    let data;
+    const q = encodeURIComponent(query);
+    let anySuccess = false;
     try {
-      data = await fetchJsonOk(url);
-    } catch (err) {
-      // Nominatim throttles aggressively (429/403 with no JSON body): one
-      // polite retry, then the keyless Photon fallback for the same query.
-      if (err?.status === 429 || err?.status === 403) {
-        showStatus("Map server is busy — retrying…");
-        await new Promise((r) => setTimeout(r, 1200));
-        if (!stillCurrent()) return;
-        try {
-          data = await fetchJsonOk(url);
-        } catch (retryErr) {
-          showStatus("Trying backup map server…");
-          const photon = await fetchJsonOk(
-            `https://photon.komoot.io/api/?q=${encodeURIComponent(query)}&limit=5`
-          );
-          renderItems(photonToItems(photon));
-          return;
-        }
-      } else {
-        throw err;
+      const data = await fetchJsonOk(
+        `https://nominatim.openstreetmap.org/search?format=json&q=${q}&limit=5`, 7000
+      );
+      anySuccess = true;
+      if (Array.isArray(data) && data.length) {
+        renderItems(data);
+        return;
       }
+    } catch (err) { console.warn("Search: nominatim failed, trying backup:", err?.status || err); }
+    if (!stillCurrent()) return;
+    showStatus("Trying backup map server…");
+    try {
+      const photon = await fetchJsonOk(`https://photon.komoot.io/api/?q=${q}&limit=5`, 7000);
+      anySuccess = true;
+      const items = photonToItems(photon);
+      if (items.length) {
+        renderItems(items);
+        return;
+      }
+    } catch (err) { console.warn("Search: photon failed, trying backup:", err?.status || err); }
+    if (!stillCurrent()) return;
+    try {
+      const geo = await fetchJsonOk(
+        `https://geocoding-api.open-meteo.com/v1/search?name=${q}&count=5&language=en&format=json`, 7000
+      );
+      anySuccess = true;
+      const items = openMeteoToItems(geo);
+      if (items.length) {
+        renderItems(items);
+        return;
+      }
+    } catch (err) { console.warn("Search: open-meteo failed:", err?.status || err); }
+    if (!stillCurrent()) return;
+    if (!anySuccess) {
+      // All three hosts unreachable from this network — keep any good
+      // results already on screen instead of wiping them.
+      const hasPlaces = searchResults.querySelector(".search-result-item:not(.search-status)");
+      if (!hasPlaces) {
+        searchResults.style.display = "block";
+        searchResults.innerHTML = '<div class="search-result-item">Search is offline right now — check connection and retry</div>';
+      }
+    } else {
+      renderItems([]);
     }
-    renderItems(Array.isArray(data) ? data : []);
   } catch (error) {
     console.error("Search error:", error);
-    // Never wipe good results for a failed keystroke: if the list already
-    // holds places, leave it; otherwise say so plainly.
     if (!stillCurrent()) return;
     const hasPlaces = searchResults.querySelector(".search-result-item:not(.search-status)");
     if (!hasPlaces) {
@@ -671,6 +705,16 @@ function selectSpawnPoint(lon, lat, baseHeight, label, shortName, cartesian) {
 
   if (!label) {
     reverseGeocodeDetailed(lon, lat).then((place) => {
+      // Null = every provider failed: fall back to coordinates rather than
+      // sticking on "FETCHING LOCATION INFO...".
+      if (!place) {
+        if (instructionText) {
+          const la = `${Math.abs(lat).toFixed(2)}°${lat >= 0 ? "N" : "S"}`;
+          const lo = `${Math.abs(lon).toFixed(2)}°${lon >= 0 ? "E" : "W"}`;
+          instructionText.textContent = `${la} ${lo}`;
+        }
+        return;
+      }
       pendingSpawnName = place.short;
       if (instructionText) instructionText.textContent = place.label;
     }).catch(() => {});
