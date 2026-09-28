@@ -996,6 +996,20 @@ function confirmSpawn() {
           pts.push([state.lat + dy * 0.01, state.lon + dx * 0.01]);
         }
       }
+      // Flight-path lead: points along the spawn heading out to ~12 km so
+      // the first seconds of flight already have sampled elevation ahead.
+      try {
+        const hRad = Cesium.Math.toRadians(state.heading || 0);
+        const R = 6371000;
+        const latR = Cesium.Math.toRadians(state.lat);
+        const cosLat = Math.max(0.2, Math.cos(latR));
+        for (const dist of [3000, 6000, 9000, 12000]) {
+          pts.push([
+            state.lat + Cesium.Math.toDegrees((dist * Math.cos(hRad)) / R),
+            state.lon + Cesium.Math.toDegrees((dist * Math.sin(hRad)) / (R * cosLat)),
+          ]);
+        }
+      } catch (e) { /* box alone still helps */ }
       groundSampler.seed(pts).catch(() => {});
       viewer.scene.requestRender();
     } catch (e) { /* warm-up is best-effort */ }
@@ -1046,11 +1060,14 @@ function confirmSpawn() {
       });
     };
     // Hold-for-tiles: perch above the spawn until the globe reports its
-    // tiles loaded (or 2.5 s pass), so the dive lands on high-detail
-    // terrain instead of soft placeholders that sharpen mid-flight.
+    // tiles loaded twice in a row (or 6 s pass), so the dive lands on
+    // high-detail terrain instead of soft placeholders that sharpen
+    // mid-flight. The longer budget is deliberate: at boost speeds the jet
+    // covers ~8 km/s and never gets a second chance at first-load tiles.
     const waitForTilesThenDive = () => {
       const start = performance.now();
-      const budgetMs = 2500;
+      const budgetMs = 6000;
+      let readyStreak = 0;
       if (loadingIndicator && loadingText) {
         loadingText.textContent = "Loading high-detail terrain...";
         loadingIndicator.classList.remove("hidden");
@@ -1062,7 +1079,8 @@ function confirmSpawn() {
         try {
           ready = viewer.scene.globe.tilesLoaded === true;
         } catch (e) { ready = true; }
-        if (ready || performance.now() - start > budgetMs) {
+        readyStreak = ready ? readyStreak + 1 : 0;
+        if (readyStreak >= 2 || performance.now() - start > budgetMs) {
           if (loadingIndicator) loadingIndicator.classList.add("hidden");
           diveToSpawn();
         } else {
@@ -1103,7 +1121,7 @@ function confirmSpawn() {
         vignette.style.opacity = "0";
         vignette.classList.remove("solid");
       }
-    }, Math.round((phase1dur + phase2dur + 2.0 + 2.5) * 1000));
+    }, Math.round((phase1dur + phase2dur + 2.0 + 6.0) * 1000));
   }, 500);
 }
 
@@ -1178,11 +1196,12 @@ function update(dt) {
     state.agl = state.alt;
   }
 
-  // Forward tile preload: twice a second, prime the terrain cache in a ~12 km
-  // fan ahead of the nose (3/6/9/12 km out, ±2 km lateral), so fast flight
-  // lands on sampled elevation instead of outrunning it. Imagery ahead
-  // streams on its own — the forward-looking camera drives it every frame
-  // via setCameraToPlane below; this covers the elevation side.
+  // Forward tile preload: twice a second, prime the terrain cache in a fan
+  // ahead of the nose. The lead scales with TRUE ground speed (~2.5 s of
+  // flight, 3–20 km), so cruise doesn't waste fetches far away while boost
+  // still has sampled elevation waiting. Imagery ahead streams on its own —
+  // the forward-looking camera drives it every frame via setCameraToPlane
+  // below; this covers the elevation side.
   try {
     preloadTimer += dt;
     if (preloadTimer > 0.5) {
@@ -1191,8 +1210,11 @@ function update(dt) {
       const R = 6371000;
       const latR = Cesium.Math.toRadians(state.lat);
       const cosLat = Math.max(0.2, Math.cos(latR));
+      const groundSpeed = (state.speed || 500) * MPH_TO_MPS * WORLD_SPEED_SCALE;
+      const lead = Math.min(20000, Math.max(3000, groundSpeed * 2.5));
       const pts = [];
-      for (const dist of [3000, 6000, 9000, 12000]) {
+      for (const frac of [0.25, 0.5, 0.75, 1.0]) {
+        const dist = lead * frac;
         for (const side of [-2000, 0, 2000]) {
           const fwd = dist;
           const dLat = (fwd * Math.cos(hRad) - side * Math.sin(hRad)) / R;

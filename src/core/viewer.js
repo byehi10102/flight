@@ -105,7 +105,10 @@ export function applyBaseWorld(viewer) {
   viewer.scene.globe.tileCacheSize = 2048;
   viewer.scene.globe.preloadAncestors = true;
   viewer.scene.globe.preloadSiblings = true;
-  viewer.scene.globe.loadingDescendantLimit = 20;
+  // Raised concurrent tile-fetch budget: at 1.8x arcade speed (up to
+  // ~8 km/s in boost) the camera outruns the default fetch queue, so more
+  // descendants load per frame instead of arriving soft behind the jet.
+  viewer.scene.globe.loadingDescendantLimit = 48;
 
   // Water effect stays OFF: with it on, ocean areas whose tiles lack data
   // render as flat grey patches instead of matching the surrounding water.
