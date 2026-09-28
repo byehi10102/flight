@@ -44,8 +44,8 @@ npm run build      # production bundle in dist/
 Speeds are **MPH**, shown raw on the HUD:
 
 - Idle throttle: **500 mph** cruise — always visibly moving, never stagnant.
-- Full `W`: **3000 mph**.
-- `Space` boost: slams to **6000 mph** with an FOV kick, screen shake, edge
+- Full `W`: **5000 mph**.
+- `Space` boost: slams to **10000 mph** with an FOV kick, screen shake, edge
   vignette, afterburner flames and a barrel-roll flourish.
 
 Physics runs in fixed 1/60 s substeps of real elapsed time, so the jet covers
@@ -157,7 +157,7 @@ revert removed the roads overlay, pinch/trackpad zoom buttons and the
   + off-screen rim arrow; **1K/5K/10K range setting** on the home page.
 - **Landmark picker** — 16 labeled pins (tap to spawn), Esri places-label
   overlay, full city/county/state/country addresses, ± zoom buttons.
-- **MPH speed band** — 500 cruise / 3000 max / 6000 boost with MPH→m/s world
+- **MPH speed band** — 500 cruise / 5000 max / 10000 boost with MPH→m/s world
   mapping, boost FOV kick, snappier spool.
 - **Fixed-substep loop** — sim time tracks wall-clock at any frame rate.
 - **Minimap accuracy pass** — meter-true grid, one shared smoothed heading

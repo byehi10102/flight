@@ -107,7 +107,10 @@ export function applyBaseWorld(viewer) {
   viewer.scene.globe.preloadSiblings = true;
   viewer.scene.globe.loadingDescendantLimit = 20;
 
-  viewer.scene.globe.showWaterEffect = true;
+  // Water effect stays OFF: with it on, ocean areas whose tiles lack data
+  // render as flat grey patches instead of matching the surrounding water.
+  // Oceans read consistently from the imagery + base color instead.
+  viewer.scene.globe.showWaterEffect = false;
   viewer.scene.globe.depthTestAgainstTerrain = true;
   viewer.scene.globe.enableLighting = true;
   viewer.scene.globe.atmosphereLightIntensity = 10;

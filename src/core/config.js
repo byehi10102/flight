@@ -34,7 +34,7 @@ export const CONFIG = {
     mass: 38300,               // kg (CRJ-900)
     wingArea: 104.9,           // m²
     maxThrust: 147000,         // N (2 × 73.5 kN)
-    maxSpeed: 3000,             // mph — W tops out here
+    maxSpeed: 5000,             // mph — W tops out here
     minSpeed: 500,              // mph — fast cruise, never stagnant
     densitySeaLevel: 1.225,    // kg/m³
     temperatureSeaLevel: 288.15, // K

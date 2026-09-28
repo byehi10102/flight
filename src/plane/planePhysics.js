@@ -2,10 +2,10 @@ import * as THREE from 'three';
 
 export class PlanePhysics {
 	constructor() {
-		// Speeds are MPH: 500 cruises fast, W tops 3000, boost hits 6000.
+		// Speeds are MPH: 500 cruises, W tops 5000, boost hits 10000.
 		// main.js converts to m/s for world movement via MPH_TO_MPS.
 		this.speed = 500;
-		this.maxSpeed = 3000;
+		this.maxSpeed = 5000;
 		this.minSpeed = 500;
 		this.throttle = 0.5;
 		this.enginePower = 1.2;

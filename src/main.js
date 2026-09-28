@@ -994,7 +994,7 @@ function update(dt) {
 
   // ── Flight sounds (ref-flight behavior) ──
   if (soundManager.isPlaying("jet-engine")) {
-    const speedFactor = Math.max(0, Math.min(1, (state.speed - 500) / 5500));
+    const speedFactor = Math.max(0, Math.min(1, (state.speed - 500) / 9500));
     soundManager.setVolume("jet-engine", 0.5 + speedFactor * 0.1);
     soundManager.setVolume("wind", 0.1 + speedFactor * 0.35);
   }
