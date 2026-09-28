@@ -2,6 +2,7 @@ import * as THREE from "three";
 import * as Cesium from "cesium";
 import { movePosition } from "./math.js";
 import { particles } from "../utils/particles.js";
+import { soundManager } from "../utils/soundManager.js";
 
 /**
  * Cannon tracer, from dimartarmizi/web-flight-simulator src/weapon/bullet.js.
@@ -14,9 +15,10 @@ import { particles } from "../utils/particles.js";
  * where they hit. NPC hit checks are omitted: this repo has no NPCs.
  */
 export class Bullet {
-  constructor(scene, viewer, startPos, heading, pitch, speedMps) {
-    this.scene = scene;
-    this.viewer = viewer;
+	constructor(scene, viewer, startPos, heading, pitch, speedMps, onKill = null) {
+		this.scene = scene;
+		this.viewer = viewer;
+		this.onKill = onKill;
 
     this.lon = startPos.lon;
     this.lat = startPos.lat;
@@ -113,24 +115,33 @@ export class Bullet {
     this.scene.add(this.mesh);
   }
 
-  update(dt) {
-    if (!this.active) return;
+	update(dt, npcs) {
+		if (!this.active) return;
 
-    this.life -= dt;
-    if (this.life <= 0) {
-      this.destroy();
-      return;
-    }
+		this.life -= dt;
+		if (this.life <= 0) {
+			this.destroy();
+			return;
+		}
 
-    // Fixed firing path: integrated from launch attitude only.
-    const newPos = movePosition(this.lon, this.lat, this.alt, this.heading, this.pitch, this.speed * dt);
-    this.lon = newPos.lon;
-    this.lat = newPos.lat;
-    this.alt = newPos.alt;
+		const newPos = movePosition(this.lon, this.lat, this.alt, this.heading, this.pitch, this.speed * dt);
+		this.lon = newPos.lon;
+		this.lat = newPos.lat;
+		this.alt = newPos.alt;
 
-    this.updateThreeMatrix();
-    this.checkTerrainCollision();
-  }
+		this.updateThreeMatrix();
+
+		if (npcs) {
+			for (const npc of npcs) {
+				const distSq = this.calculateDistSqToNPC(npc);
+				if (distSq < 400) {
+					this.hitNPC(npc);
+					return;
+				}
+			}
+		}
+		this.checkTerrainCollision();
+	}
 
   updateThreeMatrix() {
     const viewMatrix = this.viewer.camera.viewMatrix;
@@ -174,7 +185,27 @@ export class Bullet {
     this.mesh.updateMatrixWorld(true);
   }
 
-  checkTerrainCollision() {
+	calculateDistSqToNPC(npc) {
+		const dLon = (npc.lon - this.lon) * 111320 * Math.cos(Cesium.Math.toRadians(this.lat));
+		const dLat = (npc.lat - this.lat) * 111320;
+		const dAlt = npc.alt - this.alt;
+		return dLon * dLon + dLat * dLat + dAlt * dAlt;
+	}
+
+	hitNPC(npc) {
+		npc.destroyed = true;
+		if (this.onKill) this.onKill(npc);
+		try {
+			// Ref calls particles.spawnExplosion(lon, lat, alt) + spawnWreckage
+			// here; this repo's particles API centers on an overlay-local
+			// point, so the world hit is projected (same fireball, same spot).
+			particles.spawnExplosionWorld(this.viewer, this.lon, this.lat, this.alt, { count: 36, smokeCount: 8, big: true });
+			try { soundManager.play('explosion-random'); } catch (e) { }
+		} catch (e) { }
+		this.destroy();
+	}
+
+	checkTerrainCollision() {
     try {
       const cartographic = Cesium.Cartographic.fromDegrees(this.lon, this.lat);
       const terrainHeight = this.viewer.scene.globe.getHeight(cartographic);

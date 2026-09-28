@@ -194,8 +194,9 @@ revert removed the roads overlay, pinch/trackpad zoom buttons and the
   street base + picker labels: Esri/HERE/Garmin, © OpenStreetMap contributors
 - **Aircraft model** — "Low poly F-15" by SIpriv (via
   dimartarmizi/web-flight-simulator)
-- **Sounds + flight/HUD design** — dimartarmizi/web-flight-simulator
-  (dual-licensed non-commercial — replace samples before any commercial use)
+- **Sounds + flight/HUD/weapon design** — dimartarmizi/web-flight-simulator
+  (dual-licensed non-commercial — replace samples and relicense weapon code
+  before any commercial use)
 - **Geocoding** — Nominatim / OpenStreetMap
 - **Engine** — CesiumJS (Apache-2.0), Three.js (MIT)
 

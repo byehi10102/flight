@@ -285,12 +285,14 @@ export class WeaponSystem {
       }
     }
 
+    const npcs = playerState.npcs || [];
+
     // Removal contract: classes exposing a `done` getter (missile/flare:
     // inactive AND trail faded) use it; plain rounds (bullet) drop when
     // inactive.
     for (let i = this.projectiles.length - 1; i >= 0; i--) {
       const p = this.projectiles[i];
-      p.update(dt);
+      p.update(dt, npcs);
       const finished = typeof p.done === "boolean" ? p.done : !p.active;
       if (finished) this.projectiles.splice(i, 1);
     }

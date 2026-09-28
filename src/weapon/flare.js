@@ -37,7 +37,7 @@ export class Flare {
     this._scratchThreeMatrix = new THREE.Matrix4();
 
     this.trail = [];
-    this.trailTimer = 0;
+    this.distanceSinceLastTrail = 0;
 
     this.initMesh();
   }
@@ -131,28 +131,40 @@ export class Flare {
   }
 
   _spawnTrailIfNeeded(dt) {
-    // Time-based rate (ref emits every 3 m; at arcade speeds that would
-    // flood — ~12/s keeps the same look).
-    this.trailTimer += dt;
-    while (this.trailTimer >= 0.08) {
-      this.trailTimer -= 0.08;
+    this.distanceSinceLastTrail += (this.speed + Math.abs(this.verticalVelocity)) * dt;
+    const spawnInterval = 3.0;
+
+    // Ref-verbatim 3 m spawn recipe; the length cap is the only guard.
+    while (this.distanceSinceLastTrail >= spawnInterval && this.trail.length < 200) {
+      const backDist = this.distanceSinceLastTrail - spawnInterval;
+      const ratio = backDist / ((this.speed + Math.abs(this.verticalVelocity)) * dt || 1);
+
+      const spawnLon = this.lon;
+      const spawnLat = this.lat;
+      const spawnAlt = this.alt - this.verticalVelocity * dt * ratio;
+
+      this.distanceSinceLastTrail -= spawnInterval;
+
       const smokeGeom = new THREE.SphereGeometry(1.0, 12, 12);
       const gray = 0.4 + Math.random() * 0.4;
       const smokeMat = new THREE.MeshBasicMaterial({
         color: new THREE.Color(gray, gray, gray),
-        transparent: true, opacity: 0.5 + Math.random() * 0.2
+        transparent: true,
+        opacity: 0.5 + Math.random() * 0.2
       });
       const smoke = new THREE.Mesh(smokeGeom, smokeMat);
-      smoke.lon = this.lon;
-      smoke.lat = this.lat;
-      smoke.alt = this.alt;
+      smoke.lon = spawnLon;
+      smoke.lat = spawnLat;
+      smoke.alt = spawnAlt;
       smoke.life = 2.0 + Math.random() * 1.5;
       smoke.maxLife = smoke.life;
       smoke.matrixAutoUpdate = false;
       smoke.traverse((child) => child.layers.set(1));
+
       this.scene.add(smoke);
       this.trail.push(smoke);
     }
+    if (this.distanceSinceLastTrail >= spawnInterval) this.distanceSinceLastTrail = 0;
   }
 
   _updateTrail(dt) {

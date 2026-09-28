@@ -18,15 +18,18 @@ import { soundManager } from "../utils/soundManager.js";
  * distant impacts render small and far, not pasted on the jet.
  */
 export class Missile {
-  constructor(scene, viewer, startPos, heading, pitch, speedMps) {
+  constructor(scene, viewer, startPos, heading, pitch, speedMps, target = null, onKill = null) {
     this.scene = scene;
     this.viewer = viewer;
+    this.target = target;
+    this.onKill = onKill;
 
     this.lon = startPos.lon;
     this.lat = startPos.lat;
     this.alt = startPos.alt;
     this.heading = heading;
     this.pitch = pitch;
+    this.roll = 0;
     this.speed = speedMps + 800;
 
     this.maxLife = 10;
@@ -34,12 +37,13 @@ export class Missile {
     this.active = true;
 
     this._scratchMatrix = new Cesium.Matrix4();
+    this._scratchHPR = new Cesium.HeadingPitchRoll();
     this._scratchCartesian = new Cesium.Cartesian3();
     this._scratchThreeMatrix = new THREE.Matrix4();
     this._scratchCameraMatrix = new Cesium.Matrix4();
 
     this.trail = [];
-    this.trailTimer = 0;
+    this.distanceSinceLastTrail = 0;
 
     this.initMesh();
   }
@@ -143,36 +147,42 @@ export class Missile {
     this.scene.add(this.mesh);
   }
 
-  spawnPuff() {
-    const smokeGeom = new THREE.SphereGeometry(1.0, 12, 12);
-    const gray = 0.5 + Math.random() * 0.4;
-    const smokeMat = new THREE.MeshBasicMaterial({
-      color: new THREE.Color(gray, gray, gray),
-      transparent: true, opacity: 0.6
-    });
-    const smoke = new THREE.Mesh(smokeGeom, smokeMat);
-    smoke.lon = this.lon;
-    smoke.lat = this.lat;
-    smoke.alt = this.alt;
-    smoke.life = 4.0;
-    smoke.maxLife = 4.0;
-    if (!smoke.randomScale) smoke.randomScale = 0.8 + Math.random() * 0.5;
-    smoke.launchScale = 1.0;
-    smoke.matrixAutoUpdate = false;
-    smoke.traverse((child) => child.layers.set(1));
-    this.scene.add(smoke);
-    this.trail.push(smoke);
-  }
-
   updateTrail(dt) {
     if (this.active) {
-      // Time-based puff rate (ref emits every 20 m; at arcade speeds that
-      // would be hundreds per second — ~20/s keeps the same look).
-      this.trailTimer += dt;
-      while (this.trailTimer >= 0.05) {
-        this.trailTimer -= 0.05;
-        this.spawnPuff();
+      this.distanceSinceLastTrail += this.speed * dt;
+      const spawnInterval = 20.0;
+      // Ref-verbatim 20 m spawn recipe; the length cap is the only guard —
+      // at arcade speeds uncapped spawning would flood thousands of puffs.
+      while (this.distanceSinceLastTrail >= spawnInterval && this.trail.length < 200) {
+        const backDist = this.distanceSinceLastTrail - spawnInterval;
+        const spawnPos = movePosition(this.lon, this.lat, this.alt, this.heading, this.pitch, -backDist);
+
+        this.distanceSinceLastTrail -= spawnInterval;
+
+        const smokeGeom = new THREE.SphereGeometry(1.0, 16, 16);
+        const gray = 0.5 + Math.random() * 0.75;
+        const smokeMat = new THREE.MeshBasicMaterial({
+          color: new THREE.Color(gray, gray, gray),
+          transparent: true,
+          opacity: 0.6 + Math.random() * 0.25
+        });
+        const smoke = new THREE.Mesh(smokeGeom, smokeMat);
+        smoke.lon = spawnPos.lon;
+        smoke.lat = spawnPos.lat;
+        smoke.alt = spawnPos.alt;
+        smoke.life = 4.0;
+        smoke.maxLife = 4.0;
+
+        const age = this.maxLife - this.life;
+        smoke.launchScale = Math.min(1.0, 0.25 + (age / 1.5) * 0.75);
+
+        smoke.matrixAutoUpdate = false;
+        smoke.traverse((child) => child.layers.set(1));
+
+        this.scene.add(smoke);
+        this.trail.push(smoke);
       }
+      if (this.distanceSinceLastTrail >= spawnInterval) this.distanceSinceLastTrail = 0;
     }
     const viewMatrix = this.viewer.camera.viewMatrix;
     for (let i = this.trail.length - 1; i >= 0; i--) {
@@ -185,8 +195,10 @@ export class Missile {
         this.trail.splice(i, 1);
         continue;
       }
-      // Ref growth recipe: bloom ~15x over life.
-      const scale = t.launchScale * t.randomScale * (1.0 + (1.0 - t.life / t.maxLife) * 15.0);
+      if (!t.randomScale) t.randomScale = 0.8 + Math.random() * 0.5;
+      const launchScale = t.launchScale || 1.0;
+      const scale = launchScale * t.randomScale * (1.0 + (1.0 - t.life / t.maxLife) * 15.0);
+      t.scale.set(scale, scale, scale);
       t.material.opacity = (t.life / t.maxLife) * 0.5;
       const pos = Cesium.Cartesian3.fromDegrees(t.lon, t.lat, t.alt, undefined, this._scratchCartesian);
       const modelMatrix = Cesium.Transforms.eastNorthUpToFixedFrame(pos, undefined, this._scratchMatrix);
@@ -200,25 +212,38 @@ export class Missile {
     }
   }
 
-  update(dt) {
+  update(dt, npcs) {
     if (!this.active) {
-      this.updateTrail(dt);
+      if (this.trail.length > 0) {
+        this.updateTrail(dt);
+      }
       return;
     }
     // Exhaust flicker, copied from ref-flight missile.js.
     if (this.flameMesh) {
       const flicker = 0.8 + Math.random() * 0.4;
       const flickerLen = 0.9 + Math.random() * 0.2;
+
       this.flameMesh.scale.set(flicker, flickerLen, flicker);
       this.flameMesh.material.opacity = 0.7 + Math.random() * 0.3;
-      if (this.flameCore) this.flameCore.scale.set(flicker, flickerLen, flicker);
+
+      if (this.flameCore) {
+        this.flameCore.scale.set(flicker, flickerLen, flicker);
+      }
     }
+
     this.life -= dt;
     if (this.life <= 0) {
+      // Fuse-out airburst at the world point (ref destroys silently; an
+      // 8 km/s missile would otherwise vanish with no payoff).
       this.detonate();
       return;
     }
-    // Fixed firing path: integrated from launch attitude only.
+
+    if (this.target && !this.target.destroyed) {
+      this.trackTarget(dt);
+    }
+
     const newPos = movePosition(this.lon, this.lat, this.alt, this.heading, this.pitch, this.speed * dt);
     this.lon = newPos.lon;
     this.lat = newPos.lat;
@@ -226,7 +251,41 @@ export class Missile {
 
     this.updateTrail(dt);
     this.updateThreeMatrix();
+
+    if (npcs) {
+      for (const npc of npcs) {
+        const distSq = this.calculateDistSqToNPC(npc);
+        if (distSq < 10000) {
+          this.hitNPC(npc);
+          return;
+        }
+      }
+    }
+
     this.checkTerrainCollision();
+  }
+
+  trackTarget(dt) {
+    const targetPos = Cesium.Cartesian3.fromDegrees(this.target.lon, this.target.lat, this.target.alt);
+    const myPos = Cesium.Cartesian3.fromDegrees(this.lon, this.lat, this.alt);
+
+    const direction = Cesium.Cartesian3.subtract(targetPos, myPos, new Cesium.Cartesian3());
+    Cesium.Cartesian3.normalize(direction, direction);
+
+    const enuMatrix = Cesium.Transforms.eastNorthUpToFixedFrame(myPos);
+    const invEnu = Cesium.Matrix4.inverse(enuMatrix, new Cesium.Matrix4());
+    const localDir = Cesium.Matrix4.multiplyByPointAsVector(invEnu, direction, new Cesium.Cartesian3());
+
+    const targetHeading = Cesium.Math.toDegrees(Math.atan2(localDir.x, localDir.y));
+    const targetPitch = Cesium.Math.toDegrees(Math.asin(localDir.z));
+
+    let headingDiff = targetHeading - this.heading;
+    while (headingDiff < -180) headingDiff += 360;
+    while (headingDiff > 180) headingDiff -= 360;
+
+    const turnRate = 90;
+    this.heading += Math.max(-turnRate * dt, Math.min(turnRate * dt, headingDiff));
+    this.pitch += Math.max(-turnRate * dt, Math.min(turnRate * dt, targetPitch - this.pitch));
   }
 
   updateThreeMatrix() {
@@ -283,23 +342,41 @@ export class Missile {
     }
   }
 
-  checkTerrainCollision() {
-    try {
-      const cartographic = Cesium.Cartographic.fromDegrees(this.lon, this.lat);
-      const terrainHeight = this.viewer.scene.globe.getHeight(cartographic);
-      if (terrainHeight !== undefined && this.alt < terrainHeight) {
-        this.detonate();
-      }
-    } catch (e) { /* cosmetic */ }
+  calculateDistSqToNPC(npc) {
+    const dLon = (npc.lon - this.lon) * 111320 * Math.cos(Cesium.Math.toRadians(this.lat));
+    const dLat = (npc.lat - this.lat) * 111320;
+    const dAlt = npc.alt - this.alt;
+    return dLon * dLon + dLat * dLat + dAlt * dAlt;
   }
 
-  detonate() {
-    if (!this.active) return;
-    this.active = false;
+  hitNPC(npc) {
+    npc.destroyed = true;
+    if (this.onKill) this.onKill(npc);
     try {
-      particles.spawnExplosionWorld(this.viewer, this.lon, this.lat, this.alt, { big: true, count: 36, smokeCount: 8 });
-      soundManager.play("explosion-random");
-    } catch (e) { /* explosion is cosmetic */ }
+      // Ref calls particles.spawnExplosion(lon, lat, alt) + spawnWreckage;
+      // mapped to this repo's projected explosion (same fireball, same spot).
+      particles.spawnExplosionWorld(this.viewer, this.lon, this.lat, this.alt, { count: 80, smokeCount: 18, big: true });
+      soundManager.play('explosion-random');
+    } catch (e) { }
+    this.destroy();
+  }
+
+  checkTerrainCollision() {
+    const cartographic = Cesium.Cartographic.fromDegrees(this.lon, this.lat);
+    const terrainHeight = this.viewer.scene.globe.getHeight(cartographic);
+    if (terrainHeight !== undefined && this.alt < terrainHeight) {
+      try {
+        // Ref calls spawnExplosion + spawnWreckage here; mapped to the
+        // projected explosion (same fireball, same world spot).
+        particles.spawnExplosionWorld(this.viewer, this.lon, this.lat, this.alt, { count: 80, smokeCount: 18, big: true });
+        soundManager.play('explosion-random');
+      } catch (e) { }
+      this.destroy();
+    }
+  }
+
+  destroy() {
+    this.active = false;
     if (this.mesh) {
       this.scene.remove(this.mesh);
       this.mesh.traverse((child) => {
@@ -309,6 +386,17 @@ export class Missile {
       });
       this.mesh = null;
     }
+  }
+
+  detonate() {
+    // Fuse-out airburst at the world point (ref destroys silently; an
+    // 8 km/s missile would otherwise vanish with no payoff).
+    if (!this.active) return;
+    try {
+      particles.spawnExplosionWorld(this.viewer, this.lon, this.lat, this.alt, { big: true, count: 36, smokeCount: 8 });
+      soundManager.play("explosion-random");
+    } catch (e) { /* explosion is cosmetic */ }
+    this.destroy();
   }
 
   get done() {
