@@ -2,8 +2,8 @@
  * HUD — ported from dimartarmizi/web-flight-simulator src/ui/hud.js
  * (flight-display parts only: horizon + pitch ladder, compass tape,
  * speed/alt/heading/coords, region + pull-up warnings, tactical minimap,
- * weapon readout, UI tilt/shake). NPC/lock systems omitted — this repo has
- * no NPC systems, so lock calls are guarded out. The tactical minimap pairs a
+ * UI tilt/shake). Weapon/NPC systems omitted — this repo has no weapon or
+ * NPC systems, so those calls are guarded out. The tactical minimap pairs a
  * live Cesium top-down view (like ref-flight) with the canvas overlay.
  *
  * Public API kept compatible with src/main.js:
@@ -28,10 +28,6 @@ export class Hud {
     this.statusEl = document.getElementById("hud-status");
     this.boostFill = document.getElementById("boost-fill");
     this.boostLabel = document.getElementById("boost-label");
-    this.weaponBar = null;
-    this.weaponSlots = [];
-    this.weaponFlares = null;
-    this._ws = null;
     this.uiContainer = document.getElementById("uiContainer");
     this.vignette = document.getElementById("transition-vignette");
 
@@ -58,68 +54,6 @@ export class Hud {
 
     this.createHorizon();
     this.createCompass();
-    this.createWeaponBar();
-  }
-
-  // ── Weapon selector tray: two slots, key number, ammo/heat ──
-  createWeaponBar() {
-    if (document.getElementById("weapon-bar")) return;
-    const ui = document.getElementById("uiContainer");
-    if (!ui) return;
-    const bar = document.createElement("div");
-    bar.id = "weapon-bar";
-    bar.innerHTML =
-      '<div class="weapon-slot" data-index="0">' +
-        '<span class="weapon-key">1</span>' +
-        '<span class="weapon-name">M61A1</span>' +
-        '<span class="weapon-ammo">INF</span>' +
-        '<div class="weapon-heat"><div class="weapon-heat-fill"></div></div>' +
-      "</div>" +
-      '<div class="weapon-slot" data-index="1">' +
-        '<span class="weapon-key">2</span>' +
-        '<span class="weapon-name">AIM-9</span>' +
-        '<span class="weapon-ammo">50</span>' +
-      "</div>" +
-      '<span id="weapon-flares">FLR 30</span>';
-    ui.appendChild(bar);
-    this.weaponBar = bar;
-    this.weaponSlots = Array.from(bar.querySelectorAll(".weapon-slot"));
-    this.weaponFlares = bar.querySelector("#weapon-flares");
-    // Click a slot to select it (keys 1/2 do the same).
-    this.weaponSlots.forEach((slot) => {
-      slot.addEventListener("click", () => {
-        try { this._ws?.selectWeapon(Number(slot.dataset.index)); } catch (e) { /* cosmetic */ }
-      });
-    });
-  }
-
-  updateWeapons(ws) {
-    if (!this.weaponBar || !ws) return;
-    this._ws = ws;
-    const cur = ws.getCurrentWeapon ? ws.getCurrentWeapon() : null;
-    if (!cur) return;
-    this.weaponSlots.forEach((slot, i) => {
-      const w = ws.weapons[i];
-      if (!w) return;
-      const selected = i === ws.selectedWeaponIndex;
-      slot.classList.toggle("selected", selected);
-      const ammoEl = slot.querySelector(".weapon-ammo");
-      if (ammoEl) {
-        if (w.id === "gun" && ws.isGunOverheated) ammoEl.textContent = "OVERHEAT";
-        else if (w.ammo === Infinity) ammoEl.textContent = "INF";
-        else ammoEl.textContent = String(w.ammo).padStart(2, "0");
-      }
-      const heatEl = slot.querySelector(".weapon-heat-fill");
-      if (heatEl && w.id === "gun") {
-        heatEl.style.width = `${Math.round((ws.gunHeat || 0) * 100)}%`;
-      }
-      const warn = (ws.emptyWarningTimers && ws.emptyWarningTimers[w.id] > 0) ||
-        (w.id === "gun" && ws.isGunOverheated);
-      slot.classList.toggle("overheated", !!warn);
-    });
-    if (this.weaponFlares) {
-      this.weaponFlares.textContent = `FLR ${ws.flareWeapon ? ws.flareWeapon.ammo : 0}`;
-    }
   }
 
   // ── Horizon: crosshair + pitch ladder, rotated/translated by attitude ──
@@ -397,9 +331,6 @@ export class Hud {
         ? "BOOST"
         : charge >= 0.999 ? "BOOST READY" : `CHARGING ${Math.round(charge * 100)}%`;
     }
-
-    // ── Weapon readout ──
-    if (state.weaponSystem) this.updateWeapons(state.weaponSystem);
 
     // ── Horizon follows smoothed attitude ──
     // The pitch ladder lives in its own bottom-right panel (out of the

@@ -36,9 +36,6 @@ npm run build      # production bundle in dist/
 | **A** / **D** | Yaw (rudder) |
 | **Space** | Afterburner (needs a full boost meter) |
 | **Mouse drag** | Look around (springs back on release) |
-| **1** / **2** | Select M61A1 cannon / AIM-9 Sidewinder |
-| **F** or **Enter** | Fire active weapon |
-| **V** | Pop flare countermeasures |
 | **M** | Mute / unmute |
 | **Esc** / **P** | Pause / resume in place |
 
@@ -168,18 +165,11 @@ revert removed the roads overlay, pinch/trackpad zoom buttons and the
 - **Boost meter** — drains across the burn, cuts at zero, recharges in
   ~3 s, fires only when full. (Ref itself has no boost widget; built fresh
   in its visual language and verified by sim.)
-- **Weapons (ref-flight)** — M61A1 cannon (infinite, heats to overheat),
-  AIM-9 Sidewinder ×50 from alternating wing rails with smoke trails,
-  MJU-7A flares ×30 in 6-round pulses; `1`/`2` or the clickable tray
-  selects, `F` fires, `V` pops flares. Rounds fly world-space ballistics
-  from the firing attitude (pitch away after firing — the stream keeps its
-  path and dies on real terrain), and impacts detonate at the world hit
-  point, so distant hits render small and far. Missiles dumb-fire straight:
-  ref-flight homes them onto locked NPCs and this repo has no NPCs, so the
-  lock gate is omitted (documented in `src/weapon/weaponSystem.js`).
-- **Sound suite** — all 28 ref samples wired (engine/wind/throttle/boost/
+- **Sound suite** — ref flight samples wired (engine/wind/throttle/boost/
   strain loops, PULL UP, spawn/zoom/crash stingers, UI clicks, pause/mute);
-  procedural engine removed.
+  weapon samples stay on disk unused; procedural engine removed.
+- **Removed again**: ref-flight weapons (cannon/missiles/flares + tray),
+  landed then removed per request.
 - **Spawn flight** — two-phase pull-up + dive with stale-timer generation
   guards, live plane through the dive, crash→respawn replays it.
 - **Reverted again**: roads overlay, picker pinch/trackpad zoom buttons and
@@ -194,9 +184,8 @@ revert removed the roads overlay, pinch/trackpad zoom buttons and the
   street base + picker labels: Esri/HERE/Garmin, © OpenStreetMap contributors
 - **Aircraft model** — "Low poly F-15" by SIpriv (via
   dimartarmizi/web-flight-simulator)
-- **Sounds + flight/HUD/weapon design** — dimartarmizi/web-flight-simulator
-  (dual-licensed non-commercial — replace samples and relicense weapon code
-  before any commercial use)
+- **Sounds + flight/HUD design** — dimartarmizi/web-flight-simulator
+  (dual-licensed non-commercial — replace samples before any commercial use)
 - **Geocoding** — Nominatim / OpenStreetMap
 - **Engine** — CesiumJS (Apache-2.0), Three.js (MIT)
 

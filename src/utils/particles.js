@@ -1,5 +1,4 @@
 import * as THREE from "three";
-import { Cartesian3, Matrix4 } from "cesium";
 
 /**
  * Explosion particles, adapted from dimartarmizi/web-flight-simulator
@@ -156,21 +155,6 @@ export const particles = {
       this.scene.add(m);
       this.list.push(m);
     }
-  },
-
-  /**
-   * World-space detonation: project a lon/lat/alt hit through the Cesium
-   * camera into overlay-local space, so the fireball appears WHERE the hit
-   * happened (far hits render small and far, near hits big) instead of
-   * pasted on the plane. Used by weapon impacts.
-   */
-  spawnExplosionWorld(viewer, lon, lat, alt, opts = {}) {
-    if (!this.scene || !viewer) return;
-    try {
-      const world = Cartesian3.fromDegrees(lon, lat, alt);
-      const cam = Matrix4.multiplyByPoint(viewer.camera.viewMatrix, world, new Cartesian3());
-      this.spawnExplosion(new THREE.Vector3(cam.x, cam.y, cam.z), opts);
-    } catch (e) { /* explosion is cosmetic */ }
   },
 
   update(dt) {
