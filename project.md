@@ -871,3 +871,68 @@ The probe exposed the real numbers, which never lied:
    deterministic input (KeyboardEvent dispatch, no page.keyboard desync) and 22
    assertions covering spawn, idle trim, W / up / down / D / left / right / S,
    auto-level, camera behind-and-above, and staying airborne. **22/22**.
+
+## 15. Recent changes (crash detonation — soft puffs, temperature ramp, staging)
+
+The crash explosion in `src/utils/particles.js` read as "a burst of coloured
+spheres" — hard-edged faceted silhouettes, fire that stayed the same orange for
+its whole life, and fireballs that *fell* under gravity like pebbles. It is now
+a staged detonation, still entirely procedural (no asset files, matching the
+project's keyless / no-download rule) and still one self-contained module with
+the same `spawnExplosion(center, opts)` signature and the same
+`init`/`clear`/`update` lifecycle the rest of the app relies on. Nothing in
+`main.js` changed.
+
+What is different:
+
+1. **Sprites, not spheres.** Every particle is a `THREE.Sprite` wearing one
+   shared procedural `CanvasTexture` — a soft radial gradient with a few
+   low-frequency holes punched in so the silhouette is billowy instead of a
+   perfect disc. Sprites always face the camera, which is exactly right for the
+   fixed-origin chase overlay, and it removes the "ball of geometry" read. The
+   texture is built lazily on the first burst and disposed exactly once in
+   `clear()`, never per particle.
+
+2. **A temperature ramp.** Each fire puff stores a birth colour and a death
+   colour and interpolates between them over its life — white-hot / yellow →
+   orange → deep red → dark. "Fire that never cools" is the single biggest
+   reason a fake explosion reads as fake, so this is the largest visual gain.
+
+3. **Buoyancy and drag.** Fire and smoke now have *negative* gravity (hot gas
+   rises) and a per-particle velocity damping term, so ejecta decelerate instead
+   of coasting. Sparks keep strong positive gravity but gain drag, a
+   bright→dark-yellow ramp and a per-frame opacity/scale flicker.
+
+4. **Eased expansion.** Growth follows an ease-out curve (`1 - t³`) — a fast
+   blast front that then decelerates — and larger particles expand more, instead
+   of a uniform linear scale to a fixed cap.
+
+5. **Staged timing.** A per-particle `_delay` holds the trailing fireballs and
+   the smoke invisible until their delay elapses, so the burst is not one
+   simultaneous frame: flash + shock ring at `t = 0`, the main fireball, then
+   secondary fireballs and the smoke column trailing in behind.
+
+6. **A transient detonation light.** A warm `PointLight` (layer 1 enabled, the
+   same pattern `JetFlame` already uses) flashes at the blast point and fades
+   over ~0.22 s, so the detonation appears to emit light into the scene. It is
+   added to the particle list with an `isLight` flag and disposed on expiry, so
+   it can never linger after `clear()`.
+
+7. **A crisper flash and shock ring.** The white flash is a bright additive puff
+   that decays in ~0.22 s, and the ring is thinner with a faster ease-out
+   expansion and a lower peak opacity, so it reads as a pressure wave rather
+   than a drawn circle.
+
+**Timing.** The post-crash hold in `checkCrash()` is unchanged: the overlay is
+still hidden ~1 s after impact, so the effect is tuned to peak inside that
+window (the fireball is brightest in the first ~0.4 s; the smoke tail continues
+if the hold is ever lengthened). Extending the hold was left as an open
+question rather than changed silently.
+
+**Verified.** `npm run build` clean. A Node smoke harness driving the real
+module (browser canvas stubbed only) confirmed: 119 objects spawned for a
+`{ big: true, count: 72, smokeCount: 16 }` burst (1 light + flash + ring + 72
+fire + 28 sparks + 16 smoke), 59 of them correctly hidden at birth by the
+staging delay, the whole burst expired to `list.length === 0` within ~4 s with
+the scene emptied (no leak), and `clear()` plus a second burst both safe.
+
