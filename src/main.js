@@ -75,7 +75,6 @@ let spawnIndicator = null;
 let pendingSpawnName = null;
 let initialCameraView = null;
 let flightStartTime = 0;
-let lastCrashCheck = 0;
 let lastCrashPos = null;
 // True while the 4 s pre-spawn loading sign owns the loading indicator, so
 // the tile-progress handler doesn't overwrite or hide it mid-wait.
@@ -1436,15 +1435,16 @@ function checkGPWS() {
 function checkCrash() {
   if (currentState !== States.FLYING) return;
   const now = Date.now();
-  if (now - lastCrashCheck < 50) return;
-  lastCrashCheck = now;
+  // Run every frame, not on a 50 ms cadence: at speed the jet covers 100 m+
+  // between throttled checks, so it visibly sank into terrain before the hit
+  // registered. The per-frame segmented sweep below keeps the cost bounded.
 
   // Path anchor updates every check (even inside takeoff grace) so the
   // first real sweep never drags a segment across the map.
   const cur = { lon: state.lon, lat: state.lat };
   const prev = lastCrashPos && Number.isFinite(lastCrashPos.lon) ? lastCrashPos : cur;
   lastCrashPos = cur;
-  if (now - flightStartTime < 3000) return;
+  if (now - flightStartTime < 1500) return;
 
   // Segmented sweep: at boost speeds one sample per check (~400 m apart)
   // can tunnel straight through narrow ridges, so test up to 8 sub-samples

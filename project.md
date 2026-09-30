@@ -890,8 +890,8 @@ What is different:
    low-frequency holes punched in so the silhouette is billowy instead of a
    perfect disc. Sprites always face the camera, which is exactly right for the
    fixed-origin chase overlay, and it removes the "ball of geometry" read. The
-   texture is built lazily on the first burst and disposed exactly once in
-   `clear()`, never per particle.
+   texture is built lazily on the first burst and cached for the life of the
+   page (it is never disposed per burst — see the performance note below).
 
 2. **A temperature ramp.** Each fire puff stores a birth colour and a death
    colour and interpolates between them over its life — white-hot / yellow →
@@ -915,24 +915,62 @@ What is different:
 6. **A transient detonation light.** A warm `PointLight` (layer 1 enabled, the
    same pattern `JetFlame` already uses) flashes at the blast point and fades
    over ~0.22 s, so the detonation appears to emit light into the scene. It is
-   added to the particle list with an `isLight` flag and disposed on expiry, so
-   it can never linger after `clear()`.
+   created **once** in `init()` and dimmed/faded in `update()`, never added or
+   removed per burst (see the performance note below).
 
 7. **A crisper flash and shock ring.** The white flash is a bright additive puff
    that decays in ~0.22 s, and the ring is thinner with a faster ease-out
    expansion and a lower peak opacity, so it reads as a pressure wave rather
    than a drawn circle.
 
-**Timing.** The post-crash hold in `checkCrash()` is unchanged: the overlay is
-still hidden ~1 s after impact, so the effect is tuned to peak inside that
-window (the fireball is brightest in the first ~0.4 s; the smoke tail continues
-if the hold is ever lengthened). Extending the hold was left as an open
-question rather than changed silently.
+**Verified.** `npm run build` clean. A Node lifecycle harness driving the real
+module (browser canvas stubbed only) confirmed the burst spawns, stages its
+hidden particles correctly, expires fully with no leak, and that the persistent
+light dims on `clear()` and re-arms on the next burst. The original counts were
+later trimmed for performance — see §16.
 
-**Verified.** `npm run build` clean. A Node smoke harness driving the real
-module (browser canvas stubbed only) confirmed: 119 objects spawned for a
-`{ big: true, count: 72, smokeCount: 16 }` burst (1 light + flash + ring + 72
-fire + 28 sparks + 16 smoke), 59 of them correctly hidden at birth by the
-staging delay, the whole burst expired to `list.length === 0` within ~4 s with
-the scene emptied (no leak), and `clear()` plus a second burst both safe.
+## 16. Recent changes (crash feel — remove the hitch and the sink-through)
 
+The §15 detonation looked right but *felt* wrong: on impact the jet sank into
+the terrain, the frame glitched, and only then did the fireball appear. Three
+separate causes, all fixed:
+
+1. **The explosion was far too expensive (a regression introduced in §15).**
+   The overlay camera shows only ~4 world units at the plane, but §15 sized the
+   fire puffs up to ~12 units and the smoke to ~16 — each one several screens
+   tall. With 72 additive sprites that was roughly **32 000 % overdraw**, about
+   5× the original effect, which stalls any GPU. Puff sizes and expansion are
+   now modest (fire peaks at ~3 units, smoke ~4.3), giving **~1 100 % fire
+   overdraw — lighter than the original ~6 000 % — while still drawing 40
+   puffs.** Counts trimmed to 40 fire / 22 sparks / 8 smoke.
+
+2. **A shader recompile on every crash.** Two mistakes compounded:
+   (a) the detonation `PointLight` was added and removed per burst, and adding
+   or removing a light makes three.js recompile *every lit material* in the
+   scene (including the aircraft); (b) `clear()` disposed every material, which
+   evicts their shader programs so the next crash recompiled them. The light is
+   now created **once** in `init()` and only dimmed/faded, and materials are no
+   longer disposed (the tiny shared puff texture is likewise kept cached). Both
+   are proven with a real-WebGL harness: adding a light bumps the program count
+   (1 → 2), and across five crashes the program count is now **constant** where
+   it previously oscillated 5 → 2 → 5 → 2 (recompile, every time).
+
+3. **The jet sank through the terrain before the hit registered.** `checkCrash`
+   ran on a 50 ms cadence; at cruise (~400 m/s) that is ~20 m per check and in
+   boost over 100 m, so the aircraft visibly phased into the ground before the
+   sweep fired. It now runs **every frame** (the segmented path sweep keeps the
+   cost bounded), and the post-spawn takeoff grace was shortened 3 s → 1.5 s.
+
+**Verified.** `npm run build` clean. The Node lifecycle harness still passes
+(112 particles spawn, 59 staged-hidden, all expire, the persistent light dims
+and re-arms). A headless-Chromium harness on the real three.js confirmed the
+program count is stable across repeated crashes and that frame cost scales with
+the (now much smaller) sprite coverage.
+
+**Still open.** The crash→explosion gap the user reported may also be partly the
+CPU stall of the burst *plus* the frame the sim spends recovering from it: at
+impact `state.alt` is snapped to the ground, the model is hidden, and the
+particles spawn in the same frame, all while the sim's fixed-step catch-up may
+be running extra substeps. If the effect still reads late on a real GPU, the
+next lever is to spawn the explosion a frame *before* the state transition and
+to defer the pause-menu timer.

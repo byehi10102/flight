@@ -96,25 +96,39 @@ function radialVelocity(speed) {
 export const particles = {
   scene: null,
   list: [],
+  // Persistent detonation light: created once so the scene's light count never
+  // changes. Adding a light at crash time makes three.js recompile every lit
+  // material (including the aircraft), which is a visible one-time stutter.
+  _flashLight: null,
+  _lightLife: 0,
+  _lightMax: 0.22,
+  _lightBase: 0,
 
   init(scene) {
     this.scene = scene;
+    if (!this._flashLight) {
+      this._flashLight = new THREE.PointLight(0xffaa55, 0, 7, 2);
+      this._flashLight.layers.enable(1);
+      this.scene.add(this._flashLight);
+    }
   },
 
   clear() {
     for (const p of this.list) {
       this.scene?.remove(p);
       p.geometry?.dispose?.();
-      p.material?.dispose?.();
-      if (p.isLight) p.dispose?.();
+      // Materials are deliberately NOT disposed: disposing them evicts their
+      // shader programs, so the next crash would recompile them (a visible
+      // stall). Leaving them to be GC'd lets three.js's program cache reuse
+      // the same programs. Geometry (the ring) is unique per burst, so it is.
     }
     this.list.length = 0;
-    // The shared puff texture outlives individual sprites; dispose it once
-    // here and let the next burst rebuild it.
-    if (_puffTexture) {
-      _puffTexture.dispose();
-      _puffTexture = null;
-    }
+    // The shared puff texture is intentionally NOT disposed here: it is tiny
+    // and reused by every burst, so keeping it cached avoids a canvas redraw
+    // and GPU re-upload on every crash. The persistent light is dimmed instead
+    // of removed, so the light count (and shader programs) never change.
+    this._lightLife = 0;
+    if (this._flashLight) this._flashLight.intensity = 0;
   },
 
   spawnExplosion(center, opts = {}) {
@@ -122,20 +136,17 @@ export const particles = {
     const big = opts.big !== false;
     const origin = center?.clone?.() ?? new THREE.Vector3(0, -0.8, -2.75);
 
-    // ── Detonation light: a brief warm flash at the blast point ────────────
-    // Mirrors JetFlame's PointLight; layer 1 so it stays inside the overlay.
-    const light = new THREE.PointLight(0xffaa55, big ? 6 : 3, big ? 9 : 6, 2);
-    light.position.copy(origin);
-    light.layers.enable(1);
-    light.life = 0.22;
-    light.maxLife = 0.22;
-    light.isLight = true;
-    light._baseIntensity = light.intensity;
-    this.scene.add(light);
-    this.list.push(light);
+    // ── Detonation light: re-aim the persistent light and re-arm its fade ──
+    if (this._flashLight) {
+      this._flashLight.position.copy(origin);
+      this._lightBase = big ? 4 : 2;
+      this._flashLight.intensity = this._lightBase;
+      this._lightMax = 0.22;
+      this._lightLife = this._lightMax;
+    }
 
     // ── White flash: bright additive puff, decays very fast ────────────────
-    const flash = makePuff(big ? 3.2 : 1.8);
+    const flash = makePuff(big ? 1.8 : 1.1);
     flash.material.color.setRGB(1, 1, 1);
     flash.material.opacity = 1.0;
     flash.position.copy(origin);
@@ -171,9 +182,13 @@ export const particles = {
     this.list.push(ring);
 
     // ── Main + secondary fireball puffs (temperature ramp, buoyant) ────────
-    const fireCount = opts.count || (big ? 48 : 24);
+    // Sizes/expansion are deliberately modest: the overlay camera shows only
+    // ~4 world units at the plane, so a single oversized additive sprite can
+    // fill the screen and stall a weak GPU. Keep each puff well under one
+    // screen and let the group read as a fireball.
+    const fireCount = opts.count || (big ? 40 : 22);
     for (let i = 0; i < fireCount; i++) {
-      const size = (big ? 0.6 : 0.35) + Math.random() * (big ? 1.6 : 0.8);
+      const size = (big ? 0.28 : 0.18) + Math.random() * (big ? 0.7 : 0.4);
       const puff = makePuff(size);
       puff.position.copy(origin);
       // White-hot core fraction, otherwise yellow flame.
@@ -192,15 +207,15 @@ export const particles = {
       puff.life = (big ? 0.75 : 0.5) + Math.random() * (big ? 0.8 : 0.5);
       puff.maxLife = puff.life;
       puff._expand = true;
-      puff._expandAmount = (big ? 2.6 : 1.8) * (0.6 + size * 0.5);
+      puff._expandAmount = (big ? 1.6 : 1.2) * (0.7 + size * 0.6);
       this.scene.add(puff);
       this.list.push(puff);
     }
 
     // ── Sparks: fast, strong gravity, drag, flicker, cooling colour ────────
-    const sparkCount = big ? 28 : 14;
+    const sparkCount = big ? 22 : 12;
     for (let i = 0; i < sparkCount; i++) {
-      const puff = makePuff(0.06 + Math.random() * 0.12);
+      const puff = makePuff(0.05 + Math.random() * 0.08);
       puff.position.copy(origin);
       puff._colorFrom = new THREE.Color(0xffffcc);
       puff._colorTo = new THREE.Color(0xcc5500);
@@ -216,9 +231,9 @@ export const particles = {
     }
 
     // ── Smoke: buoyant, expanding, darkening, trailing the fireball ────────
-    const smokeCount = opts.smokeCount ?? (big ? 10 : 5);
+    const smokeCount = opts.smokeCount ?? (big ? 8 : 4);
     for (let i = 0; i < smokeCount; i++) {
-      const size = (big ? 1.0 : 0.55) + Math.random() * (big ? 1.6 : 0.7);
+      const size = (big ? 0.5 : 0.3) + Math.random() * (big ? 0.7 : 0.35);
       const puff = makePuff(size, { additive: false });
       const gray = 0.3 + Math.random() * 0.2;
       puff._colorFrom = new THREE.Color(gray, gray, gray);
@@ -243,13 +258,21 @@ export const particles = {
       puff.life = (big ? 1.4 : 0.9) + Math.random() * (big ? 1.2 : 0.7);
       puff.maxLife = puff.life;
       puff._expand = true;
-      puff._expandAmount = (big ? 3.2 : 2.2) * (0.6 + size * 0.4);
+      puff._expandAmount = (big ? 2.0 : 1.4) * (0.7 + size * 0.5);
       this.scene.add(puff);
       this.list.push(puff);
     }
   },
 
   update(dt) {
+    // Fade the persistent detonation light (not part of the list, so the
+    // light count stays constant).
+    if (this._lightLife > 0 && this._flashLight) {
+      this._lightLife -= dt;
+      const k = Math.max(0, this._lightLife / this._lightMax);
+      this._flashLight.intensity = this._lightBase * k;
+    }
+
     for (let i = this.list.length - 1; i >= 0; i--) {
       const p = this.list[i];
 
@@ -264,18 +287,12 @@ export const particles = {
       if (p.life <= 0) {
         this.scene.remove(p);
         p.geometry?.dispose?.();
-        p.material?.dispose?.();
-        if (p.isLight) p.dispose?.();
+        // Materials stay alive so their shader programs are reused next crash.
         this.list.splice(i, 1);
         continue;
       }
 
       const t = Math.max(0, Math.min(1, p.life / p.maxLife));
-
-      if (p.isLight) {
-        p.intensity = p._baseIntensity * t;
-        continue;
-      }
 
       if (p._vel) {
         if (p._drag) p._vel.multiplyScalar(Math.max(0, 1 - p._drag * dt));
