@@ -70,6 +70,37 @@ roar, pitch/roll strain, PULL UP voice, spawn/zoom/crash stingers, UI
 hover/clicks). Browsers start audio suspended — everything fades in after your
 first click or keypress.
 
+## Multiplayer (beta)
+
+Peer-to-peer flight with a friend — no server, no accounts, no API keys. A
+5-character room code is the only thing you share. The game's public relays
+(Nostr) are used only for the initial WebRTC handshake; after that all
+flight data flows directly between the two players.
+
+- **Mode select** — the home screen offers SINGLE PLAYER (unchanged) and
+  MULTIPLAYER (BETA). Multiplayer opens a lobby: enter a callsign, then
+  CREATE PARTY (generates a code) or JOIN with a shared code.
+- **Waiting room** — shows your code with a copy button and live peer
+  status. When the second player joins, both move to spawn selection.
+- **Shared spawn gate** — each player picks on their own map and can see
+  the other's placed dot (and live cursor). SPAWN HERE appears once *you*
+  place but stays greyed until BOTH have committed; re-picking by either
+  player re-arms the gate. NEW LOCATION returns both players to the picker.
+- **In flight** — remote jets render as 3D models with distance-gated
+  nametags, and the minimap shows a red dot when a player is close, a rim
+  arrow with their callsign when far. An MP badge shows link state
+  (MP LIVE / SYNCING / OFFLINE) and peer count.
+- **Smooth at any speed** — remote planes are dead-reckoned locally with
+  the same movement math the sim uses; packets only correct drift, so a
+  10,000 mph pass reads as a pass instead of a teleport.
+- **Multiplayer graphics diet** — terrain detail relaxes one step, the
+  minimap renders at half resolution, and an adaptive guard drops detail
+  further if frame rate sags (restoring when headroom returns).
+  Single-player visuals are untouched.
+
+Undo: all multiplayer work lives on the `multiplayer-beta` branch —
+`git checkout master` returns to the pre-multiplayer game.
+
 ## What makes it real
 
 - **Real 3D terrain** — global elevation DEM from Re:Earth/Mapterhorn (CC BY 4.0).

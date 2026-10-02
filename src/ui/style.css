@@ -781,3 +781,258 @@ html, body {
   margin-bottom: 20px;
   letter-spacing: 4px;
 }
+
+/* ---------------------------------------------------------------
+   Multiplayer: mode select, lobby, waiting room, HUD badge
+   --------------------------------------------------------------- */
+
+.menu-btn-secondary {
+  position: relative;
+  background: rgba(0, 255, 140, 0.10);
+  border-color: rgba(0, 255, 140, 0.45);
+  color: #b9ffd9;
+}
+
+.menu-btn-secondary:hover {
+  background: rgba(0, 255, 140, 0.20);
+}
+
+.menu-btn-ghost {
+  background: transparent;
+  border-color: rgba(255, 255, 255, 0.18);
+  color: #999;
+  font-size: 13px;
+  padding: 10px 24px;
+}
+
+.menu-btn-ghost:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.beta-tag {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 7px;
+  font-size: 10px;
+  letter-spacing: 2px;
+  vertical-align: middle;
+  border: 1px solid rgba(0, 255, 140, 0.6);
+  border-radius: 3px;
+  color: #0fe;
+}
+
+.mp-field {
+  display: block;
+  margin: 0 0 18px;
+  text-align: left;
+}
+
+.mp-field-label {
+  display: block;
+  font-size: 11px;
+  letter-spacing: 3px;
+  color: #888;
+  margin-bottom: 6px;
+}
+
+.mp-field input,
+.mp-join-row input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 12px 14px;
+  background: rgba(0, 0, 0, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  color: #fff;
+  font-family: Consolas, monospace;
+  font-size: 15px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  outline: none;
+}
+
+.mp-field input:focus,
+.mp-join-row input:focus {
+  border-color: rgba(0, 255, 140, 0.7);
+}
+
+.mp-actions {
+  margin-top: 6px;
+}
+
+.mp-or {
+  margin: 14px 0 10px;
+  font-size: 10px;
+  letter-spacing: 3px;
+  color: #777;
+}
+
+.mp-join-row {
+  display: flex;
+  gap: 8px;
+}
+
+.mp-join-row input {
+  flex: 1 1 auto;
+  text-align: center;
+  font-size: 18px;
+  letter-spacing: 6px;
+}
+
+.mp-join-row .menu-btn {
+  flex: 0 0 auto;
+  width: auto;
+  margin: 0;
+}
+
+.mp-status {
+  min-height: 18px;
+  margin: 14px 0 6px;
+  font-size: 12px;
+  letter-spacing: 1px;
+  color: #9ad;
+}
+
+.mp-status.error {
+  color: #ff7b7b;
+}
+
+.mp-status.ok {
+  color: #6f6;
+}
+
+.mp-status.busy {
+  color: #fc6;
+}
+
+/* Waiting room */
+.wr-code-block {
+  margin-bottom: 22px;
+}
+
+.wr-label {
+  display: block;
+  font-size: 11px;
+  letter-spacing: 3px;
+  color: #888;
+  margin-bottom: 8px;
+}
+
+.wr-code {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+}
+
+#wrCode {
+  font-family: Consolas, monospace;
+  font-size: 40px;
+  letter-spacing: 10px;
+  color: #0fe;
+  text-shadow: 0 0 14px rgba(0, 255, 230, 0.45);
+}
+
+.wr-copy {
+  padding: 6px 12px;
+  font-size: 11px;
+  letter-spacing: 2px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  color: #ccc;
+  cursor: pointer;
+}
+
+.wr-copy:hover {
+  background: rgba(255, 255, 255, 0.18);
+  color: #fff;
+}
+
+.wr-hint {
+  display: block;
+  margin-top: 10px;
+  font-size: 12px;
+  color: #888;
+}
+
+.wr-players {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.wr-player {
+  padding: 12px 16px;
+  background: rgba(0, 255, 140, 0.08);
+  border: 1px solid rgba(0, 255, 140, 0.35);
+  font-size: 13px;
+  letter-spacing: 2px;
+  color: #cfffe6;
+  text-align: left;
+}
+
+.wr-player.wr-peer-empty {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.15);
+  color: #888;
+}
+
+/* Pulsing cue while waiting on the other player */
+.wr-player.wr-peer-empty::after {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-left: 8px;
+  border-radius: 50%;
+  background: #fc6;
+  animation: wr-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes wr-pulse {
+  0%, 100% { opacity: 0.25; }
+  50% { opacity: 1; }
+}
+
+/* HUD multiplayer badge */
+#mp-badge {
+  position: absolute;
+  top: 96px;
+  right: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  font-family: Consolas, monospace;
+  font-size: 11px;
+  letter-spacing: 2px;
+  color: #0fe;
+  background: rgba(0, 0, 0, 0.45);
+  border: 1px solid rgba(0, 255, 230, 0.4);
+  border-radius: 4px;
+}
+
+#mp-badge.stale {
+  color: #fc6;
+  border-color: rgba(255, 204, 102, 0.5);
+}
+
+#mp-badge.offline {
+  color: #ff7b7b;
+  border-color: rgba(255, 123, 123, 0.5);
+}
+
+/* Spawn confirm: visible but clearly inert until both players commit */
+#confirmSpawnBtn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.2);
+  color: #bbb;
+}
+
+#confirmSpawnBtn.mp-waiting {
+  border-color: rgba(255, 204, 102, 0.55);
+  color: #fc6;
+}

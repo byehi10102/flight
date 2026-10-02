@@ -327,6 +327,35 @@ export function getMiniViewer() {
   return miniViewer;
 }
 
+/**
+ * Multiplayer performance mode.
+ *
+ * A second player means a second aircraft, more entities, and steady P2P
+ * packet work — so terrain detail is relaxed one step and the minimap
+ * renders at half resolution. Deliberately conservative: single-player
+ * visuals are untouched, and the adaptive guard in main.js can push this
+ * on/off as frame rate demands.
+ */
+let perfMode = false;
+export function setPerformanceMode(on) {
+  perfMode = !!on;
+  try {
+    if (mainViewer) {
+      const globe = mainViewer.scene.globe;
+      globe.maximumScreenSpaceError = perfMode ? 4 : 2;
+      globe.loadingDescendantLimit = perfMode ? 24 : 48;
+      globe.tileCacheSize = perfMode ? 1024 : 2048;
+    }
+  } catch (e) { /* quality is best-effort */ }
+  try {
+    if (miniViewer) miniViewer.resolutionScale = perfMode ? 0.5 : 1.0;
+  } catch (e) { /* minimap is cosmetic */ }
+}
+
+export function isPerformanceMode() {
+  return perfMode;
+}
+
 /** Top-down minimap camera tracking the aircraft. */
 export function setMinimapCamera(lon, lat, altitude, heading) {
   if (!miniViewer) return;

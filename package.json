@@ -12,7 +12,8 @@
   },
   "dependencies": {
     "cesium": "^1.132.0",
-    "three": "^0.182.0"
+    "three": "^0.182.0",
+    "trystero": "^0.25.4"
   },
   "devDependencies": {
     "vite": "^6.0.0",

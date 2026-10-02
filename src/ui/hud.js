@@ -454,6 +454,58 @@ export class Hud {
       }
     }
 
+    // Remote players (multiplayer): close enough to plot -> red dot;
+    // beyond the map -> rim arrow pointing at their bearing. Both carry the
+    // callsign so two friends are distinguishable.
+    const mpPeers = state.mpPeers || [];
+    if (mpPeers.length) {
+      const hdg2 = (heading * Math.PI) / 180;
+      const cosLat = Math.cos((state.lat * Math.PI) / 180);
+      ctx.font = "bold 9px monospace";
+      for (const peer of mpPeers) {
+        if (!Number.isFinite(peer.lon) || !Number.isFinite(peer.lat)) continue;
+        const dxm = (peer.lon - state.lon) * 111320 * cosLat;
+        const dym = (peer.lat - state.lat) * 111320;
+        const rx = dxm * Math.cos(hdg2) - dym * Math.sin(hdg2);
+        const ry = -dxm * Math.sin(hdg2) - dym * Math.cos(hdg2);
+        const px = rx * pixelsPerMeter;
+        const py = ry * pixelsPerMeter;
+        const dist = Math.sqrt(px * px + py * py);
+        if (dist < radius - 8) {
+          ctx.fillStyle = "#f00";
+          ctx.beginPath();
+          ctx.arc(cx + px, cy + py, 5, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = "#fff";
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+          ctx.fillStyle = "#fff";
+          ctx.textAlign = "left";
+          ctx.textBaseline = "middle";
+          ctx.fillText(String(peer.callsign || "P").slice(0, 8), cx + px + 8, cy + py);
+        } else {
+          const a = Math.atan2(px, -py);
+          const ex = cx + Math.sin(a) * (radius - 12);
+          const ey = cy - Math.cos(a) * (radius - 12);
+          ctx.save();
+          ctx.translate(ex, ey);
+          ctx.rotate(a);
+          ctx.fillStyle = "#f00";
+          ctx.beginPath();
+          ctx.moveTo(0, -9);
+          ctx.lineTo(7, 7);
+          ctx.lineTo(-7, 7);
+          ctx.closePath();
+          ctx.fill();
+          ctx.restore();
+          ctx.fillStyle = "#f00";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "bottom";
+          ctx.fillText(String(peer.callsign || "P").slice(0, 8), ex, ey - 11);
+        }
+      }
+    }
+
     // Player wedge
     ctx.save();
     ctx.translate(cx, cy);
