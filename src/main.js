@@ -1645,20 +1645,12 @@ function animate() {
       } catch (e) { /* minimap is cosmetic */ }
     }
 
-    // Multiplayer per-frame work: remote-plane presentation, spawn-map
-    // presence broadcast, adaptive quality, badge refresh.
+    // Multiplayer per-frame work: remote-plane presentation, adaptive
+    // quality, badge refresh.
     try {
       if (mpActive) {
         remotePlanes?.update(dt);
         mpTickPerf(dt);
-
-        mpSpawnBroadcastTimer += dt;
-        if (mpPhase === "spawn" && mpSpawnBroadcastTimer > 0.25) {
-          mpSpawnBroadcastTimer = 0;
-          mpBroadcastSpawn();
-          mpUpdateSpawnGate();
-        }
-
         state.mpPeers = mpPeersForMinimap();
       } else if (state.mpPeers && state.mpPeers.length) {
         state.mpPeers = [];
@@ -1688,6 +1680,18 @@ function animate() {
     camera.layers.set(1);
     renderer.render(scene, camera);
     renderer.clearDepth();
+  }
+
+  // Spawn-phase presence runs in EVERY state: the picker is not a flying
+  // state, so this cannot live in the flight block above. Keeps the
+  // partner's map cursor live and re-evaluates the shared launch gate.
+  if (mpActive && mpPhase === "spawn") {
+    mpSpawnBroadcastTimer += dt;
+    if (mpSpawnBroadcastTimer > 0.3) {
+      mpSpawnBroadcastTimer = 0;
+      mpBroadcastSpawn();
+      mpUpdateSpawnGate();
+    }
   }
 
   // Cesium's own loop can stall under a throttled/batched frame scheduler
@@ -1818,6 +1822,11 @@ async function mpStartParty(code, callsign) {
     .on("onHello", (peerId, callsign) => {
       if (remotePlanes) remotePlanes.setCallsign(peerId, callsign);
       if (spawnPresence) spawnPresence.setCallsign(peerId, callsign);
+      mpUpdateWaitingRoom();
+    })
+    .on("onRetry", (attempt, max) => {
+      // Transient signaling failure — reconnect is automatic, but say so.
+      mpSetStatus(wrStatusEl, `Connection attempt ${attempt} of ${max} failed — retrying…`, "busy");
       mpUpdateWaitingRoom();
     })
     .on("onBack", () => {

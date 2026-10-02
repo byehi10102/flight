@@ -93,10 +93,36 @@ flight data flows directly between the two players.
 - **Smooth at any speed** — remote planes are dead-reckoned locally with
   the same movement math the sim uses; packets only correct drift, so a
   10,000 mph pass reads as a pass instead of a teleport.
+- **Reliability** — the handshake needs no server of ours, so it is built
+  to self-heal:
+  - Free public STUN servers (Trystero 0.25 ships with none by default,
+    which breaks ICE gathering on many networks).
+  - A failed handshake retries automatically with a fresh offer, and the
+    waiting room says "retrying" rather than appearing stuck.
+  - A dedicated liveness ping keeps presence alive while players sit in
+    menus (gameplay traffic is not required to stay connected).
+  - Presence is swept by heartbeat, so a hard-disconnected player is
+    cleaned up instead of leaving a ghost blocking the spawn gate.
 - **Multiplayer graphics diet** — terrain detail relaxes one step, the
   minimap renders at half resolution, and an adaptive guard drops detail
   further if frame rate sags (restoring when headroom returns).
   Single-player visuals are untouched.
+
+### Verifying multiplayer
+
+A dev-only harness exercises the connection without the UI. With the dev
+server running:
+
+- `/dev-mp-selftest.html?trials=12` — runs N independent connections
+  between isolated frames and reports connect time, success rate, and
+  whether the data channel actually delivered a packet.
+- `/dev-mp-idle.html` — holds two peers silent and confirms presence
+  survives (and that the hello counter stays at 1, i.e. no echo storm).
+- `/dev-mp-depart.html` — hard-kills one peer and confirms the survivor
+  detects the departure.
+
+These pages are excluded from the production build (they are not part of
+`index.html` or `public/`).
 
 Undo: all multiplayer work lives on the `multiplayer-beta` branch —
 `git checkout master` returns to the pre-multiplayer game.

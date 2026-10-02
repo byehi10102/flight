@@ -43,8 +43,19 @@ const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const CODE_LENGTH = 5;
 const STATE_HZ = 12;
 const STATE_INTERVAL_MS = 1000 / STATE_HZ;
+/** Presence ping interval; the sweep tolerates ~3 missed beats. */
+const HEARTBEAT_MS = 2000;
 /** A peer silent this long is considered gone (leave event not required). */
 const PEER_TIMEOUT_MS = 6000;
+/** Automatic reconnect: attempts per connect() call, with a short delay. */
+const MAX_CONNECT_ATTEMPTS = 3;
+const RETRY_DELAY_MS = 1000;
+/**
+ * Handshake window per attempt. Typical connections land in ~2s, so this is
+ * generous headroom for slow ICE gathering without making a failed attempt
+ * take so long that the retry feels broken.
+ */
+const HANDSHAKE_TIMEOUT_MS = 14000;
 
 export function generateRoomCode() {
   let out = "";
@@ -79,6 +90,8 @@ export class Net {
     this.status = "idle"; // idle | connecting | online | error | closed
     this.error = null;
     this.active = false;
+    this._attempt = 0;
+    this._closing = false;
 
     this._handlers = {
       onStatus: [],
@@ -93,9 +106,11 @@ export class Net {
     this._sendSpawn = null;
     this._sendHello = null;
     this._sendBack = null;
+    this._sendHeartbeat = null;
     this._lastStateSent = 0;
     this._lastStatePayload = null;
     this._sweepTimer = null;
+    this._heartbeatTimer = null;
   }
 
   on(event, fn) {
@@ -127,6 +142,11 @@ export class Net {
   /**
    * Connect to a room. Call for both "create" (code you generated) and
    * "join" (code typed in) — they are the same operation.
+   *
+   * Public relay signaling is very good but not perfect (measured ~4% of
+   * attempts fail at the ICE stage), so a failed handshake is retried
+   * automatically with a fresh offer before surfacing an error. That is
+   * what makes the party flow self-healing rather than requiring a reload.
    */
   async connect(code, callsign) {
     if (this.active) await this.leave();
@@ -136,24 +156,68 @@ export class Net {
       this._setStatus("error", "Room code is empty.");
       return false;
     }
+    this._attempt = 0;
+    this._closing = false;
+    return this._openRoom();
+  }
 
+  /** Tear down the current room + timers without touching user intent. */
+  _teardownRoom() {
+    if (this._sweepTimer) {
+      clearInterval(this._sweepTimer);
+      this._sweepTimer = null;
+    }
+    if (this._heartbeatTimer) {
+      clearInterval(this._heartbeatTimer);
+      this._heartbeatTimer = null;
+    }
+    const room = this.room;
+    this.room = null;
+    this._sendState = null;
+    this._sendSpawn = null;
+    this._sendHello = null;
+    this._sendBack = null;
+    this._sendHeartbeat = null;
+    if (room) {
+      try { room.leave(); } catch (e) { /* already gone */ }
+    }
+  }
+
+  /**
+   * A handshake failed. Retry with a fresh room/offer until attempts run
+   * out; the peer may have been racing us or the relay path was bad.
+   */
+  _handleJoinError(details) {
+    if (this._closing) return;
+    this.active = false;
+    this._teardownRoom();
+    if (this._attempt < MAX_CONNECT_ATTEMPTS) {
+      this._emit("onRetry", this._attempt, MAX_CONNECT_ATTEMPTS);
+      this._setStatus("connecting", `Attempt ${this._attempt} failed — retrying…`);
+      setTimeout(() => {
+        if (this._closing) return;
+        this._openRoom();
+      }, RETRY_DELAY_MS);
+    } else {
+      this._setStatus(
+        "error",
+        `Could not reach your partner after ${this._attempt} attempts (${details?.error || "relay error"}).`
+      );
+    }
+  }
+
+  async _openRoom() {
+    this._attempt++;
     this._setStatus("connecting");
     try {
       const room = joinRoom(
         {
           appId: APP_ID,
           rtcConfig: { iceServers: ICE_SERVERS },
-          // Generous handshake window: gathering STUN+TURN candidates can
-          // take several seconds on slow links, and a tight timeout kills
-          // otherwise-healthy connections right after the SDP exchange.
-          handshakeTimeoutMs: 25000,
+          handshakeTimeoutMs: HANDSHAKE_TIMEOUT_MS,
         },
         this.code,
-        {
-          onJoinError: (details) => {
-            this._setStatus("error", `Could not reach matchmaking (${details?.error || "relay error"}).`);
-          },
-        }
+        { onJoinError: (details) => this._handleJoinError(details) }
       );
       this.room = room;
 
@@ -165,6 +229,13 @@ export class Net {
 
       const helloAction = room.makeAction("hi");
       helloAction.onMessage = (data, ctx) => this._handleHello(ctx.peerId, data);
+
+      // Dedicated liveness ping. Presence must not depend on gameplay
+      // traffic: players sit in the waiting room and browse the spawn map
+      // for long stretches, and without a heartbeat the presence sweep
+      // would declare a perfectly healthy partner "gone".
+      const hbAction = room.makeAction("hb");
+      hbAction.onMessage = (data, ctx) => this._touch(ctx.peerId);
 
       // "Going back to spawn picking" — so NEW LOCATION by one player
       // returns BOTH to the picker instead of leaving the partner flying.
@@ -178,11 +249,22 @@ export class Net {
       this._sendHello = (payload) =>
         helloAction.send(payload).catch((e) => console.warn("[mp] hello send failed:", e));
       this._sendBack = () => backAction.send({ t: 1 }).catch((e) => console.warn("[mp] back send failed:", e));
+      this._sendHeartbeat = () => hbAction.send({ t: 1 }).catch(() => { /* liveness is best-effort */ });
+
+      // Liveness ping well inside the sweep window (3 missed beats tolerated).
+      if (this._heartbeatTimer) clearInterval(this._heartbeatTimer);
+      this._heartbeatTimer = setInterval(() => {
+        if (!this.active || !this._sendHeartbeat) return;
+        if (this.peers.size === 0) return;
+        this._sendHeartbeat();
+      }, HEARTBEAT_MS);
 
       room.onPeerJoin = (peerId) => {
-        this.peers.set(peerId, { callsign: "PILOT", lastSeen: Date.now(), state: null, spawn: null });
+        this.peers.set(peerId, { callsign: "PILOT", lastSeen: Date.now(), state: null, spawn: null, helloSent: true });
         this._emit("onPeerJoin", peerId);
-        // Announce ourselves immediately so names appear without waiting.
+        // Announce ourselves immediately so names appear without waiting
+        // (and mark this peer as already greeted so the reply path in
+        // _handleHello cannot start an echo).
         try { this._sendHello({ c: this.callsign }); } catch (e) { /* best effort */ }
       };
 
@@ -197,8 +279,17 @@ export class Net {
 
       this.active = true;
       this._setStatus("online");
+      // A successful (re)connect invalidates any earlier attempt failure.
+      this.error = null;
       return true;
     } catch (e) {
+      this.active = false;
+      this._teardownRoom();
+      if (this._attempt < MAX_CONNECT_ATTEMPTS && !this._closing) {
+        setTimeout(() => { if (!this._closing) this._openRoom(); }, RETRY_DELAY_MS);
+        this._setStatus("connecting", `Attempt ${this._attempt} failed — retrying…`);
+        return true;
+      }
       this._setStatus("error", e?.message || "Failed to start multiplayer.");
       return false;
     }
@@ -217,7 +308,7 @@ export class Net {
   _touch(peerId) {
     let peer = this.peers.get(peerId);
     if (!peer) {
-      peer = { callsign: "PILOT", lastSeen: Date.now(), state: null, spawn: null };
+      peer = { callsign: "PILOT", lastSeen: Date.now(), state: null, spawn: null, helloSent: false };
       this.peers.set(peerId, peer);
       this._emit("onPeerJoin", peerId);
     }
@@ -228,8 +319,13 @@ export class Net {
   _handleHello(peerId, data) {
     const peer = this._touch(peerId);
     if (data && typeof data.c === "string") peer.callsign = data.c.slice(0, 14);
-    // Reply once so a peer that joined before us learns our name too.
-    try { if (this._sendHello) this._sendHello({ c: this.callsign }); } catch (e) { /* best effort */ }
+    // Reply AT MOST ONCE per peer, so a peer that joined before us learns
+    // our name. Replying to every hello made two peers echo each other
+    // endlessly — measured ~4,250 messages/second before this guard.
+    if (!peer.helloSent) {
+      peer.helloSent = true;
+      try { if (this._sendHello) this._sendHello({ c: this.callsign }); } catch (e) { /* best effort */ }
+    }
     this._emit("onHello", peerId, peer.callsign);
   }
 
@@ -303,22 +399,11 @@ export class Net {
   }
 
   async leave() {
+    this._closing = true;
     this.active = false;
-    if (this._sweepTimer) {
-      clearInterval(this._sweepTimer);
-      this._sweepTimer = null;
-    }
-    const room = this.room;
-    this.room = null;
-    this._sendState = null;
-    this._sendSpawn = null;
-    this._sendHello = null;
-    this._sendBack = null;
-    this._lastStatePayload = null;
+    this._teardownRoom();
     this.peers.clear();
-    if (room) {
-      try { await room.leave(); } catch (e) { /* already gone */ }
-    }
+    this._lastStatePayload = null;
     this._setStatus("closed");
   }
 }

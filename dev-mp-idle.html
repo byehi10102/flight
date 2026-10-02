@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Skyward MP idle-stability test</title>
+    <style>
+      body { background: #08121c; color: #b9ffd9; font: 13px Consolas, monospace; padding: 16px; }
+      #out { white-space: pre-wrap; line-height: 1.5; }
+      .pass { color: #5f5; } .fail { color: #f66; } .info { color: #9cf; }
+      h1 { font-size: 15px; letter-spacing: 2px; color: #0fe; }
+    </style>
+  </head>
+  <body>
+    <h1>MP IDLE STABILITY — do peers survive silence?</h1>
+    <div id="out">starting…</div>
+    <div id="frames"></div>
+    <script>
+      // Reproduces the "no application traffic" case: two peers connect,
+      // then neither sends anything. If presence decays, players would see
+      // each other vanish while simply sitting in a menu.
+      const IDLE_MS = Number(new URLSearchParams(location.search).get("idle") || 14000);
+      const out = document.getElementById("out");
+      const frames = document.getElementById("frames");
+      let lines = [];
+      const log = (t, c) => { lines.push(c ? `<span class="${c}">${t}</span>` : t); out.innerHTML = lines.join("\n"); };
+      const randCode = () => {
+        const A = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+        let s = ""; for (let i = 0; i < 6; i++) s += A[Math.floor(Math.random() * A.length)];
+        return s;
+      };
+
+      const room = randCode();
+      const state = { A: {}, B: {} };
+      const leaves = [];
+      const counts = { A: [], B: [] };
+      let connectedAt = 0;
+      let finished = false;
+
+      const ifrA = document.createElement("iframe");
+      const ifrB = document.createElement("iframe");
+      ifrA.width = ifrB.width = 220; ifrA.height = ifrB.height = 40;
+
+      window.addEventListener("message", (e) => {
+        const d = e.data;
+        if (!d || !d.from) return;
+        state[d.from][d.kind] = d;
+        if (d.kind === "leave") leaves.push(d.from + "@" + d.ms + "ms");
+        if (d.kind === "peers") counts[d.from].push(d.count);
+        if (d.kind === "join" && state.A.join && state.B.join && !connectedAt) {
+          connectedAt = performance.now();
+          log("Both peers connected at " + Math.round(connectedAt) + "ms — now idling " + IDLE_MS + "ms with NO app traffic\n", "info");
+          const seen = new Set();
+          const tick = setInterval(() => {
+            const last = (arr) => (arr.length ? arr[arr.length - 1] : "?");
+            const hA = state.A.peers ? state.A.peers.hellos : 0;
+            const hB = state.B.peers ? state.B.peers.hellos : 0;
+            const key = last(counts.A) + "/" + last(counts.B) + "/" + hA + "/" + hB;
+            if (!seen.has(key)) {
+              seen.add(key);
+              log("  peerCount A=" + last(counts.A) + "  B=" + last(counts.B) +
+                  "   helloCount A=" + hA + "  B=" + hB);
+            }
+          }, 1000);
+          setTimeout(() => { clearInterval(tick); finish(); }, IDLE_MS);
+        }
+      });
+
+      function finish() {
+        if (finished) return; finished = true;
+        const aLast = counts.A.length ? counts.A[counts.A.length - 1] : 0;
+        const bLast = counts.B.length ? counts.B[counts.B.length - 1] : 0;
+        const survivor = aLast > 0 && bLast > 0;
+        log(
+          "\nRESULT\n" +
+          "leave events: " + (leaves.length ? leaves.join(", ") : "none") + "\n" +
+          "final peerCount: A=" + aLast + "  B=" + bLast + "\n" +
+          (survivor
+            ? "IDLE_STABLE — peers survived silence"
+            : "IDLE_DECAY — peers lost each other with no traffic (BUG)"),
+          survivor ? "pass" : "fail"
+        );
+      }
+
+      ifrA.src = "/dev-mp-peer.html?room=" + room + "&label=A";
+      ifrB.src = "/dev-mp-peer.html?room=" + room + "&label=B";
+      frames.appendChild(ifrA); frames.appendChild(ifrB);
+      setTimeout(() => { if (finished) return; log("\nTIMEOUT waiting for connection"); finish(); }, 30000);
+    </script>
+  </body>
+</html>

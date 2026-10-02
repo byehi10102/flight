@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Skyward MP departure test</title>
+    <style>
+      body { background: #08121c; color: #b9ffd9; font: 13px Consolas, monospace; padding: 16px; }
+      #out { white-space: pre-wrap; line-height: 1.5; }
+      .pass { color: #5f5; } .fail { color: #f66; } .info { color: #9cf; }
+      h1 { font-size: 15px; letter-spacing: 2px; color: #0fe; }
+    </style>
+  </head>
+  <body>
+    <h1>MP DEPARTURE — is a hard-disconnect detected?</h1>
+    <div id="out">starting…</div>
+    <div id="frames"></div>
+    <script>
+      // Kills one peer WITHOUT a clean leave (iframe destroyed), then checks
+      // that the survivor notices within the sweep window. This is the path
+      // that must not leave the spawn gate stuck on a ghost partner.
+      const out = document.getElementById("out");
+      const frames = document.getElementById("frames");
+      let lines = [];
+      const log = (t, c) => { lines.push(c ? `<span class="${c}">${t}</span>` : t); out.innerHTML = lines.join("\n"); };
+      const randCode = () => {
+        const A = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+        let s = ""; for (let i = 0; i < 6; i++) s += A[Math.floor(Math.random() * A.length)];
+        return s;
+      };
+
+      const room = randCode();
+      const counts = { A: [], B: [] };
+      let leaveSeen = null;
+      let killAt = 0;
+      let done = false;
+
+      const ifrA = document.createElement("iframe");
+      const ifrB = document.createElement("iframe");
+      ifrA.width = ifrB.width = 220; ifrA.height = ifrB.height = 40;
+
+      window.addEventListener("message", (e) => {
+        const d = e.data;
+        if (!d || !d.from) return;
+        if (d.kind === "peers") counts[d.from].push({ count: d.count, ms: d.ms });
+        if (d.kind === "leave") {
+          if (d.from === "A" && !leaveSeen) {
+            leaveSeen = d.ms;
+            log("  A reports partner LEFT at " + d.ms + "ms (killed at " + killAt + "ms)", "pass");
+          }
+        }
+        if (d.kind === "join" && counts.A.length && counts.B.length && !killAt) start();
+      });
+
+      function start() {
+        // Wait until both see each other, then kill B hard.
+        const waitBoth = setInterval(() => {
+          const aLast = counts.A.length ? counts.A[counts.A.length - 1].count : 0;
+          const bLast = counts.B.length ? counts.B[counts.B.length - 1].count : 0;
+          if (aLast > 0 && bLast > 0) {
+            clearInterval(waitBoth);
+            killAt = Math.round(performance.now());
+            log("Both connected. Hard-killing peer B (no clean leave) at " + killAt + "ms\n", "info");
+            ifrB.remove(); // destroy the frame: connection dies abruptly
+            decide();
+          }
+        }, 500);
+      }
+
+      function decide() {
+        // Give the survivor the sweep window (6s) plus grace.
+        setTimeout(() => {
+          if (done) return;
+          done = true;
+          const after = counts.A.filter((c) => c.ms > killAt);
+          const last = after.length ? after[after.length - 1].count : -1;
+          const detected = leaveSeen !== null || last === 0;
+          log(
+            "\nRESULT\n" +
+            "leave event: " + (leaveSeen !== null ? "yes at " + leaveSeen + "ms" : "none") + "\n" +
+            "A peerCount after kill: " + last + "\n" +
+            (detected
+              ? "DEPARTURE_DETECTED — dead peer cleaned up"
+              : "DEPARTURE_MISSED — ghost peer left behind (BUG)"),
+            detected ? "pass" : "fail"
+          );
+        }, 11000);
+      }
+
+      ifrA.src = "/dev-mp-peer.html?room=" + room + "&label=A";
+      ifrB.src = "/dev-mp-peer.html?room=" + room + "&label=B";
+      frames.appendChild(ifrA); frames.appendChild(ifrB);
+      setTimeout(() => {
+        if (done || killAt) return;
+        done = true;
+        log("\nTIMEOUT: peers never connected", "fail");
+      }, 30000);
+    </script>
+  </body>
+</html>
