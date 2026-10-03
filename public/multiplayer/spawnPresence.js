@@ -1,5 +1,3 @@
-import * as Cesium from "cesium";
-
 /**
  * Peer presence on the spawn-selection map.
  *
@@ -7,7 +5,18 @@ import * as Cesium from "cesium";
  * few Hz) and, the moment they commit, the point they placed. Live cursor
  * tracking can lag on a slow link, so the placed dot is the guaranteed
  * signal: it is sent once and stays put until they move it.
+ *
+ * This file loads RAW (outside the app bundler), so Cesium arrives through
+ * createSpawnPresence(ctx) instead of a bare import.
  */
+
+let Cesium = null;
+
+/** Wire up the host app's Cesium namespace and return a new instance. */
+export function createSpawnPresence(ctx) {
+  Cesium = ctx.Cesium;
+  return new SpawnPresence(ctx.viewer);
+}
 export class SpawnPresence {
   constructor(viewer) {
     this.viewer = viewer;

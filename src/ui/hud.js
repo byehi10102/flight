@@ -56,7 +56,7 @@ export class Hud {
     this.createCompass();
   }
 
-  // ── Horizon: crosshair + pitch ladder, rotated/translated by attitude ──
+  // â”€â”€ Horizon: crosshair + pitch ladder, rotated/translated by attitude â”€â”€
   createHorizon() {
     if (document.getElementById("horizon-container")) return;
     const ui = document.getElementById("uiContainer");
@@ -108,7 +108,7 @@ export class Hud {
     ui.appendChild(panel);
   }
 
-  // ── Compass tape: 5° steps, 4px/deg, N/E/S/W labels (ref-flight) ──
+  // â”€â”€ Compass tape: 5Â° steps, 4px/deg, N/E/S/W labels (ref-flight) â”€â”€
   createCompass() {
     if (!this.compassTape) return;
     const step = 5;
@@ -177,7 +177,7 @@ export class Hud {
     if (t - this._last < 100) return;
     this._last = t;
 
-    // ── Smooth attitude toward true state (ref-flight lerp) ──
+    // â”€â”€ Smooth attitude toward true state (ref-flight lerp) â”€â”€
     const lerpFactor = 0.5;
     const lerpAngle = (current, target, factor) => {
       let diff = target - current;
@@ -203,13 +203,13 @@ export class Hud {
     this.smoothedThrottle += ((state.throttle || 0) - this.smoothedThrottle) * (lerpFactor * 0.4);
     this.smoothedYaw += ((state.yaw || 0) - this.smoothedYaw) * lerpFactor;
 
-    // ── Boost vignette (flight only; transitions own the solid fade) ──
+    // â”€â”€ Boost vignette (flight only; transitions own the solid fade) â”€â”€
     const isBoosting = state.isBoosting || false;
     if (this.vignette && state.isFlying) {
       this.vignette.style.opacity = isBoosting ? "1" : "0";
     }
 
-    // ── UI tilt/shake: the whole HUD shifts with control deflection ──
+    // â”€â”€ UI tilt/shake: the whole HUD shifts with control deflection â”€â”€
     const pitchDiff = getAngleDiff(state.pitch, this.smoothedPitch);
     const rollDiff = getAngleDiff(state.roll, this.smoothedRoll);
     const yawDiff = (state.yaw || 0) - this.smoothedYaw;
@@ -237,12 +237,12 @@ export class Hud {
         `translate(${shiftX + this.currentShakeX}px, ${shiftY + this.currentShakeY}px) scale(${scale})`;
     }
 
-    // ── Speed / altitude (ref-flight formatting) ──
+    // â”€â”€ Speed / altitude (ref-flight formatting) â”€â”€
     if (this.speedEl) this.speedEl.innerText = Math.round(state.speed).toString().padStart(3, "0");
     const altFeet = Math.max(0, Math.round((state.agl ?? state.alt) * 3.28084));
     if (this.altEl) this.altEl.innerText = altFeet.toString().padStart(5, "0");
 
-    // ── Heading + cardinal + compass tape ──
+    // â”€â”€ Heading + cardinal + compass tape â”€â”€
     let compassHeading = this.smoothedHeading;
     while (compassHeading < 0) compassHeading += 360;
     while (compassHeading >= 360) compassHeading -= 360;
@@ -267,7 +267,7 @@ export class Hud {
       this.compassTape.style.transform = `translateX(${centerOffset - targetPosOnTape}px)`;
     }
 
-    // ── Score / mission time / local datetime / coords ──
+    // â”€â”€ Score / mission time / local datetime / coords â”€â”€
     if (this.scoreEl) {
       if (typeof state.score === "number") {
         this.scoreEl.innerText = state.score.toString().padStart(6, "0");
@@ -301,7 +301,7 @@ export class Hud {
       const latDir = state.lat >= 0 ? "N" : "S";
       const lonDir = state.lon >= 0 ? "E" : "W";
       this.coordsEl.innerText =
-        `POS: ${Math.abs(state.lat).toFixed(4)}°${latDir} ${Math.abs(state.lon).toFixed(4)}°${lonDir}`;
+        `POS: ${Math.abs(state.lat).toFixed(4)}Â°${latDir} ${Math.abs(state.lon).toFixed(4)}Â°${lonDir}`;
     }
     if (this.statusEl) {
       const stallFactor = state.stallFactor || 0;
@@ -310,7 +310,7 @@ export class Hud {
         : stallFactor > 0.35 ? "STALL" : "AIRBORNE";
     }
 
-    // ── FPS ──
+    // â”€â”€ FPS â”€â”€
     this._fpsFrames++;
     if (t - this._fpsLast >= 1000) {
       const fps = (this._fpsFrames * 1000) / (t - this._fpsLast);
@@ -319,7 +319,7 @@ export class Hud {
       this._fpsLast = t;
     }
 
-    // ── Boost meter: drains across one boost, refills right after ──
+    // â”€â”€ Boost meter: drains across one boost, refills right after â”€â”€
     const charge = Math.max(0, Math.min(1, state.boostCharge ?? 1));
     if (this.boostFill) {
       this.boostFill.style.width = `${Math.round(charge * 100)}%`;
@@ -332,7 +332,7 @@ export class Hud {
         : charge >= 0.999 ? "BOOST READY" : `CHARGING ${Math.round(charge * 100)}%`;
     }
 
-    // ── Horizon follows smoothed attitude ──
+    // â”€â”€ Horizon follows smoothed attitude â”€â”€
     // The pitch ladder lives in its own bottom-right panel (out of the
     // center view); roll rotates the panel, pitch slides it vertically.
     const pitchLines = document.getElementById("pitch-lines");
@@ -363,7 +363,7 @@ export class Hud {
     }
 
     // Heading-rotated, meter-true grid (ref-flight): each line is exactly
-    // one range-unit (rangeKm × 1000 m), so grid matches the world scale.
+    // one range-unit (rangeKm Ã— 1000 m), so grid matches the world scale.
     // `heading` is the SAME smoothed value driving the real-map camera.
     const heading = state.minimapHeading ?? this.smoothedHeading;
     const rangeKm = (state.minimapRange || 1000) / 1000;
@@ -388,7 +388,7 @@ export class Hud {
     ctx.restore();
 
     // FOV wedge from the LIVE main-camera frustum (follows the boost FOV
-    // kick), falling back to 45° if the viewer is unreachable.
+    // kick), falling back to 45Â° if the viewer is unreachable.
     ctx.strokeStyle = "rgba(0, 255, 0, 0.7)";
     ctx.lineWidth = 1.2;
     let halfHFov = Math.PI / 4;
@@ -451,58 +451,6 @@ export class Hud {
         ctx.closePath();
         ctx.fill();
         ctx.restore();
-      }
-    }
-
-    // Remote players (multiplayer): close enough to plot -> red dot;
-    // beyond the map -> rim arrow pointing at their bearing. Both carry the
-    // callsign so two friends are distinguishable.
-    const mpPeers = state.mpPeers || [];
-    if (mpPeers.length) {
-      const hdg2 = (heading * Math.PI) / 180;
-      const cosLat = Math.cos((state.lat * Math.PI) / 180);
-      ctx.font = "bold 9px monospace";
-      for (const peer of mpPeers) {
-        if (!Number.isFinite(peer.lon) || !Number.isFinite(peer.lat)) continue;
-        const dxm = (peer.lon - state.lon) * 111320 * cosLat;
-        const dym = (peer.lat - state.lat) * 111320;
-        const rx = dxm * Math.cos(hdg2) - dym * Math.sin(hdg2);
-        const ry = -dxm * Math.sin(hdg2) - dym * Math.cos(hdg2);
-        const px = rx * pixelsPerMeter;
-        const py = ry * pixelsPerMeter;
-        const dist = Math.sqrt(px * px + py * py);
-        if (dist < radius - 8) {
-          ctx.fillStyle = "#f00";
-          ctx.beginPath();
-          ctx.arc(cx + px, cy + py, 5, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.strokeStyle = "#fff";
-          ctx.lineWidth = 1.5;
-          ctx.stroke();
-          ctx.fillStyle = "#fff";
-          ctx.textAlign = "left";
-          ctx.textBaseline = "middle";
-          ctx.fillText(String(peer.callsign || "P").slice(0, 8), cx + px + 8, cy + py);
-        } else {
-          const a = Math.atan2(px, -py);
-          const ex = cx + Math.sin(a) * (radius - 12);
-          const ey = cy - Math.cos(a) * (radius - 12);
-          ctx.save();
-          ctx.translate(ex, ey);
-          ctx.rotate(a);
-          ctx.fillStyle = "#f00";
-          ctx.beginPath();
-          ctx.moveTo(0, -9);
-          ctx.lineTo(7, 7);
-          ctx.lineTo(-7, 7);
-          ctx.closePath();
-          ctx.fill();
-          ctx.restore();
-          ctx.fillStyle = "#f00";
-          ctx.textAlign = "center";
-          ctx.textBaseline = "bottom";
-          ctx.fillText(String(peer.callsign || "P").slice(0, 8), ex, ey - 11);
-        }
       }
     }
 

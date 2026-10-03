@@ -122,10 +122,31 @@ server running:
   detects the departure.
 
 These pages are excluded from the production build (they are not part of
-`index.html` or `public/`).
+`index.html`; the three harness pages live at the project root).
 
-Undo: all multiplayer work lives on the `multiplayer-beta` branch —
-`git checkout master` returns to the pre-multiplayer game.
+## Removing multiplayer
+
+Everything the feature needs lives in one folder:
+
+```
+public/multiplayer/
+├── index.js            entry: party lifecycle, spawn gate, presence
+├── net.js              serverless WebRTC transport
+├── remotePlanes.js     remote aircraft + nametags in the 3D world
+├── spawnPresence.js    peer cursor + placed dot on the spawn map
+├── ui.js               mode button, lobby, waiting room, HUD badge
+├── style.css           all multiplayer styles
+└── vendor/trystero.mjs bundled Trystero (no npm runtime dependency)
+```
+
+The host app loads it with a guarded dynamic import and talks to it only
+through optional chaining (`mp?.…`), so:
+
+- **Delete `public/multiplayer/`** → the import 404s, the MULTIPLAYER
+  button never appears, and the game is pure single player. Build still
+  passes (nothing bundles or statically resolves the folder).
+- To regenerate the vendored bundle after a Trystero update:
+  `npx esbuild node_modules/trystero/dist/index.mjs --bundle --format=esm --outfile=public/multiplayer/vendor/trystero.mjs`
 
 ## What makes it real
 

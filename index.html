@@ -22,9 +22,8 @@
           </div>
           <p class="menu-desc">Fly anywhere on Earth over real 3D terrain. No API keys, no accounts.</p>
           <button id="startBtn" class="menu-btn">SINGLE PLAYER</button>
-          <button id="mpBtn" class="menu-btn menu-btn-secondary">
-            MULTIPLAYER <span class="beta-tag">BETA</span>
-          </button>
+          <!-- Multiplayer mode button slot (filled by public/multiplayer/ui.js; empty = single player only) -->
+          <div id="mp-slot"></div>
           <div class="menu-settings">
             <span class="settings-label">MINIMAP RANGE</span>
             <div id="rangeBtns">
@@ -41,65 +40,6 @@
             <b>/</b> — Search · <b>M</b> — Sound · <b>H</b> — Hide UI<br/>
             <b>C</b> — Clean View · <b>P</b> — Pause
           </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Multiplayer lobby: create or join a party -->
-    <div id="mpPanel" class="overlay hidden">
-      <div class="menu-container">
-        <div class="menu-content">
-          <div class="menu-header">
-            <span class="logo-main">MULTIPLAYER</span>
-            <span class="logo-sub">BETA</span>
-          </div>
-          <p class="menu-desc">Peer-to-peer — the code is the only thing you share. No accounts, no servers holding your flight.</p>
-
-          <label class="mp-field">
-            <span class="mp-field-label">CALLSIGN</span>
-            <input id="mpCallsign" type="text" maxlength="14" placeholder="PILOT" autocomplete="off" />
-          </label>
-
-          <div class="mp-actions">
-            <button id="mpCreateBtn" class="menu-btn">CREATE PARTY</button>
-            <div class="mp-or"><span>OR JOIN WITH A CODE</span></div>
-            <div class="mp-join-row">
-              <input id="mpCodeInput" type="text" maxlength="5" placeholder="CODE" autocomplete="off" />
-              <button id="mpJoinBtn" class="menu-btn">JOIN</button>
-            </div>
-          </div>
-
-          <div id="mpStatus" class="mp-status"></div>
-          <button id="mpBackBtn" class="menu-btn menu-btn-ghost">BACK</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Waiting room -->
-    <div id="waitingRoom" class="overlay hidden">
-      <div class="menu-container">
-        <div class="menu-content">
-          <div class="menu-header">
-            <span class="logo-main">PARTY</span>
-            <span class="logo-sub">WAITING ROOM</span>
-          </div>
-
-          <div class="wr-code-block">
-            <span class="wr-label">ROOM CODE</span>
-            <div class="wr-code">
-              <span id="wrCode">-----</span>
-              <button id="wrCopyBtn" class="wr-copy" title="Copy code">COPY</button>
-            </div>
-            <span class="wr-hint">Your partner enters this under MULTIPLAYER → JOIN.</span>
-          </div>
-
-          <div class="wr-players">
-            <div id="wrSelf" class="wr-player">YOU</div>
-            <div id="wrPeer" class="wr-player wr-peer-empty">WAITING FOR PLAYER…</div>
-          </div>
-
-          <div id="wrStatus" class="mp-status"></div>
-          <button id="wrLeaveBtn" class="menu-btn menu-btn-ghost">LEAVE PARTY</button>
         </div>
       </div>
     </div>
@@ -145,12 +85,6 @@
       <div id="hud-top-right">
         FPS <span id="fps">60</span><br/>
         <span id="local-datetime">01 JAN 26 | 00:00:00</span>
-      </div>
-
-      <!-- Multiplayer badge (hidden in single player) -->
-      <div id="mp-badge" class="hidden">
-        <span id="mp-badge-status">MP</span>
-        <span id="mp-badge-peers">0</span>
       </div>
 
       <!-- Speed box -->

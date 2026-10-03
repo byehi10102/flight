@@ -2,7 +2,7 @@ import * as THREE from "three";
 import * as Cesium from "cesium";
 import "cesium/Build/Cesium/Widgets/widgets.css";
 import { CONFIG } from "./core/config.js";
-import { createViewer, attachTerrain, setSunForTime, initMiniViewer, getMiniViewer, setMinimapCamera, setStreetsVisible, setPerformanceMode } from "./core/viewer.js";
+import { createViewer, attachTerrain, setSunForTime, initMiniViewer, getMiniViewer, setMinimapCamera, setStreetsVisible } from "./core/viewer.js";
 import { GroundSampler } from "./core/ground.js";
 import { PlanePhysics } from "./plane/planePhysics.js";
 import { PlaneController } from "./plane/planeController.js";
@@ -11,9 +11,6 @@ import { Hud } from "./ui/hud.js";
 import { particles } from "./utils/particles.js";
 import { soundManager } from "./utils/soundManager.js";
 import { reverseGeocode, reverseGeocodeDetailed, calculateDistance } from "./utils/geo.js";
-import { Net, generateRoomCode, normalizeRoomCode } from "./net/net.js";
-import { RemotePlanes } from "./net/remotePlanes.js";
-import { SpawnPresence } from "./net/spawnPresence.js";
 
 const States = {
   MENU: "MENU",
@@ -61,6 +58,8 @@ const state = {
 // ── Three.js overlay ─────────────────────────────────────────────────────────
 let scene, camera, renderer, threeContainer;
 let planeModel;
+// Multiplayer handle (set by the dynamic import above; null = single player).
+let mp = null;
 let physics = new PlanePhysics();
 let controller = new PlaneController();
 let hud = new Hud();
@@ -84,27 +83,6 @@ let lastCrashPos = null;
 // the tile-progress handler doesn't overwrite or hide it mid-wait.
 let spawnPending = false;
 
-// ── Multiplayer state ────────────────────────────────────────────────────────
-// mpPhase: idle (single player) | lobby | waiting | spawn | flying
-let net = null;
-let remotePlanes = null;
-let spawnPresence = null;
-let mpPhase = "idle";
-let mpActive = false;
-let mpCallsign = "PILOT";
-let mpRoomCode = null;
-/** I have committed a spawn point on my own map. */
-let mpSpawnPlaced = false;
-/** Set when the partner disconnects during selection; cleared on rejoin. */
-let mpPartnerLeft = false;
-/** Peer ids I should be rendering, tracked so ghosts can be cleaned up. */
-let mpKnownPeers = new Set();
-let mpSpawnBroadcastTimer = 0;
-let mpPerfForced = false;
-let mpFpsSamples = [];
-let mpPerfCooldown = 0;
-let minimapUpdateTimer = 0;
-let sunUpdateTimer = 0;
 // Fixed-step sim: physics/movement advance in 1/60s slices of REAL elapsed
 // time (up to 5 per frame), so the jet covers true MPH distance even when
 // the frame rate sags. The old clamped single-step ran the whole sim in
@@ -132,26 +110,6 @@ const vignette = document.getElementById("transition-vignette");
 const locationSearch = document.getElementById("locationSearch");
 const searchResults = document.getElementById("search-results");
 const instructionText = document.getElementById("instruction-text");
-
-// ── Multiplayer DOM ──────────────────────────────────────────────────────────
-const mpPanel = document.getElementById("mpPanel");
-const waitingRoom = document.getElementById("waitingRoom");
-const mpBtn = document.getElementById("mpBtn");
-const mpBackBtn = document.getElementById("mpBackBtn");
-const mpCallsignInput = document.getElementById("mpCallsign");
-const mpCreateBtn = document.getElementById("mpCreateBtn");
-const mpJoinBtn = document.getElementById("mpJoinBtn");
-const mpCodeInput = document.getElementById("mpCodeInput");
-const mpStatusEl = document.getElementById("mpStatus");
-const wrCodeEl = document.getElementById("wrCode");
-const wrCopyBtn = document.getElementById("wrCopyBtn");
-const wrSelfEl = document.getElementById("wrSelf");
-const wrPeerEl = document.getElementById("wrPeer");
-const wrStatusEl = document.getElementById("wrStatus");
-const wrLeaveBtn = document.getElementById("wrLeaveBtn");
-const mpBadge = document.getElementById("mp-badge");
-const mpBadgeStatus = document.getElementById("mp-badge-status");
-const mpBadgePeers = document.getElementById("mp-badge-peers");
 
 const loadingStatus = { model: false, cesium: false, globe: false, terrain: false, audio: false, failed: false };
 
@@ -272,8 +230,43 @@ function initThree() {
 
   planeModel = new PlaneModel(scene);
   particles.init(scene);
-  remotePlanes = new RemotePlanes(viewer);
-  spawnPresence = new SpawnPresence(viewer);
+
+  // ── MULTIPLAYER WIRING ──────────────────────────────────────────────────
+  // The whole feature lives in public/multiplayer/ and loads dynamically:
+  // delete that folder and this import fails silently, every mp?. call
+  // becomes a no-op, and the game is pure single player again. The URL is
+  // a variable + @vite-ignore so the bundler leaves it as a runtime import
+  // (a literal would be statically resolved and break the build).
+  const MP_URL = "/multiplayer/index.js";
+  import(/* @vite-ignore */ MP_URL)
+    .then((mod) => {
+      mp = mod.initMp({
+        Cesium,
+        viewer,
+        state,
+        CONFIG,
+        renderer,
+        getMiniViewer,
+        calculateDistance,
+        worldSpeedScale: WORLD_SPEED_SCALE,
+        dom: {
+          mainMenu,
+          loadingIndicator,
+          loadingText,
+          spawnInstruction,
+          instructionText,
+          confirmSpawnBtn,
+          pauseMenu,
+          uiContainer,
+          threeContainer,
+          vignette,
+          minimapCanvas: document.getElementById("minimap"),
+        },
+        enterSpawnPicking: (useVignette) => enterSpawnPicking(useVignette),
+        isPickSpawn: () => currentState === States.PICK_SPAWN,
+      });
+    })
+    .catch(() => { mp = null; });
   initSounds().catch((err) => console.error("Failed to init sounds:", err));
   planeModel.load().then(() => {
     loadingStatus.model = true;
@@ -413,9 +406,8 @@ function enterSpawnPicking(useVignette = true) {
 
 function exitSpawnPicking() {
   transitionGen++;
-  // Leaving the picker from a multiplayer room tears the party down — the
-  // partner sees the disconnect instead of a hung lobby.
-  if (mpActive) mpLeaveParty();
+  // Leaving the picker from a multiplayer room tears the party down.
+  mp?.leaveParty();
   stopAllFlyingSounds(0.3);
   try {
     viewer.camera.cancelFlight();
@@ -650,7 +642,7 @@ function selectSearchResult(lon, lat, name) {
 
   // Search is its own placement path (it does not go through
   // selectSpawnPoint) — arm the shared multiplayer gate here too.
-  mpNoteSpawnPlaced();
+  mp?.noteSpawnPlaced();
 }
 
 function setupSpawnPicker() {
@@ -795,7 +787,7 @@ function selectSpawnPoint(lon, lat, baseHeight, label, shortName, cartesian) {
   if (confirmSpawnBtn) confirmSpawnBtn.classList.remove("hidden");
 
   // Multiplayer: committing a point re-arms the shared gate.
-  mpNoteSpawnPlaced();
+  mp?.noteSpawnPlaced();
 }
 
 // ── Notable landmarks: minimal readable labels on the spawn map ─────────────
@@ -1177,12 +1169,7 @@ function confirmSpawn() {
             if (state.spawnName) hud.showRegion(`SPAWN · ${state.spawnName}`);
             // Multiplayer: flight phase begins — presence markers hand off
             // to live remote planes, and the performance diet turns on.
-            if (mpActive) {
-              mpPhase = "flying";
-              spawnPresence?.clear();
-              mpApplyPerformance(true);
-              mpRefreshBadge();
-            }
+            mp?.onFlightStart();
           try {
             getMiniViewer()?.resize();
           } catch (e) { /* minimap is cosmetic */ }
@@ -1250,12 +1237,7 @@ function confirmSpawn() {
       hud.resetTime();
       hud.resetScore();
       // Multiplayer: same phase handoff as the healthy flight path.
-      if (mpActive) {
-        mpPhase = "flying";
-        spawnPresence?.clear();
-        mpApplyPerformance(true);
-        mpRefreshBadge();
-      }
+      mp?.onFlightStart();
       try {
         getMiniViewer()?.resize();
       } catch (e) { /* minimap is cosmetic */ }
@@ -1379,9 +1361,6 @@ function update(dt) {
       if (distFromSpawn > PIN_REVEAL_M) spawnIndicator.show = true;
     }
   } catch (e) { /* indicator is cosmetic */ }
-
-  // Multiplayer: share the updated flight state (rate-limited inside net).
-  try { net?.broadcastState({ ...state, isFlying: true }); } catch (e) { /* best effort */ }
 
   checkCrash();
   checkGPWS();
@@ -1623,6 +1602,8 @@ function animate() {
     if (minimapUpdateTimer > 0.1) {
       minimapUpdateTimer = 0;
       hud.updateMinimap(state);
+      // Multiplayer peer markers draw on top of the base overlay.
+      mp?.drawMinimap();
     }
 
     // Minimap truth (ref-flight parity): smooth one shared heading, derive
@@ -1646,16 +1627,8 @@ function animate() {
     }
 
     // Multiplayer per-frame work: remote-plane presentation, adaptive
-    // quality, badge refresh.
-    try {
-      if (mpActive) {
-        remotePlanes?.update(dt);
-        mpTickPerf(dt);
-        state.mpPeers = mpPeersForMinimap();
-      } else if (state.mpPeers && state.mpPeers.length) {
-        state.mpPeers = [];
-      }
-    } catch (e) { /* multiplayer is best-effort; never break flight */ }
+    // quality, badge, flight-state broadcast. All inside the module.
+    mp?.tick(dt);
 
     // Permanent daytime: re-pin the sun high at the aircraft's position
     // twice a second so flying across the globe never leaves you in the dark.
@@ -1682,350 +1655,10 @@ function animate() {
     renderer.clearDepth();
   }
 
-  // Spawn-phase presence runs in EVERY state: the picker is not a flying
-  // state, so this cannot live in the flight block above. Keeps the
-  // partner's map cursor live and re-evaluates the shared launch gate.
-  if (mpActive && mpPhase === "spawn") {
-    mpSpawnBroadcastTimer += dt;
-    if (mpSpawnBroadcastTimer > 0.3) {
-      mpSpawnBroadcastTimer = 0;
-      mpBroadcastSpawn();
-      mpUpdateSpawnGate();
-    }
-  }
-
   // Cesium's own loop can stall under a throttled/batched frame scheduler
   // (headless CI, backgrounded tabs). Driving it explicitly guarantees the
   // globe always composites under the Three.js overlay.
   viewer.render();
-}
-
-// ── Multiplayer: party lifecycle, spawn gate, presence ───────────────────────
-function mpSetStatus(el, text, kind = "") {
-  if (!el) return;
-  el.textContent = text || "";
-  el.className = "mp-status" + (kind ? " " + kind : "");
-}
-
-function mpShowScreen(which) {
-  // which: "menu" | "lobby" | "waiting"
-  if (mainMenu) mainMenu.classList.toggle("hidden", which !== "menu");
-  if (mpPanel) mpPanel.classList.toggle("hidden", which !== "lobby");
-  if (waitingRoom) waitingRoom.classList.toggle("hidden", which !== "waiting");
-}
-
-/** Keep the HUD badge honest about link state and peer count. */
-function mpRefreshBadge() {
-  if (!mpBadge) return;
-  if (!mpActive) {
-    mpBadge.classList.add("hidden");
-    return;
-  }
-  mpBadge.classList.remove("hidden");
-  const peers = net ? net.peerCount() : 0;
-  if (mpBadgePeers) mpBadgePeers.textContent = `${peers}/2`;
-  const healthy = net && net.status === "online" && peers > 0;
-  const linkDown = !net || net.status === "error";
-  mpBadge.classList.toggle("offline", !!linkDown);
-  mpBadge.classList.toggle("stale", !linkDown && !healthy);
-  if (mpBadgeStatus) {
-    mpBadgeStatus.textContent = linkDown ? "MP OFFLINE" : healthy ? "MP LIVE" : "MP SYNCING";
-  }
-}
-
-function mpUpdateWaitingRoom() {
-  const peers = net ? net.activePeers() : [];
-  if (wrCodeEl) wrCodeEl.textContent = mpRoomCode || "-----";
-  if (wrSelfEl) wrSelfEl.textContent = `YOU — ${mpCallsign}`;
-  if (wrPeerEl) {
-    if (peers.length) {
-      wrPeerEl.classList.remove("wr-peer-empty");
-      wrPeerEl.textContent = peers.map((p) => p.callsign || "PILOT").join(", ");
-    } else {
-      wrPeerEl.classList.add("wr-peer-empty");
-      wrPeerEl.textContent = "WAITING FOR PLAYER…";
-    }
-  }
-  mpRefreshBadge();
-}
-
-/**
- * Enter flight-serverless play. Create and join are the same operation:
- * both peers connect to the same room code.
- */
-async function mpStartParty(code, callsign) {
-  mpCallsign = (callsign || "PILOT").slice(0, 14).toUpperCase() || "PILOT";
-  mpRoomCode = normalizeRoomCode(code);
-  mpActive = true;
-  mpPhase = "waiting";
-  mpSpawnPlaced = false;
-  mpKnownPeers = new Set();
-
-  mpShowScreen("waiting");
-  mpUpdateWaitingRoom();
-  mpSetStatus(wrStatusEl, "Connecting to matchmaking…", "busy");
-
-  net = new Net();
-  net
-    .on("onStatus", (status, error) => {
-      mpRefreshBadge();
-      if (status === "online") {
-        mpSetStatus(wrStatusEl, "Connected — share your code.", "ok");
-        mpUpdateWaitingRoom();
-      } else if (status === "error") {
-        mpSetStatus(wrStatusEl, error || "Connection failed.", "error");
-      }
-    })
-    .on("onPeerJoin", (peerId) => {
-      mpPartnerLeft = false;
-      mpUpdateWaitingRoom();
-      mpSetStatus(wrStatusEl, "Player joined — starting spawn selection…", "ok");
-      // Both players are present: move on to picking a spawn. This is the
-      // "you can't load in until both placed" start of the gate.
-      setTimeout(() => {
-        if (mpActive && mpPhase === "waiting") mpBeginSpawnPhase();
-      }, 600);
-    })
-    .on("onPeerLeave", (peerId) => {
-      mpKnownPeers.delete(peerId);
-      if (remotePlanes) remotePlanes.remove(peerId);
-      if (spawnPresence) spawnPresence.remove(peerId);
-      mpUpdateWaitingRoom();
-
-      if (mpPhase === "waiting") {
-        mpSetStatus(wrStatusEl, "Player left the party.", "error");
-      } else if (mpPhase === "spawn") {
-        // Partner bailed during selection: the gate can no longer be
-        // satisfied, so say so instead of leaving a dead grey button.
-        mpSpawnPlaced = false;
-        mpPartnerLeft = true;
-        mpUpdateSpawnGate();
-        mpSetStatus(wrStatusEl, "Partner disconnected.", "error");
-      } else {
-        mpSetStatus(wrStatusEl, "Partner disconnected.", "error");
-      }
-      mpRefreshBadge();
-    })
-    .on("onState", (peerId, data, peer) => {
-      if (!remotePlanes) return;
-      mpKnownPeers.add(peerId);
-      remotePlanes.setState(peerId, data);
-      if (peer.callsign) remotePlanes.setCallsign(peerId, peer.callsign);
-    })
-    .on("onSpawn", (peerId, data, peer) => {
-      if (!spawnPresence) return;
-      mpKnownPeers.add(peerId);
-      spawnPresence.setPresence(peerId, data);
-      if (peer.callsign) spawnPresence.setCallsign(peerId, peer.callsign);
-      mpUpdateSpawnGate();
-    })
-    .on("onHello", (peerId, callsign) => {
-      if (remotePlanes) remotePlanes.setCallsign(peerId, callsign);
-      if (spawnPresence) spawnPresence.setCallsign(peerId, callsign);
-      mpUpdateWaitingRoom();
-    })
-    .on("onRetry", (attempt, max) => {
-      // Transient signaling failure — reconnect is automatic, but say so.
-      mpSetStatus(wrStatusEl, `Connection attempt ${attempt} of ${max} failed — retrying…`, "busy");
-      mpUpdateWaitingRoom();
-    })
-    .on("onBack", () => {
-      // Partner went back to spawn picking: follow them, whether I was
-      // flying or paused — the gate only makes sense with both on the map.
-      if (!mpActive) return;
-      if (currentState === States.PICK_SPAWN) {
-        mpUpdateSpawnGate();
-        return;
-      }
-      if (pauseMenu) pauseMenu.classList.add("hidden");
-      mpSpawnPlaced = false;
-      mpPartnerLeft = false;
-      remotePlanes?.clear();
-      mpPhase = "spawn";
-      enterSpawnPicking(true);
-      mpBroadcastSpawn();
-      mpUpdateSpawnGate();
-      setTimeout(() => {
-        if (mpActive && mpPhase === "spawn") mpUpdateSpawnGate();
-      }, 620);
-    });
-
-  const ok = await net.connect(mpRoomCode, mpCallsign);
-  if (!ok) {
-    mpSetStatus(wrStatusEl, net.error || "Could not connect.", "error");
-  }
-}
-
-/** Both players present: open the spawn picker for each of them. */
-function mpBeginSpawnPhase() {
-  mpPhase = "spawn";
-  mpSpawnPlaced = false;
-  mpSpawnBroadcastTimer = 0;
-  if (waitingRoom) waitingRoom.classList.add("hidden");
-  enterSpawnPicking(true);
-  if (instructionText) {
-    instructionText.textContent = "PICK YOUR SPAWN — BOTH PLAYERS MUST CHOOSE BEFORE LAUNCH";
-  }
-  mpSetStatus(wrStatusEl, "", "");
-  mpRefreshBadge();
-  mpUpdateSpawnGate();
-  // enterSpawnPicking's own transition timer rewrites the instruction text
-  // 500 ms in — reassert the multiplayer wording just after it.
-  setTimeout(() => {
-    if (mpActive && mpPhase === "spawn") mpUpdateSpawnGate();
-  }, 620);
-  // Tell the partner we are on the map (their marker appears immediately).
-  mpBroadcastSpawn();
-}
-
-/** Do we collectively have both spawn points committed? */
-function mpBothSpawnPlaced() {
-  if (!mpActive) return true;
-  if (!net || net.peerCount() === 0) return false;
-  if (!mpSpawnPlaced) return false;
-  for (const peer of net.activePeers()) {
-    if (!spawnPresence || !spawnPresence.hasPlaced(peer.id)) return false;
-  }
-  return true;
-}
-
-/**
- * The spawn button appears as soon as YOU pick, but stays inert until both
- * players have committed. Re-picking by either player re-arms the gate.
- */
-function mpUpdateSpawnGate() {
-  if (!confirmSpawnBtn) return;
-  if (!mpActive) {
-    confirmSpawnBtn.disabled = false;
-    confirmSpawnBtn.classList.remove("mp-waiting");
-    return;
-  }
-  // Button stays out of sight until *you* commit a point, then appears
-  // greyed until the party is collectively ready.
-  if (!mpSpawnPlaced) {
-    confirmSpawnBtn.classList.add("hidden");
-    confirmSpawnBtn.disabled = true;
-    confirmSpawnBtn.classList.remove("mp-waiting");
-    if (instructionText) {
-      instructionText.textContent = "PICK YOUR SPAWN — BOTH PLAYERS MUST CHOOSE BEFORE LAUNCH";
-    }
-    return;
-  }
-
-  const ready = mpBothSpawnPlaced();
-  confirmSpawnBtn.classList.remove("hidden");
-  confirmSpawnBtn.disabled = !ready;
-  confirmSpawnBtn.classList.toggle("mp-waiting", !ready);
-
-  if (instructionText) {
-    if (mpPartnerLeft) {
-      instructionText.textContent = "YOUR PARTNER LEFT — WAITING FOR A PLAYER TO REJOIN";
-    } else if (ready) {
-      instructionText.textContent = "BOTH PLAYERS READY — LAUNCH WHEN YOU ARE";
-    } else {
-      const waiting = net ? net.activePeers().filter((p) => !spawnPresence?.hasPlaced(p.id)) : [];
-      instructionText.textContent = waiting.length
-        ? `WAITING FOR ${(waiting[0].callsign || "PARTNER").toUpperCase()} TO PICK A SPAWN`
-        : "WAITING FOR YOUR PARTNER TO CONNECT";
-    }
-  }
-}
-
-/** Share my map centre + committed point with the party. */
-function mpBroadcastSpawn() {
-  if (!mpActive || !net) return;
-  try {
-    const carto = viewer.camera.positionCartographic;
-    net.broadcastSpawn({
-      camLon: carto ? Cesium.Math.toDegrees(carto.longitude) : null,
-      camLat: carto ? Cesium.Math.toDegrees(carto.latitude) : null,
-      lon: mpSpawnPlaced ? state.lon : null,
-      lat: mpSpawnPlaced ? state.lat : null,
-      placed: mpSpawnPlaced,
-    });
-  } catch (e) { /* presence is best-effort */ }
-}
-
-/** Called once the local player commits a point on the map. */
-function mpNoteSpawnPlaced() {
-  if (!mpActive) return;
-  mpSpawnPlaced = true;
-  mpBroadcastSpawn();
-  mpUpdateSpawnGate();
-}
-
-/** Build the peer list the minimap draws (dots close, arrows far). */
-function mpPeersForMinimap() {
-  const out = [];
-  if (!mpActive || !remotePlanes) return out;
-  for (const peerId of mpKnownPeers) {
-    const live = remotePlanes.getLive(peerId);
-    if (!live) continue;
-    const info = net ? net.peers.get(peerId) : null;
-    out.push({
-      lon: live.lon,
-      lat: live.lat,
-      alt: live.alt,
-      callsign: info?.callsign || "PILOT",
-    });
-  }
-  return out;
-}
-
-/** Leave the party and return to a clean single-player menu. */
-async function mpLeaveParty() {
-  const had = mpActive;
-  mpActive = false;
-  mpPhase = "idle";
-  mpSpawnPlaced = false;
-  mpKnownPeers = new Set();
-  if (remotePlanes) remotePlanes.clear();
-  if (spawnPresence) spawnPresence.clear();
-  if (net) {
-    try { await net.leave(); } catch (e) { /* already gone */ }
-    net = null;
-  }
-  mpRoomCode = null;
-  mpRefreshBadge();
-  mpApplyPerformance(false);
-  if (confirmSpawnBtn) {
-    confirmSpawnBtn.disabled = false;
-    confirmSpawnBtn.classList.remove("mp-waiting");
-  }
-  if (had) mpShowScreen("menu");
-}
-
-/** Toggle the multiplayer graphics diet. */
-function mpApplyPerformance(on) {
-  try { setPerformanceMode(on); } catch (e) { /* best effort */ }
-  try {
-    if (renderer) renderer.setPixelRatio(on ? 1 : Math.min(window.devicePixelRatio || 1, 2));
-  } catch (e) { /* best effort */ }
-}
-
-/**
- * Adaptive guard: if multiplayer frames sag, drop detail further; if there
- * is headroom again, restore. Cooldown prevents oscillation.
- */
-function mpTickPerf(dt) {
-  if (!mpActive) return;
-  mpPerfCooldown -= dt;
-  if (dt > 0) mpFpsSamples.push(1 / dt);
-  if (mpFpsSamples.length < 90) return;
-
-  const avg = mpFpsSamples.reduce((a, b) => a + b, 0) / mpFpsSamples.length;
-  mpFpsSamples = [];
-  if (mpPerfCooldown > 0) return;
-
-  if (avg < 45 && !mpPerfForced) {
-    mpPerfForced = true;
-    mpApplyPerformance(true);
-    mpPerfCooldown = 10;
-  } else if (avg > 58 && mpPerfForced) {
-    mpPerfForced = false;
-    mpApplyPerformance(false);
-    mpPerfCooldown = 10;
-  }
 }
 
 // ── UI events ────────────────────────────────────────────────────────────────
@@ -2049,62 +1682,9 @@ startBtn.addEventListener("click", () => {
   enterSpawnPicking(false);
 });
 
-// ── Multiplayer UI events ────────────────────────────────────────────────────
-try {
-  mpCallsignInput.value = localStorage.getItem("skywardCallsign") || "";
-} catch (e) { /* storage unavailable */ }
-mpCallsignInput?.addEventListener("input", () => {
-  try { localStorage.setItem("skywardCallsign", mpCallsignInput.value); } catch (e) { /* cosmetic */ }
-});
-mpCallsignInput?.addEventListener("keydown", (e) => e.stopPropagation());
-mpCodeInput?.addEventListener("keydown", (e) => e.stopPropagation());
-
-mpBtn?.addEventListener("click", () => {
-  mpShowScreen("lobby");
-  mpSetStatus(mpStatusEl, "");
-});
-
-mpBackBtn?.addEventListener("click", () => mpShowScreen("menu"));
-
-mpCreateBtn?.addEventListener("click", () => {
-  mpStartParty(generateRoomCode(), mpCallsignInput?.value || "PILOT");
-});
-
-mpJoinBtn?.addEventListener("click", () => {
-  const code = normalizeRoomCode(mpCodeInput?.value);
-  if (!code) {
-    mpSetStatus(mpStatusEl, "Enter a 5-character party code first.", "error");
-    return;
-  }
-  mpStartParty(code, mpCallsignInput?.value || "PILOT");
-});
-
-mpCodeInput?.addEventListener("keydown", (e) => {
-  if (e.key === "Enter") {
-    const code = normalizeRoomCode(mpCodeInput.value);
-    if (code) mpStartParty(code, mpCallsignInput?.value || "PILOT");
-  }
-});
-
-wrCopyBtn?.addEventListener("click", async () => {
-  if (!mpRoomCode) return;
-  try {
-    await navigator.clipboard.writeText(mpRoomCode);
-    wrCopyBtn.textContent = "COPIED";
-    setTimeout(() => { if (wrCopyBtn) wrCopyBtn.textContent = "COPY"; }, 1500);
-  } catch (e) {
-    // Clipboard can be blocked: fall back to selecting the code text.
-    mpSetStatus(wrStatusEl, `Code: ${mpRoomCode} — write it down.`, "busy");
-  }
-});
-
-wrLeaveBtn?.addEventListener("click", async () => {
-  await mpLeaveParty();
-});
-
 confirmSpawnBtn.addEventListener("click", () => {
   // Multiplayer gate: a greyed button must not launch early.
-  if (mpActive && !mpBothSpawnPlaced()) return;
+  if (mp?.isActive() && !mp.bothSpawnPlaced()) return;
   confirmSpawn();
 });
 
@@ -2127,22 +1707,10 @@ document.getElementById("resumeBtn").addEventListener("click", async () => {
 
 document.getElementById("restartBtn").addEventListener("click", () => {
   if (pauseMenu) pauseMenu.classList.add("hidden");
-  // Multiplayer: NEW LOCATION keeps the party and re-opens the shared gate —
-  // for BOTH players (the partner is pulled back to the picker too).
-  if (mpActive) {
-    try { net?.broadcastBack(); } catch (e) { /* best effort */ }
-    mpSpawnPlaced = false;
-    if (spawnPresence) {
-      // My old commit is stale; the partner's stays until they re-pick.
-      for (const peer of net ? net.activePeers() : []) {
-        spawnPresence.setPresence(peer.id, { placed: 0 });
-      }
-    }
-    remotePlanes?.clear();
-    mpPhase = "spawn";
-    enterSpawnPicking(true);
-    mpBroadcastSpawn();
-    mpUpdateSpawnGate();
+  // Multiplayer: NEW LOCATION keeps the party and pulls BOTH players back
+  // to the shared spawn gate.
+  if (mp?.isActive()) {
+    mp.goBackToPicking();
     return;
   }
   enterSpawnPicking(true);

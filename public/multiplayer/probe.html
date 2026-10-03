@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head><meta charset="utf-8" /><title>cesium probe</title></head>
+  <body>
+    <pre id="out">checking…</pre>
+    <script type="module">
+      // Dev probe: does the app expose window.Cesium, and is the raw
+      // vendored trystero bundle loadable from public/?
+      const out = document.getElementById("out");
+      const lines = [];
+      const log = (t) => { lines.push(t); out.innerHTML = lines.join("\n"); };
+      log("window.Cesium: " + (window.Cesium ? "EXISTS" : "missing"));
+      if (window.Cesium) {
+        log("  Cartesian3: " + (window.Cesium.Cartesian3 ? "ok" : "missing"));
+        log("  Transforms: " + (window.Cesium.Transforms ? "ok" : "missing"));
+        log("  Entity/Color/Math: " + [window.Cesium.Entity, window.Cesium.Color, window.Cesium.Math].every(Boolean) ? "ok" : "missing");
+      }
+      try {
+        const t = await import("/multiplayer/vendor/trystero.mjs");
+        log("vendored trystero: LOADS, joinRoom=" + (typeof t.joinRoom) + " selfId=" + (typeof t.selfId));
+      } catch (e) {
+        log("vendored trystero: FAILED — " + e.message);
+      }
+      log("CESIUM_PROBE_DONE");
+    </script>
+  </body>
+</html>

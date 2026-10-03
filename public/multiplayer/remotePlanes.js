@@ -1,5 +1,3 @@
-import * as Cesium from "cesium";
-
 /**
  * Remote aircraft rendering in the 3D world.
  *
@@ -15,16 +13,26 @@ import * as Cesium from "cesium";
  * internal Z-up space, and a glTF model whose nose is -Z becomes +Y after
  * Cesium's Y-up -> Z-up conversion — which is exactly this game's F-15, so
  * no yaw correction is needed (verified numerically before implementation).
+ *
+ * This file loads RAW (outside the app bundler), so Cesium and tunables
+ * arrive through createRemotePlanes(ctx) instead of bare imports.
  */
 
 const MPH_TO_MPS = 0.44704;
-const WORLD_SPEED_SCALE = 1.8;
 /** Drift correction time constant: a packet's error is ~63% gone in this. */
 const CORRECTION_TAU = 0.3;
 const MODEL_URI = "models/f-15.glb";
 const LABEL_NEAR_M = 3000;
 const LABEL_FAR_M = 20000000;
 const FADE_OUT_S = 3;
+
+let Cesium = null;
+
+/** Wire up the host app's Cesium namespace and return a new instance. */
+export function createRemotePlanes(ctx) {
+  Cesium = ctx.Cesium;
+  return new RemotePlanes(ctx.viewer, ctx.worldSpeedScale);
+}
 
 function movePosition(lon, lat, alt, heading, pitch, distance) {
   const headingRad = Cesium.Math.toRadians(heading);
@@ -51,8 +59,9 @@ function shortestAngle(a, b) {
 }
 
 export class RemotePlanes {
-  constructor(viewer) {
+  constructor(viewer, worldSpeedScale) {
     this.viewer = viewer;
+    this.worldSpeedScale = worldSpeedScale;
     /** peerId -> plane record */
     this.planes = new Map();
     this._palette = [
@@ -227,7 +236,7 @@ export class RemotePlanes {
 
       // 1. Dead-reckon forward along the last known vector.
       if (live.fly !== false) {
-        const mps = live.v * MPH_TO_MPS * WORLD_SPEED_SCALE;
+        const mps = live.v * MPH_TO_MPS * this.worldSpeedScale;
         if (mps > 0.01) {
           const next = movePosition(live.lon, live.lat, live.alt, live.h, live.p, mps * dt);
           live.lon = next.lon;

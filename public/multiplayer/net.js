@@ -16,7 +16,7 @@
  *    12 Hz regardless of speed.
  *  - Every send is wrapped: a network hiccup can never break the sim loop.
  */
-import { joinRoom, selfId } from "trystero";
+import { joinRoom, selfId } from "./vendor/trystero.mjs";
 
 const APP_ID = "skyward-flight-sim-v1";
 /**
