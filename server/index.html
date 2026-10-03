@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Skyward multiplayer — server demo</title>
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/cesium@1.132.0/Build/Cesium/Widgets/widgets.css"
+    />
+    <script>
+      // Cesium loads its workers/assets from here (bundlers set this too).
+      window.CESIUM_BASE_URL = "https://cdn.jsdelivr.net/npm/cesium@1.132.0/Build/Cesium/";
+    </script>
+    <script type="importmap">
+      {
+        "imports": {
+          "cesium": "https://cdn.jsdelivr.net/npm/cesium@1.132.0/+esm"
+        }
+      }
+    </script>
+    <style>
+      html, body { margin: 0; height: 100%; background: #08121c; color: #cfffe6;
+        font: 13px Consolas, monospace; }
+      #cesiumContainer { position: absolute; inset: 0; }
+      #panel {
+        position: absolute; top: 12px; left: 12px; z-index: 10; width: 280px;
+        background: rgba(4, 14, 22, 0.86); border: 1px solid rgba(0, 255, 200, 0.35);
+        border-radius: 8px; padding: 12px 14px; line-height: 1.7;
+      }
+      h1 { font-size: 14px; letter-spacing: 2px; color: #0fe; margin: 0 0 8px; }
+      input, button {
+        font: inherit; padding: 6px 9px; border-radius: 5px; box-sizing: border-box;
+        background: rgba(0,0,0,0.5); color: #fff; border: 1px solid rgba(255,255,255,0.25);
+      }
+      button { cursor: pointer; background: rgba(0,255,180,0.12);
+        border-color: rgba(0,255,180,0.5); margin: 6px 0; width: 100%; }
+      button:hover { background: rgba(0,255,180,0.22); }
+      input { width: 100%; text-transform: uppercase; letter-spacing: 3px; text-align: center; }
+      #code { font-size: 22px; letter-spacing: 6px; color: #0fe; }
+      #log { max-height: 150px; overflow: auto; color: #9cf; font-size: 11px;
+        white-space: pre-wrap; }
+      .err { color: #ff8b8b; }
+      .ok { color: #6f6; }
+    </style>
+  </head>
+  <body>
+    <div id="cesiumContainer"></div>
+    <div id="panel">
+      <h1>MULTIPLAYER DEMO</h1>
+      CALLSIGN <input id="callsign" value="ACE-1" maxlength="16" />
+      <button id="createBtn">CREATE LOBBY</button>
+      <div id="code">-----</div>
+      OR JOIN <input id="joinCode" maxlength="5" placeholder="CODE" />
+      <button id="joinBtn">JOIN LOBBY</button>
+      <div id="log"></div>
+      <div style="color:#889; font-size:11px; margin-top:6px;">
+        Fly: W/S throttle · arrows pitch/roll — remote planes interpolate.
+      </div>
+    </div>
+
+    <script type="module">
+      // A deliberately small Cesium scene (no game code) whose only job is to
+      // prove the client module: rooms, telemetry, entity spawn/remove, and
+      // smooth interpolation of remote aircraft.
+      import * as Cesium from "cesium";
+      import { createMultiplayerClient } from "./client.js";
+
+      const logEl = document.getElementById("log");
+      const log = (msg, cls = "") => {
+        logEl.innerHTML += `<span class="${cls}">${msg}</span>\n`;
+        logEl.scrollTop = logEl.scrollHeight;
+      };
+
+      const viewer = new Cesium.Viewer("cesiumContainer", {
+        baseLayer: Cesium.ImageryLayer.fromProviderAsync(
+          Cesium.TileMapServiceImageryProvider.fromUrl(
+            Cesium.buildModuleUrl("Assets/Textures/NaturalEarthII")
+          )
+        ),
+        animation: false, timeline: false, baseLayerPicker: false, geocoder: false,
+        homeButton: false, sceneModePicker: false, navigationHelpButton: false,
+        infoBox: false, selectionIndicator: false,
+      });
+
+      // ── A minimal local "plane": a point that flies forward, so there is
+      //    something real to broadcast. ─────────────────────────────────────
+      const local = {
+        lon: -117.9143, lat: 33.8366, alt: 3000,
+        heading: 45, pitch: 0, roll: 0, speed: 180, throttle: 0.6,
+      };
+      const keys = {};
+      addEventListener("keydown", (e) => (keys[e.key.toLowerCase()] = true));
+      addEventListener("keyup", (e) => (keys[e.key.toLowerCase()] = false));
+
+      Cesium.knockout?.track?.(); // no-op guard; keeps older Cesium happy
+
+      const move = (dt) => {
+        if (keys["w"]) local.throttle = Math.min(1, local.throttle + dt * 0.5);
+        if (keys["s"]) local.throttle = Math.max(0, local.throttle - dt * 0.5);
+        if (keys["arrowup"]) local.pitch = Math.min(35, local.pitch + dt * 40);
+        if (keys["arrowdown"]) local.pitch = Math.max(-35, local.pitch - dt * 40);
+        if (keys["arrowleft"]) local.heading -= dt * 60;
+        if (keys["arrowright"]) local.heading += dt * 60;
+        local.speed = 60 + local.throttle * 400;
+        const R = 6371000;
+        const h = Cesium.Math.toRadians(local.heading);
+        const p = Cesium.Math.toRadians(local.pitch);
+        local.lat += Cesium.Math.toDegrees((local.speed * Math.cos(p) * Math.cos(h) * dt) / R);
+        local.lon += Cesium.Math.toDegrees(
+          (local.speed * Math.cos(p) * Math.sin(h) * dt) / (R * Math.cos(Cesium.Math.toRadians(local.lat)))
+        );
+        local.alt += local.speed * Math.sin(p) * dt;
+      };
+
+      // Local plane marker + chase camera.
+      const localEntity = viewer.entities.add({
+        position: Cesium.Cartesian3.fromDegrees(local.lon, local.lat, local.alt),
+        point: { pixelSize: 10, color: Cesium.Color.LIME },
+        label: { text: "YOU", font: "600 12px monospace",
+          pixelOffset: new Cesium.Cartesian2(0, -18),
+          disableDepthTestDistance: Number.POSITIVE_INFINITY },
+      });
+
+      // ── Multiplayer client ───────────────────────────────────────────────
+      const cs = document.getElementById("callsign");
+      const mp = createMultiplayerClient(viewer, {
+        url: location.origin, // this page is served by the same server
+        get callsign() { return cs.value || "PILOT"; },
+        getPosition: () => Cesium.Cartesian3.fromDegrees(local.lon, local.lat, local.alt),
+        getHeadingPitchRoll: () => new Cesium.HeadingPitchRoll(
+          Cesium.Math.toRadians(local.heading),
+          Cesium.Math.toRadians(local.pitch),
+          Cesium.Math.toRadians(local.roll)
+        ),
+      });
+
+      mp.on("status", (s) => log(s.connected ? "connected to server" : "disconnected", s.connected ? "ok" : "err"));
+      mp.on("error", (e) => log("error: " + e.error, "err"));
+      mp.on("joined", (p) => log("+ " + p.callsign + " joined"));
+      mp.on("left", (p) => log("- " + p.callsign + " left"));
+
+      document.getElementById("createBtn").onclick = async () => {
+        try {
+          const code = await mp.createLobby();
+          document.getElementById("code").textContent = code;
+          log("lobby created: " + code, "ok");
+        } catch (e) { log("create failed: " + e.message, "err"); }
+      };
+      document.getElementById("joinBtn").onclick = async () => {
+        const code = document.getElementById("joinCode").value.trim();
+        try {
+          const res = await mp.joinLobby(code);
+          document.getElementById("code").textContent = res.code;
+          log("joined " + res.code + " (" + res.players.length + " already here)", "ok");
+        } catch (e) { log("join failed: " + e.message, "err"); }
+      };
+
+      // ── Fly loop ─────────────────────────────────────────────────────────
+      const clock = new Cesium.Clock();
+      let last = performance.now();
+      viewer.scene.preUpdate.addEventListener(() => {
+        const now = performance.now();
+        const dt = Math.min((now - last) / 1000, 0.1);
+        last = now;
+        move(dt);
+        localEntity.position = Cesium.Cartesian3.fromDegrees(local.lon, local.lat, local.alt);
+        viewer.camera.lookAt(
+          Cesium.Cartesian3.fromDegrees(local.lon, local.lat, local.alt),
+          new Cesium.HeadingPitchRange(
+            Cesium.Math.toRadians(local.heading + 180),
+            Cesium.Math.toRadians(-18),
+            900
+          )
+        );
+        viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY);
+      });
+      viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY);
+    </script>
+  </body>
+</html>

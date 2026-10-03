@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Skyward multiplayer — 2D demo (no dependencies)</title>
+    <style>
+      html, body { margin: 0; height: 100%; background: #08121c; color: #cfffe6;
+        font: 13px Consolas, monospace; overflow: hidden; }
+      #panel {
+        position: absolute; top: 12px; left: 12px; z-index: 10; width: 250px;
+        background: rgba(4, 14, 22, 0.86); border: 1px solid rgba(0, 255, 200, 0.35);
+        border-radius: 8px; padding: 12px 14px; line-height: 1.7;
+      }
+      h1 { font-size: 13px; letter-spacing: 2px; color: #0fe; margin: 0 0 8px; }
+      input, button { font: inherit; padding: 6px 9px; border-radius: 5px;
+        box-sizing: border-box; background: rgba(0,0,0,0.5); color: #fff;
+        border: 1px solid rgba(255,255,255,0.25); }
+      button { cursor: pointer; background: rgba(0,255,180,0.12);
+        border-color: rgba(0,255,180,0.5); margin: 6px 0; width: 100%; }
+      button:hover { background: rgba(0,255,180,0.22); }
+      input { width: 100%; text-transform: uppercase; letter-spacing: 3px; text-align: center; }
+      #code { font-size: 22px; letter-spacing: 6px; color: #0fe; }
+      #log { max-height: 140px; overflow: auto; color: #9cf; font-size: 11px;
+        white-space: pre-wrap; margin-top: 4px; }
+      .err { color: #ff8b8b; } .ok { color: #6f6; }
+      #hint { position: absolute; bottom: 10px; left: 12px; color: #667;
+        font-size: 11px; }
+    </style>
+  </head>
+  <body>
+    <canvas id="view"></canvas>
+    <div id="panel">
+      <h1>MULTIPLAYER — 2D DEMO</h1>
+      CALLSIGN <input id="callsign" value="ACE-1" maxlength="16" />
+      <button id="createBtn">CREATE LOBBY</button>
+      <div id="code">-----</div>
+      OR JOIN <input id="joinCode" maxlength="5" placeholder="CODE" />
+      <button id="joinBtn">JOIN LOBBY</button>
+      <div id="log"></div>
+    </div>
+    <div id="hint">Drive with W/A/S/D — remote planes glide between packets.</div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+      // Zero-dependency visual demo of the same server contract the Cesium
+      // client uses. Planes are drawn top-down on a canvas; incoming 25 Hz
+      // packets are interpolated to 60 fps with the SAME exponential
+      // smoothing (alpha = 1 - exp(-dt/tau)) and shortest-angle heading rule
+      // that client.js applies in Cesium.
+      const logEl = document.getElementById("log");
+      const log = (m, c = "") => {
+        logEl.innerHTML += `<span class="${c}">${m}</span>\n`;
+        logEl.scrollTop = logEl.scrollHeight;
+      };
+
+      // ── Interpolation (identical maths to client.js) ─────────────────────
+      const TAU = 0.12;
+      const shortestAngle = (a, b) => {
+        let d = (b - a) % (Math.PI * 2);
+        if (d > Math.PI) d -= Math.PI * 2;
+        if (d < -Math.PI) d += Math.PI * 2;
+        return d;
+      };
+      const stepToward = (cur, tgt, dt) => {
+        const a = 1 - Math.exp(-dt / TAU);
+        cur.x += (tgt.x - cur.x) * a;
+        cur.y += (tgt.y - cur.y) * a;
+        cur.h += shortestAngle(cur.h, tgt.h) * a;
+      };
+
+      // ── Local plane (x/y = metres on a flat plane, h = heading radians) ──
+      const local = { x: 0, y: 0, h: 0, speed: 120 };
+      const keys = {};
+      addEventListener("keydown", (e) => (keys[e.key.toLowerCase()] = true));
+      addEventListener("keyup", (e) => (keys[e.key.toLowerCase()] = false));
+
+      // ── Remote planes ────────────────────────────────────────────────────
+      const remote = new Map(); // id -> { callsign, cur, tgt, hasTgt }
+
+      // ── Socket ───────────────────────────────────────────────────────────
+      const cs = document.getElementById("callsign");
+      const socket = io(location.origin, { transports: ["websocket", "polling"] });
+      socket.on("connect", () => log("connected to server", "ok"));
+      socket.on("connect_error", (e) => log("connect error: " + e.message, "err"));
+
+      socket.on("player-joined", (p) => {
+        if (!remote.has(p.id)) {
+          remote.set(p.id, {
+            callsign: p.callsign, hasTgt: false,
+            cur: { x: 0, y: 0, h: 0 }, tgt: { x: 0, y: 0, h: 0 },
+          });
+          // A late joiner arrives with a last known position: snap to it.
+          if (p.state) applyState(remote.get(p.id), p.state, true);
+        }
+        log("+ " + p.callsign + " joined");
+      });
+
+      socket.on("player-moved", (p) => {
+        let r = remote.get(p.id);
+        if (!r) {
+          r = { callsign: "PILOT", hasTgt: false,
+            cur: { x: 0, y: 0, h: 0 }, tgt: { x: 0, y: 0, h: 0 } };
+          remote.set(p.id, r);
+        }
+        // Telemetry is ECEF in the real game; the demo only needs 2 axes, so
+        // it uses x/y directly and converts the heading into radians.
+        applyState(r, { x: p.x, y: p.y, h: p.heading }, !r.hasTgt);
+      });
+
+      socket.on("player-left", (p) => {
+        const r = remote.get(p.id);
+        remote.delete(p.id);
+        if (r) log("- " + r.callsign + " left");
+      });
+
+      function applyState(r, s, snap) {
+        r.tgt.x = s.x; r.tgt.y = s.y; r.tgt.h = s.h;
+        r.hasTgt = true;
+        if (snap) { r.cur.x = s.x; r.cur.y = s.y; r.cur.h = s.h; }
+      }
+
+      document.getElementById("createBtn").onclick = () => {
+        socket.emit("create-lobby", { callsign: cs.value }, (res) => {
+          if (!res || !res.ok) return log("create failed: " + (res && res.error), "err");
+          document.getElementById("code").textContent = res.code;
+          log("lobby created: " + res.code, "ok");
+        });
+      };
+      document.getElementById("joinBtn").onclick = () => {
+        const code = document.getElementById("joinCode").value.trim();
+        socket.emit("join-lobby", { code, callsign: cs.value }, (res) => {
+          if (!res || !res.ok) return log("join failed: " + (res && res.error), "err");
+          document.getElementById("code").textContent = res.code;
+          for (const p of res.players) {
+            remote.set(p.id, {
+              callsign: p.callsign, hasTgt: false,
+              cur: { x: 0, y: 0, h: 0 }, tgt: { x: 0, y: 0, h: 0 },
+            });
+            if (p.state) applyState(remote.get(p.id), p.state, true);
+          }
+          log("joined " + res.code + " (" + res.players.length + " already here)", "ok");
+        });
+      };
+
+      // ── Telemetry out at 25 Hz ───────────────────────────────────────────
+      setInterval(() => {
+        if (!socket.connected) return;
+        socket.emit("player-moved", {
+          x: local.x, y: local.y, z: 1000,
+          heading: local.h, pitch: 0, roll: 0,
+        });
+      }, 1000 / 25);
+
+      // ── Render + simulate at 60 fps ──────────────────────────────────────
+      const canvas = document.getElementById("view");
+      const ctx = canvas.getContext("2d");
+      const resize = () => { canvas.width = innerWidth; canvas.height = innerHeight; };
+      resize();
+      addEventListener("resize", resize);
+
+      let last = performance.now();
+      function frame(now) {
+        const dt = Math.min((now - last) / 1000, 0.1);
+        last = now;
+
+        // Local movement
+        if (keys["w"]) local.speed = Math.min(400, local.speed + dt * 200);
+        if (keys["s"]) local.speed = Math.max(0, local.speed - dt * 200);
+        if (keys["a"]) local.h -= dt * 1.2;
+        if (keys["d"]) local.h += dt * 1.2;
+        local.x += Math.cos(local.h) * local.speed * dt;
+        local.y += Math.sin(local.h) * local.speed * dt;
+
+        // Remote interpolation — the whole point of the demo.
+        for (const r of remote.values()) if (r.hasTgt) stepToward(r.cur, r.tgt, dt);
+
+        draw();
+        requestAnimationFrame(frame);
+      }
+
+      function draw() {
+        ctx.fillStyle = "#08121c";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        const cx = canvas.width / 2;
+        const cy = canvas.height / 2;
+        const scale = 0.35;
+        const project = (p) => ({ x: cx + (p.x - local.x) * scale, y: cy + (p.y - local.y) * scale });
+
+        // grid
+        ctx.strokeStyle = "rgba(0,255,180,0.10)";
+        ctx.lineWidth = 1;
+        for (let i = -20; i <= 20; i++) {
+          const gx = cx + i * 100 - ((local.x * scale) % 100);
+          const gy = cy + i * 100 - ((local.y * scale) % 100);
+          ctx.beginPath(); ctx.moveTo(gx, 0); ctx.lineTo(gx, canvas.height); ctx.stroke();
+          ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(canvas.width, gy); ctx.stroke();
+        }
+
+        // own plane at the centre
+        drawPlane(cx, cy, local.h, "#0f0", "YOU");
+
+        // remote planes
+        for (const r of remote.values()) {
+          const p = project(r.cur);
+          drawPlane(p.x, p.y, r.cur.h, "#ff6a3d", r.callsign);
+        }
+      }
+
+      function drawPlane(x, y, h, colour, label) {
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(h + Math.PI / 2);
+        ctx.fillStyle = colour;
+        ctx.beginPath();
+        ctx.moveTo(0, -12); ctx.lineTo(8, 10); ctx.lineTo(0, 5); ctx.lineTo(-8, 10);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+        ctx.fillStyle = colour;
+        ctx.font = "bold 11px monospace";
+        ctx.textAlign = "center";
+        ctx.fillText(label, x, y - 18);
+      }
+
+      requestAnimationFrame(frame);
+    </script>
+  </body>
+</html>

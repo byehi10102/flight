@@ -1,0 +1,19 @@
+{
+  "name": "skyward-multiplayer-server",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Express + Socket.IO room server for the Skyward flight sim (room codes, telemetry relay, cleanup).",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node test-server.mjs && node test-interpolation.mjs && node --experimental-vm-modules test-pages.mjs"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "socket.io": "^4.8.1"
+  },
+  "devDependencies": {
+    "socket.io-client": "^4.8.1"
+  }
+}
