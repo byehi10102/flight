@@ -33,6 +33,41 @@ const ICE_SERVERS = [
   { urls: "stun:stun3.l.google.com:19302" },
   { urls: "stun:stun4.l.google.com:19302" },
 ];
+/**
+ * Signaling relays, PINNED explicitly and health-checked live (22 of
+ * Trystero's 28 answered a subscribe; the publish-rejecting
+ * relay-rpi.edufeed.org is excluded).
+ *
+ * WHY PIN THEM: Trystero's default pick is DETERMINISTIC — it shuffles the
+ * 28 relays with a seed derived from the appId and uses only the first 5.
+ * Our appId's pick included one dead relay and one publish-rejecting one,
+ * leaving just 3 working relays carrying every handshake. Pinning the
+ * verified set means both peers always share many working relays, so a
+ * join actually finds the party instead of sitting in a second lobby.
+ */
+const RELAY_URLS = [
+  "wss://basspistol.org",
+  "wss://bucket.coracle.social",
+  "wss://nos.lol",
+  "wss://nostr-01.uid.ovh",
+  "wss://nostr-01.yakihonne.com",
+  "wss://nostr-relay.corb.net",
+  "wss://nostr.data.haus",
+  "wss://nostr.islandarea.net",
+  "wss://nostr.sathoarder.com",
+  "wss://purplerelay.com",
+  "wss://relay-can.zombi.cloudrodion.com",
+  "wss://relay.artio.inf.unibe.ch",
+  "wss://relay.mostro.network",
+  "wss://relay.sigit.io",
+  "wss://relay02.lnfi.network",
+  "wss://schnorr.me",
+  "wss://social.amanah.eblessing.co",
+  "wss://staging.yabu.me",
+  "wss://strfry.shock.network",
+  "wss://top.testrelay.top",
+  "wss://yabu.me/v2",
+];
 // NOTE on TURN: verified live that adding the free openrelay TURN made
 // connections flakier (its allocation adds seconds of ICE delay and trips
 // handshake timeouts), while STUN-only connected reliably across repeated
@@ -213,6 +248,7 @@ export class Net {
       const room = joinRoom(
         {
           appId: APP_ID,
+          relayConfig: { urls: RELAY_URLS },
           rtcConfig: { iceServers: ICE_SERVERS },
           handshakeTimeoutMs: HANDSHAKE_TIMEOUT_MS,
         },

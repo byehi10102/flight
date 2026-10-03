@@ -21,6 +21,20 @@
       } catch (e) {
         log("vendored trystero: FAILED — " + e.message);
       }
+      try {
+        const IDX_URL = "/multiplayer/index.js";
+        const n = await import(/* @vite-ignore */ IDX_URL);
+        log("multiplayer/index.js: LOADS, initMp=" + (typeof n.initMp));
+      } catch (e) {
+        log("multiplayer/index.js: FAILED — " + (e && e.message ? e.message : e));
+      }
+      try {
+        const LIT = "/multiplayer/index.js";
+        const n2 = await import(LIT);
+        log("literal import (no @vite-ignore): LOADS, initMp=" + (typeof n2.initMp));
+      } catch (e) {
+        log("literal import: FAILED — " + (e && e.message ? e.message : e));
+      }
       log("CESIUM_PROBE_DONE");
     </script>
   </body>

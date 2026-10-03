@@ -7,15 +7,38 @@
   <body>
     <script type="module">
       // Dev-only multiplayer peer used by mp-selftest.html. Joins a room
-      // via the real src/net/net.js and reports every milestone to the
-      // parent frame so a trial can be scored automatically.
-      import { Net } from "/src/net/net.js";
+      // via the real /multiplayer/net.js and reports every milestone to
+      // the parent frame so a trial can be scored automatically.
+      // NOTE: the import must be dynamic with @vite-ignore — Vite's dev
+      // server refuses static JS imports of files inside /public.
+      let Net;
+      try {
+        const NET_URL = "/multiplayer/net.js";
+        const m = await import(/* @vite-ignore */ NET_URL);
+        Net = m.Net;
+      } catch (e) {
+        document.body.innerHTML = "harness failed to load net.js: " + e.message;
+        throw e;
+      }
 
       const params = new URLSearchParams(location.search);
       const room = params.get("room");
       const label = params.get("label") || "peer";
       const t0 = performance.now();
-      const send = (msg) => parent.postMessage({ from: label, ...msg }, "*");
+      const standalone = window.parent === window;
+      const send = (msg) => {
+        if (!standalone) parent.postMessage({ from: label, ...msg }, "*");
+        // Also render standalone so the page can be debugged directly.
+        if (standalone) {
+          const el = document.getElementById("out") || (() => {
+            const d = document.createElement("pre");
+            d.id = "out";
+            document.body.appendChild(d);
+            return d;
+          })();
+          el.textContent += `\n${msg.kind}: ${JSON.stringify(msg)}`;
+        }
+      };
       const ms = () => Math.round(performance.now() - t0);
 
       const net = new Net();

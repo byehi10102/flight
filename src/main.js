@@ -234,41 +234,46 @@ function initThree() {
   particles.init(scene);
 
   // ── MULTIPLAYER WIRING ──────────────────────────────────────────────────
-  // The whole feature lives in public/multiplayer/ and loads dynamically:
-  // delete that folder and this import fails silently, every mp?. call
-  // becomes a no-op, and the game is pure single player again. The URL is
-  // a variable + @vite-ignore so the bundler leaves it as a runtime import
-  // (a literal would be statically resolved and break the build).
+  // The whole feature lives in multiplayer/ (project root) and loads
+  // dynamically: delete that folder and this import 404s silently, every
+  // mp?. call becomes a no-op, and the game is pure single player again.
+  // Variable + @vite-ignore keeps the bundler from resolving it statically,
+  // so a missing folder never breaks the build either.
   const MP_URL = "/multiplayer/index.js";
   import(/* @vite-ignore */ MP_URL)
     .then((mod) => {
-      mp = mod.initMp({
-        Cesium,
-        viewer,
-        state,
-        CONFIG,
-        renderer,
-        getMiniViewer,
-        calculateDistance,
-        worldSpeedScale: WORLD_SPEED_SCALE,
-        dom: {
-          mainMenu,
-          loadingIndicator,
-          loadingText,
-          spawnInstruction,
-          instructionText,
-          confirmSpawnBtn,
-          pauseMenu,
-          uiContainer,
-          threeContainer,
-          vignette,
-          minimapCanvas: document.getElementById("minimap"),
-        },
-        enterSpawnPicking: (useVignette) => enterSpawnPicking(useVignette),
-        isPickSpawn: () => currentState === States.PICK_SPAWN,
-      });
+      try {
+        mp = mod.initMp({
+          Cesium,
+          viewer,
+          state,
+          CONFIG,
+          renderer,
+          getMiniViewer,
+          calculateDistance,
+          worldSpeedScale: WORLD_SPEED_SCALE,
+          dom: {
+            mainMenu,
+            loadingIndicator,
+            loadingText,
+            spawnInstruction,
+            instructionText,
+            confirmSpawnBtn,
+            pauseMenu,
+            uiContainer,
+            threeContainer,
+            vignette,
+            minimapCanvas: document.getElementById("minimap"),
+          },
+          enterSpawnPicking: (useVignette) => enterSpawnPicking(useVignette),
+          isPickSpawn: () => currentState === States.PICK_SPAWN,
+        });
+      } catch (e) {
+        console.error("[mp] initMp failed:", e);
+        mp = null;
+      }
     })
-    .catch(() => { mp = null; });
+    .catch((e) => { console.error("[mp] module load failed:", e); mp = null; });
   initSounds().catch((err) => console.error("Failed to init sounds:", err));
   planeModel.load().then(() => {
     loadingStatus.model = true;

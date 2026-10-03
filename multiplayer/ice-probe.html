@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+  <head><meta charset="utf-8" /><title>ICE probe</title></head>
+  <body>
+    <pre id="out">gathering…</pre>
+    <script type="module">
+      // Dev probe: gather ICE candidates with STUN and with STUN+TURN to
+      // see whether a relayed candidate can be obtained (the last-resort
+      // path for symmetric NATs).
+      const out = document.getElementById("out");
+      const lines = [];
+      const log = (t) => { lines.push(t); out.innerHTML = lines.join("\n"); };
+
+      const STUN = [{ urls: "stun:stun.l.google.com:19302" }];
+      const OPENRELAY = [
+        { urls: "stun:stun.l.google.com:19302" },
+        {
+          urls: ["turn:openrelay.metered.ca:80", "turn:openrelay.metered.ca:443", "turn:openrelay.metered.ca:443?transport=tcp"],
+          username: "openrelayproject",
+          credential: "openrelayproject",
+        },
+      ];
+
+      function gather(name, servers) {
+        return new Promise((resolve) => {
+          const types = {};
+          const pc = new RTCPeerConnection({ iceServers: servers });
+          pc.createDataChannel("probe");
+          const timer = setTimeout(() => {
+            pc.close();
+            log(name + ": " + JSON.stringify(types) + (types.relay ? "  TURN WORKS" : "  no relay candidate"));
+            resolve(types);
+          }, 8000);
+          pc.onicecandidate = (e) => {
+            if (!e.candidate) {
+              clearTimeout(timer);
+              pc.close();
+              log(name + ": " + JSON.stringify(types) + (types.relay ? "  TURN WORKS" : "  no relay candidate"));
+              resolve(types);
+              return;
+            }
+            const t = e.candidate.type || "unknown";
+            types[t] = (types[t] || 0) + 1;
+          };
+          pc.createOffer().then((o) => pc.setLocalDescription(o));
+        });
+      }
+
+      log("gathering STUN candidates…");
+      await gather("STUN only", STUN);
+      log("gathering STUN+openrelay TURN candidates…");
+      await gather("STUN + openrelay TURN", OPENRELAY);
+      log("ICE_PROBE_DONE");
+    </script>
+  </body>
+</html>
