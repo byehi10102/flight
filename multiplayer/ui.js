@@ -87,6 +87,7 @@ export function buildMpUi(ctx) {
             <div id="wrSelf" class="wr-player">YOU</div>
             <div id="wrPeer" class="wr-player wr-peer-empty">WAITING FOR PLAYER…</div>
           </div>
+          <div id="wrDiag" class="wr-diag"></div>
           <div id="wrStatus" class="mp-status"></div>
           <button id="wrLeaveBtn" class="menu-btn menu-btn-ghost">LEAVE PARTY</button>
         </div>
@@ -120,6 +121,7 @@ export function buildMpUi(ctx) {
     wrSelfEl: document.getElementById("wrSelf"),
     wrPeerEl: document.getElementById("wrPeer"),
     wrStatusEl: document.getElementById("wrStatus"),
+    wrDiagEl: document.getElementById("wrDiag"),
     wrLeaveBtn: document.getElementById("wrLeaveBtn"),
     badgeStatus: document.getElementById("mp-badge-status"),
     badgePeers: document.getElementById("mp-badge-peers"),

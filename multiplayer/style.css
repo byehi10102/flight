@@ -154,6 +154,20 @@
   color: #888;
 }
 
+/* Live signaling diagnostics: makes a blocked network visible instead of
+   leaving players in a silent lobby. */
+.wr-diag {
+  margin: 6px 0 2px;
+  font-family: Consolas, monospace;
+  font-size: 11px;
+  letter-spacing: 1px;
+  color: #7fb;
+  min-height: 15px;
+}
+
+.wr-diag.bad { color: #ff8b8b; }
+.wr-diag.warn { color: #fc6; }
+
 .wr-players {
   display: flex;
   flex-direction: column;

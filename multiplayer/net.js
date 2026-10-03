@@ -16,7 +16,7 @@
  *    12 Hz regardless of speed.
  *  - Every send is wrapped: a network hiccup can never break the sim loop.
  */
-import { joinRoom, selfId } from "./vendor/trystero.mjs";
+import { joinRoom, selfId, getRelaySockets } from "./vendor/trystero.mjs";
 
 const APP_ID = "skyward-flight-sim-v1";
 /**
@@ -83,7 +83,7 @@ const HEARTBEAT_MS = 2000;
 /** A peer silent this long is considered gone (leave event not required). */
 const PEER_TIMEOUT_MS = 6000;
 /** Automatic reconnect: attempts per connect() call, with a short delay. */
-const MAX_CONNECT_ATTEMPTS = 3;
+const MAX_CONNECT_ATTEMPTS = 4;
 const RETRY_DELAY_MS = 1000;
 /**
  * Handshake window per attempt. Typical connections land in ~2s, so this is
@@ -172,6 +172,25 @@ export class Net {
 
   peerCount() {
     return this.peers.size;
+  }
+
+  /**
+   * Signaling health: how many relay sockets are actually open. This is the
+   * single most useful diagnostic — if zero relays are reachable from a
+   * network, no amount of retrying will connect, and the UI can say so
+   * instead of leaving players staring at a silent lobby.
+   */
+  relayStats() {
+    try {
+      const sockets = getRelaySockets() || {};
+      const entries = Object.values(sockets);
+      return {
+        total: entries.length,
+        open: entries.filter((s) => s && s.readyState === 1).length,
+      };
+    } catch (e) {
+      return { total: 0, open: 0 };
+    }
   }
 
   /**

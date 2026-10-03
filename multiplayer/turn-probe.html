@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+  <head><meta charset="utf-8" /><title>TURN probe</title></head>
+  <body>
+    <pre id="out">probing…</pre>
+    <script type="module">
+      // Probes candidate public TURN servers: a working one yields a
+      // "relay" ICE candidate, which is the only way two peers behind
+      // symmetric NATs can connect.
+      const out = document.getElementById("out");
+      const lines = [];
+      const log = (t) => { lines.push(t); out.innerHTML = lines.join("\n"); };
+
+      const STUN = { urls: "stun:stun.l.google.com:19302" };
+      const CANDIDATES = [
+        { name: "openrelay (control)", urls: "turn:openrelay.metered.ca:80", username: "openrelayproject", credential: "openrelayproject" },
+        { name: "anyfirewall udp", urls: "turn:turn.anyfirewall.com:3478", username: "webrtc", credential: "webrtc" },
+        { name: "anyfirewall tcp443", urls: "turn:turn.anyfirewall.com:443?transport=tcp", username: "webrtc", credential: "webrtc" },
+        { name: "metered free udp", urls: "turn:standard.relay.metered.ca:80", username: "openrelayproject", credential: "openrelayproject" },
+        { name: "expressturn", urls: "turn:relay1.expressturn.com:3478", username: "ef9d4vf7c9l5ddv5", credential: "uM8P1YlJ7Xs5kX3f" },
+      ];
+
+      function gather(name, turnCfg) {
+        return new Promise((resolve) => {
+          const types = {};
+          let pc;
+          try {
+            pc = new RTCPeerConnection({ iceServers: [STUN, turnCfg] });
+          } catch (e) { log(name + ": ctor failed"); resolve({ relay: false }); return; }
+          pc.createDataChannel("probe");
+          const done = () => {
+            try { pc.close(); } catch {}
+            const ok = !!types.relay;
+            log(`  ${name}: ${JSON.stringify(types)}  ${ok ? "TURN WORKS" : "no relay candidate"}`);
+            resolve(types);
+          };
+          const timer = setTimeout(done, 9000);
+          pc.onicecandidate = (e) => {
+            if (!e.candidate) { clearTimeout(timer); done(); return; }
+            const t = e.candidate.type || "unknown";
+            types[t] = (types[t] || 0) + 1;
+          };
+          pc.createOffer().then((o) => pc.setLocalDescription(o)).catch(() => { clearTimeout(timer); done(); });
+        });
+      }
+
+      log("Testing candidate TURN servers (looking for a relay candidate)…");
+      let working = [];
+      for (const c of CANDIDATES) {
+        const res = await gather(c.name, { urls: c.urls, username: c.username, credential: c.credential });
+        if (res.relay) working.push(c.name);
+      }
+      log("\nWORKING TURN: " + (working.length ? working.join(", ") : "NONE"));
+      log("TURN_PROBE_DONE");
+    </script>
+  </body>
+</html>

@@ -93,16 +93,34 @@ flight data flows directly between the two players.
 - **Smooth at any speed** — remote planes are dead-reckoned locally with
   the same movement math the sim uses; packets only correct drift, so a
   10,000 mph pass reads as a pass instead of a teleport.
-- **Reliability** — the handshake needs no server of ours, so it is built
-  to self-heal:
-  - Free public STUN servers (Trystero 0.25 ships with none by default,
-    which breaks ICE gathering on many networks).
-  - A failed handshake retries automatically with a fresh offer, and the
-    waiting room says "retrying" rather than appearing stuck.
+- **Reliability** — no server of ours means the handshake must self-heal:
+  - **Relays are pinned, not left to Trystero's default.** Trystero's
+    pick is deterministic (seeded by the appId) and our appId landed on 5
+    relays of which only 3 worked — one dead, one that rejects publishing.
+    Two players could end up with no working shared relay, which is
+    exactly the "two separate lobbies, same code" failure. All 28 relays
+    are now health-checked and the 21 verified ones are passed explicitly
+    via `relayConfig.urls`, so both players always share many working
+    relays. (`turn-probe.html` and the relay health script document how.)
+  - **Live signaling readout** in the waiting room — "SIGNALING 19/21
+    RELAYS · PEERS 0/2" — so a blocked network is visible immediately
+    instead of looking like a silent lobby.
+  - **Actionable failures** — if no relay is reachable it says so; if
+    signaling is fine but the peer never arrives it explains that the two
+    networks could not reach each other directly.
+  - A failed handshake retries automatically (4 attempts, fresh offer).
   - A dedicated liveness ping keeps presence alive while players sit in
     menus (gameplay traffic is not required to stay connected).
   - Presence is swept by heartbeat, so a hard-disconnected player is
     cleaned up instead of leaving a ghost blocking the spawn gate.
+- **Known limit: no keyless TURN exists.** Two peers *both* behind
+  symmetric NATs cannot connect directly, and every public TURN server
+  tested (`openrelay`, `anyfirewall`, `expressturn`, metered) failed to
+  allocate a relay candidate. STUN covers normal home/mobile networks;
+  for symmetric-NAT pairs the game now says exactly what happened rather
+  than hanging. Adding a TURN server to `ICE_SERVERS` in
+  `multiplayer/net.js` is the one-line fix if a hosted one is ever
+  available.
 - **Multiplayer graphics diet** — terrain detail relaxes one step, the
   minimap renders at half resolution, and an adaptive guard drops detail
   further if frame rate sags (restoring when headroom returns).

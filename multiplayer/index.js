@@ -111,7 +111,33 @@ export function initMp(ctx) {
         ui.wrPeerEl.textContent = "WAITING FOR PLAYER…";
       }
     }
+    updateDiag();
     refreshBadge();
+  }
+
+  /**
+   * Live signaling readout. A failed join is almost always one of two
+   * things — no relay reachable from this network, or the two networks
+   * cannot reach each other directly — and both are invisible without
+   * this line, which is what made the earlier failure so confusing.
+   */
+  function updateDiag() {
+    const el = ui.wrDiagEl;
+    if (!el) return;
+    if (!active) { el.textContent = ""; el.className = "wr-diag"; return; }
+    const { open, total } = net.relayStats();
+    const peers = net.peerCount();
+    let text = `SIGNALING ${open}/${total} RELAYS · PEERS ${peers}/2`;
+    let cls = "wr-diag";
+    if (total > 0 && open === 0) {
+      text += " — NO RELAY REACHABLE FROM THIS NETWORK";
+      cls += " bad";
+    } else if (open > 0 && open < 3) {
+      text += " — THIN SIGNALING PATH";
+      cls += " warn";
+    }
+    el.textContent = text;
+    el.className = cls;
   }
 
   async function startParty(code, callsign) {
@@ -133,7 +159,17 @@ export function initMp(ctx) {
           setStatus(ui.wrStatusEl, "Connected — share your code.", "ok");
           updateWaitingRoom();
         } else if (status === "error") {
-          setStatus(ui.wrStatusEl, error || "Connection failed.", "error");
+          // Say WHY, with the relay count, so a blocked network is obvious.
+          const { open, total } = net.relayStats();
+          let msg = error || "Connection failed.";
+          if (total > 0 && open === 0) {
+            msg += " No signaling relay is reachable from this network.";
+          } else if (net.peerCount() === 0) {
+            msg += ` Signaling is fine (${open}/${total} relays) — the two` +
+              " networks could not reach each other directly (often a" +
+              " restrictive NAT). Try a different network, or a phone hotspot.";
+          }
+          setStatus(ui.wrStatusEl, msg, "error");
         }
       })
       .on("onRetry", (attempt, max) => {
@@ -415,7 +451,9 @@ export function initMp(ctx) {
 
   // ── Presence + gate run in EVERY state (the picker is not a flying one) ──
   setInterval(() => {
-    if (!active || phase !== "spawn") return;
+    if (!active) return;
+    updateDiag();
+    if (phase !== "spawn") return;
     broadcastSpawn();
     updateSpawnGate();
   }, 300);
