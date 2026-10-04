@@ -1,13 +1,23 @@
 /**
  * Remote aircraft rendering in the 3D world.
  *
- * At 10,000 mph a jet covers ~650 m between 12 Hz packets, so raw positions
- * would visibly teleport. Instead every remote plane is dead-reckoned
- * forward each frame using the same movement math the local sim uses
- * (heading/pitch/speed), and each arriving packet only gently corrects the
- * accumulated drift over ~300 ms. Heading/pitch/roll are exact from the
- * packet, so a head-on pass reads as a head-on pass on both screens; only
- * along-track position can differ by a few hundred metres mid-pass.
+ * ── How remote motion is reconstructed ────────────────────────────────────
+ * Packets arrive on an irregular schedule (network jitter, frame timing), so
+ * applying each one directly makes a plane stutter, and correcting toward the
+ * newest packet makes it rubber-band. Instead this file keeps a short history
+ * of snapshots per peer and renders each plane a fixed 120 ms in the PAST,
+ * interpolating between the two snapshots that bracket that instant.
+ *
+ * Why the fixed delay: to interpolate you must have a snapshot on both sides
+ * of the render time. Rendering slightly behind the newest packet guarantees
+ * that, and absorbs jitter up to the delay. The result is continuous motion
+ * with no jitter, no rubber-banding and no corrective lag — a plane flying
+ * toward you closes the distance at the true rate instead of appearing to
+ * hang, and two planes flying the same heading hold formation smoothly.
+ *
+ * If packets stall, the plane keeps moving by extrapolating the last known
+ * velocity for a short while (so a brief gap does not look like a freeze),
+ * then holds until data resumes. It never snaps.
  *
  * Orientation: Cesium's HeadingPitchRoll frame uses +Y as forward in its
  * internal Z-up space, and a glTF model whose nose is -Z becomes +Y after
@@ -19,8 +29,12 @@
  */
 
 const MPH_TO_MPS = 0.44704;
-/** Drift correction time constant: a packet's error is ~63% gone in this. */
-const CORRECTION_TAU = 0.3;
+/** Render remote planes this far behind the newest packet. */
+const INTERP_DELAY_MS = 120;
+/** Keep pushing along the last velocity through a gap this long, then hold. */
+const MAX_EXTRAP_MS = 400;
+/** Snapshots older than this (relative to the newest) are dropped. */
+const SNAPSHOT_TTL_MS = 1200;
 const MODEL_URI = "models/f-15.glb";
 const LABEL_NEAR_M = 3000;
 const LABEL_FAR_M = 20000000;
@@ -33,6 +47,20 @@ export function createRemotePlanes(ctx) {
   Cesium = ctx.Cesium;
   return new RemotePlanes(ctx.viewer, ctx.worldSpeedScale);
 }
+
+function nowMs() {
+  return typeof performance !== "undefined" ? performance.now() : Date.now();
+}
+
+/** Wrap a longitude difference into (-180, 180]. */
+function wrapDeg(d) {
+  while (d > 180) d -= 360;
+  while (d <= -180) d += 360;
+  return d;
+}
+
+const lerp = (a, b, f) => a + (b - a) * f;
+const lerpAngle = (a, b, f) => a + wrapDeg(b - a) * f;
 
 function movePosition(lon, lat, alt, heading, pitch, distance) {
   const headingRad = Cesium.Math.toRadians(heading);
@@ -48,14 +76,6 @@ function movePosition(lon, lat, alt, heading, pitch, distance) {
     lat: lat + Cesium.Math.toDegrees(dLat),
     alt: alt + dAlt,
   };
-}
-
-/** Shortest signed angular difference a -> b, in degrees. */
-function shortestAngle(a, b) {
-  let d = b - a;
-  while (d < -180) d += 360;
-  while (d > 180) d -= 360;
-  return d;
 }
 
 export class RemotePlanes {
@@ -86,10 +106,10 @@ export class RemotePlanes {
     return this.planes.has(peerId);
   }
 
-  /** World position of a peer (for minimap / distance readouts). */
+  /** Last rendered (interpolated) position, for the minimap / distance readouts. */
   getLive(peerId) {
     const p = this.planes.get(peerId);
-    if (!p) return null;
+    if (!p || !p.live) return null;
     return { lon: p.live.lon, lat: p.live.lat, alt: p.live.alt, heading: p.live.h, v: p.live.v };
   }
 
@@ -107,8 +127,11 @@ export class RemotePlanes {
     plane = {
       callsign: callsign || "PILOT",
       colour,
+      snaps: [],
       live: null,
-      target: null,
+      /** localTime - senderTime for this peer (clock skew + min latency). */
+      offset: null,
+      clocked: false,
       leaving: false,
       fadeT: 0,
       entity: null,
@@ -163,10 +186,32 @@ export class RemotePlanes {
     } catch (e) { /* label is cosmetic */ }
   }
 
-  /** Fold an authoritative packet in as the correction target. */
-  setState(peerId, data) {
+  /**
+   * Append an authoritative packet to the peer's history.
+   *
+   * The snapshot is keyed by the SENDER's clock (`data.ts`), not the arrival
+   * time. Arrival time carries network jitter, and interpolating along a
+   * jittery timeline re-introduces exactly the stutter we are removing. The
+   * sender's clock is regular, so we estimate the offset between the two
+   * clocks (skew + minimum latency) and interpolate along the sender's
+   * timeline instead.
+   *
+   * `recvMs` defaults to the local clock; the harness passes a simulated time.
+   */
+  setState(peerId, data, recvMs = nowMs()) {
     const plane = this.ensure(peerId);
-    const target = {
+    const hasTs = typeof data.ts === "number" && Number.isFinite(data.ts);
+    if (hasTs) {
+      // Track the minimum observed offset: latency only ever adds, so the
+      // minimum is the closest estimate of the true clock difference. Let it
+      // creep upward slowly so slow drift is followed.
+      const inst = recvMs - data.ts;
+      plane.offset = plane.offset == null ? inst : (inst < plane.offset ? inst : plane.offset + 0.5);
+      plane.clocked = true;
+    }
+    const t = hasTs ? data.ts : recvMs;
+    const snap = {
+      t,
       lon: data.lon,
       lat: data.lat,
       alt: data.alt,
@@ -174,12 +219,18 @@ export class RemotePlanes {
       p: data.p,
       r: data.r,
       v: data.v,
-      fly: !!data.fly,
+      fly: data.fly ? 1 : 0,
     };
-    plane.target = target;
-    // First packet: snap (nothing to interpolate from).
+    plane.snaps.push(snap);
+
+    // Keep the history bounded: everything we might still render, plus the
+    // newest packet as the extrapolation seed.
+    const oldest = snap.t - SNAPSHOT_TTL_MS;
+    while (plane.snaps.length > 2 && plane.snaps[0].t < oldest) plane.snaps.shift();
+    if (plane.snaps.length > 240) plane.snaps.splice(0, plane.snaps.length - 240);
+
     if (!plane.live) {
-      plane.live = { ...target };
+      plane.live = snap;
       plane.visible = true;
       try {
         if (plane.entity) plane.entity.show = true;
@@ -215,10 +266,50 @@ export class RemotePlanes {
   }
 
   /**
-   * Advance every remote plane. Called once per rendered frame (not per
-   * sim substep) — remote motion is presentation, not simulation.
+   * Sample a peer's path at time `t`. Interpolates between the bracketing
+   * snapshots, extrapolates short gaps from the newest one, otherwise holds.
    */
-  update(dt) {
+  _sample(plane, t) {
+    const s = plane.snaps;
+    if (!s.length) return plane.live;
+    if (s.length === 1 || t <= s[0].t) return s[0];
+
+    const last = s[s.length - 1];
+    if (t >= last.t) {
+      const ahead = Math.min(t - last.t, MAX_EXTRAP_MS);
+      if (ahead <= 0 || !last.fly) return last;
+      const mps = last.v * MPH_TO_MPS * this.worldSpeedScale;
+      const np = movePosition(last.lon, last.lat, last.alt, last.h, last.p, mps * (ahead / 1000));
+      return { t, lon: np.lon, lat: np.lat, alt: np.alt, h: last.h, p: last.p, r: last.r, v: last.v, fly: last.fly };
+    }
+
+    for (let i = s.length - 2; i >= 0; i--) {
+      if (s[i].t <= t) {
+        const a = s[i];
+        const b = s[i + 1];
+        const span = b.t - a.t;
+        const f = span > 0 ? Math.max(0, Math.min(1, (t - a.t) / span)) : 0;
+        return {
+          t,
+          lon: wrapDeg(a.lon + wrapDeg(b.lon - a.lon) * f),
+          lat: lerp(a.lat, b.lat, f),
+          alt: lerp(a.alt, b.alt, f),
+          h: lerpAngle(a.h, b.h, f),
+          p: lerp(a.p, b.p, f),
+          r: lerp(a.r, b.r, f),
+          v: lerp(a.v, b.v, f),
+          fly: b.fly,
+        };
+      }
+    }
+    return s[0];
+  }
+
+  /**
+   * Advance every remote plane. Called once per rendered frame — remote motion
+   * is presentation, not simulation, so it uses wall-clock time.
+   */
+  update(dt, atMs = nowMs()) {
     if (!this.planes.size) return;
 
     for (const [peerId, plane] of [...this.planes.entries()]) {
@@ -230,44 +321,22 @@ export class RemotePlanes {
         }
       }
 
-      const live = plane.live;
-      const target = plane.target;
-      if (!live || !target) continue;
+      if (!plane.snaps.length) continue;
+      // Render a fixed delay behind the newest data. Clocked peers are on the
+      // sender's timeline (so network jitter cannot distort the path); peers
+      // without a timestamp fall back to the local arrival timeline.
+      const base = plane.clocked && plane.offset != null ? atMs - plane.offset : atMs;
+      const pose = this._sample(plane, base - INTERP_DELAY_MS);
+      if (!pose) continue;
+      plane.live = pose;
 
-      // 1. Dead-reckon forward along the last known vector.
-      if (live.fly !== false) {
-        const mps = live.v * MPH_TO_MPS * this.worldSpeedScale;
-        if (mps > 0.01) {
-          const next = movePosition(live.lon, live.lat, live.alt, live.h, live.p, mps * dt);
-          live.lon = next.lon;
-          live.lat = next.lat;
-          live.alt = next.alt;
-        }
-      }
-
-      // 2. Ease toward the authoritative packet (exponential, framerate
-      //    independent) instead of snapping.
-      const k = 1 - Math.exp(-dt / CORRECTION_TAU);
-      let dLon = shortestAngle(live.lon, target.lon);
-      live.lon += dLon * k;
-      while (live.lon > 180) live.lon -= 360;
-      while (live.lon < -180) live.lon += 360;
-      live.lat += (target.lat - live.lat) * k;
-      live.alt += (target.alt - live.alt) * k;
-      live.h += shortestAngle(live.h, target.h) * k;
-      live.p += (target.p - live.p) * k;
-      live.r += (target.r - live.r) * k;
-      live.v += (target.v - live.v) * k;
-      live.fly = target.fly;
-
-      // 3. Push to the Cesium entity.
       try {
         if (plane.entity) {
-          const position = Cesium.Cartesian3.fromDegrees(live.lon, live.lat, live.alt);
+          const position = Cesium.Cartesian3.fromDegrees(pose.lon, pose.lat, pose.alt);
           const hpr = new Cesium.HeadingPitchRoll(
-            Cesium.Math.toRadians(live.h),
-            Cesium.Math.toRadians(live.p),
-            Cesium.Math.toRadians(live.r)
+            Cesium.Math.toRadians(pose.h),
+            Cesium.Math.toRadians(pose.p),
+            Cesium.Math.toRadians(pose.r)
           );
           plane.entity.position = position;
           plane.entity.orientation = Cesium.Transforms.headingPitchRollQuaternion(position, hpr);
@@ -276,7 +345,7 @@ export class RemotePlanes {
           }
         }
         if (plane.labelEntity) {
-          plane.labelEntity.position = Cesium.Cartesian3.fromDegrees(live.lon, live.lat, live.alt);
+          plane.labelEntity.position = Cesium.Cartesian3.fromDegrees(pose.lon, pose.lat, pose.alt);
           if (plane.leaving) {
             plane.labelEntity.label.fillColor = plane.colour.withAlpha(
               Math.max(0, plane.fadeT / FADE_OUT_S)

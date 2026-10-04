@@ -14,11 +14,16 @@
  * (it loads raw, outside the bundler): the Cesium namespace, the shared
  * game state by reference, DOM handles, and the spawn-flow hooks.
  */
-import { Net, generateRoomCode, normalizeRoomCode } from "./net.js";
 import { ManualLink, looksLikeCode } from "./manual.js";
 import { createRemotePlanes } from "./remotePlanes.js";
 import { createSpawnPresence } from "./spawnPresence.js";
 import { buildMpUi } from "./ui.js";
+
+/**
+ * Flight-state send rate. Decoupled from the render loop so a dropped frame
+ * cannot punch a gap into the other player's view of you.
+ */
+const STATE_HZ = 20;
 
 // ── Performance mode (moved out of core/viewer.js so it lives here) ─────────
 let perfMode = false;
@@ -46,7 +51,7 @@ export function initMp(ctx) {
   const ui = buildMpUi(ctx);
   const { state, dom } = ctx;
 
-  let net = new Net();
+  let net = new ManualLink();
   const remotePlanes = createRemotePlanes({
     Cesium: ctx.Cesium,
     viewer: ctx.viewer,
@@ -65,9 +70,6 @@ export function initMp(ctx) {
   let partnerLeft = false;
   let knownPeers = new Set();
   let presenceTimer = 0;
-  let fpsSamples = [];
-  let perfForced = false;
-  let perfCooldown = 0;
 
   function setStatus(el, text, kind = "") {
     if (!el) return;
@@ -78,7 +80,6 @@ export function initMp(ctx) {
   function showScreen(which) {
     if (dom.mainMenu) dom.mainMenu.classList.toggle("hidden", which !== "menu");
     if (ui.mpPanel) ui.mpPanel.classList.toggle("hidden", which !== "lobby");
-    if (ui.manualPanel) ui.manualPanel.classList.toggle("hidden", which !== "manual");
     if (ui.waitingRoom) ui.waitingRoom.classList.toggle("hidden", which !== "waiting");
   }
 
@@ -102,7 +103,6 @@ export function initMp(ctx) {
 
   function updateWaitingRoom() {
     const peers = net.activePeers();
-    if (ui.wrCodeEl) ui.wrCodeEl.textContent = roomCode || "-----";
     if (ui.wrSelfEl) ui.wrSelfEl.textContent = `YOU — ${net.callsign}`;
     if (ui.wrPeerEl) {
       if (peers.length) {
@@ -167,32 +167,13 @@ export function initMp(ctx) {
     link
       .on("onStatus", (status, error) => {
         refreshBadge();
-        const manual = link.mode === "manual";
         if (status === "online") {
-          setStatus(
-            manual ? ui.mnStatusEl : ui.wrStatusEl,
-            manual ? "Connected directly — no server involved." : "Connected — share your code.",
-            "ok"
-          );
+          setStatus(ui.wrStatusEl, "Connected directly — no server involved.", "ok");
           updateWaitingRoom();
         } else if (status === "error") {
-          let msg = error || "Connection failed.";
-          if (!manual) {
-            // Say WHY, with the relay count, so a blocked network is obvious.
-            const { open, total } = link.relayStats();
-            if (total > 0 && open === 0) {
-              msg += " No signaling relay is reachable from this network.";
-            } else if (link.peerCount() === 0) {
-              msg += ` Signaling is fine (${open}/${total} relays) — the two` +
-                " networks could not reach each other directly (often a" +
-                " restrictive NAT). Try a different network, or a phone hotspot.";
-            }
-          } else if (link._lastStatusMessage) {
-            msg = link._lastStatusMessage;
-          }
-          setStatus(manual ? ui.mnStatusEl : ui.wrStatusEl, msg, "error");
-        } else if (manual && status === "connecting" && link._lastStatusMessage) {
-          setStatus(ui.mnStatusEl, link._lastStatusMessage, "busy");
+          setStatus(ui.wrStatusEl, error || "Connection failed.", "error");
+        } else if (status === "connecting" && link._lastStatusMessage) {
+          setStatus(ui.wrStatusEl, link._lastStatusMessage, "busy");
         }
       })
       .on("onRetry", (attempt, max) => {
@@ -244,29 +225,13 @@ export function initMp(ctx) {
       .on("onBack", () => goBackToPicking());
   }
 
-  async function startParty(code, callsign) {
-    roomCode = normalizeRoomCode(code);
-    active = true;
-    phase = "waiting";
-    spawnPlaced = false;
-    partnerLeft = false;
-    knownPeers = new Set();
-
-    showScreen("waiting");
-    updateWaitingRoom();
-    setStatus(ui.wrStatusEl, "Connecting to matchmaking…", "busy");
-
-    net = new Net();
-    attachHandlers(net);
-
-    const ok = await net.connect(roomCode, callsign);
-    if (!ok) {
-      setStatus(ui.wrStatusEl, net.error || "Could not connect.", "error");
-    }
-  }
-
-  // ── Manual (copy/paste) connect: no server, no relays ────────────────────
-  /** Puts the module into a manual party and shows the code panel. */
+  // ── Party start: no server, no relays — two codes exchanged by hand ─────
+  /**
+   * Because "join by code" is the manual WebRTC exchange, CREATE PARTY and
+   * JOIN lead into the same waiting room with different roles: the host shows
+   * an invite and pastes a reply, the joiner pastes an invite and shows a
+   * reply. Both end at the identical spawn flow.
+   */
   function beginManualParty() {
     active = true;
     phase = "waiting";
@@ -274,55 +239,74 @@ export function initMp(ctx) {
     partnerLeft = false;
     knownPeers = new Set();
     roomCode = "MANUAL";
-    showScreen("manual");
-    setStatus(ui.mnStatusEl, "");
-    updateDiag();
-    refreshBadge();
+    showScreen("waiting");
+    setStatus(ui.wrStatusEl, "");
+    updateWaitingRoom();
   }
 
-  async function manualCreateInvite() {
-    if (!active) beginManualParty();
-    net = new ManualLink();
-    attachHandlers(net);
-    setStatus(ui.mnStatusEl, "Building your invite code…", "busy");
-    try {
-      const code = await net.createInvite(net.callsign || ui.mpCallsign?.value || "PILOT");
-      if (ui.mnInviteOut) ui.mnInviteOut.value = code;
-      setStatus(ui.mnStatusEl, "Send that invite, then paste the reply you get back.", "ok");
-    } catch (e) {
-      setStatus(ui.mnStatusEl, "Could not build an invite: " + e.message, "error");
+  function setWaitingRole(role) {
+    if (ui.wrHostBlock) ui.wrHostBlock.classList.toggle("hidden", role !== "host");
+    if (ui.wrJoinBlock) ui.wrJoinBlock.classList.toggle("hidden", role !== "joiner");
+    if (ui.wrRoleEl) {
+      ui.wrRoleEl.textContent = role === "host" ? "STEP 1 OF 2 — SHARE YOUR INVITE" : "YOUR MOVE — SEND THE REPLY";
     }
   }
 
-  async function manualGenerateReply() {
-    const invite = (ui.mnInviteIn?.value || "").trim();
-    if (!looksLikeCode(invite)) {
-      setStatus(ui.mnStatusEl, "That does not look like a Skyward invite code.", "error");
+  function myCallsign() {
+    return (ui.mpCallsign?.value || "PILOT").trim().slice(0, 14) || "PILOT";
+  }
+
+  /** CREATE PARTY — build an invite code, then wait for the reply. */
+  async function hostParty() {
+    beginManualParty();
+    setWaitingRole("host");
+    if (ui.wrInviteOut) ui.wrInviteOut.value = "";
+    if (ui.wrReplyIn) ui.wrReplyIn.value = "";
+    net = new ManualLink();
+    attachHandlers(net);
+    setStatus(ui.wrStatusEl, "Building your invite code…", "busy");
+    try {
+      const code = await net.createInvite(myCallsign());
+      if (ui.wrInviteOut) ui.wrInviteOut.value = code;
+      setStatus(ui.wrStatusEl, "Send your invite, then paste the reply you get back.", "ok");
+    } catch (e) {
+      setStatus(ui.wrStatusEl, "Could not build an invite: " + e.message, "error");
+    }
+  }
+
+  /** JOIN — read the host's invite and produce the reply to send back. */
+  async function joinParty(inviteCode) {
+    if (!looksLikeCode(inviteCode)) {
+      setStatus(ui.mpStatusEl, "That does not look like a Skyward invite code.", "error");
       return;
     }
     beginManualParty();
+    setWaitingRole("joiner");
+    if (ui.wrReplyOut) ui.wrReplyOut.value = "";
     net = new ManualLink();
     attachHandlers(net);
-    setStatus(ui.mnStatusEl, "Building your reply code…", "busy");
+    setStatus(ui.wrStatusEl, "Reading the invite…", "busy");
     try {
-      const reply = await net.acceptInvite(invite, ui.mpCallsign?.value || "PILOT");
-      if (ui.mnReplyOut) ui.mnReplyOut.value = reply;
-      setStatus(ui.mnStatusEl, "Send that reply back — you will connect as soon as the host pastes it.", "ok");
+      const reply = await net.acceptInvite(inviteCode, myCallsign());
+      if (ui.wrReplyOut) ui.wrReplyOut.value = reply;
+      setStatus(ui.wrStatusEl, "Send this reply back to the host — you connect as soon as they paste it.", "ok");
     } catch (e) {
-      setStatus(ui.mnStatusEl, "Could not read that invite: " + e.message, "error");
+      setStatus(ui.wrStatusEl, "Could not read that invite: " + e.message, "error");
     }
   }
 
-  async function manualFinish() {
-    const reply = (ui.mnReplyIn?.value || "").trim();
+  /** HOST step 2 — paste the joiner's reply to finish the handshake. */
+  async function finishHostHandshake() {
+    const reply = (ui.wrReplyIn?.value || "").trim();
     if (!looksLikeCode(reply)) {
-      setStatus(ui.mnStatusEl, "That does not look like a Skyward reply code.", "error");
+      setStatus(ui.wrStatusEl, "That does not look like a reply code.", "error");
       return;
     }
+    setStatus(ui.wrStatusEl, "Connecting…", "busy");
     try {
       await net.acceptReply(reply);
     } catch (e) {
-      setStatus(ui.mnStatusEl, "Could not read that reply: " + e.message, "error");
+      setStatus(ui.wrStatusEl, "Could not read that reply: " + e.message, "error");
     }
   }
 
@@ -524,29 +508,9 @@ export function initMp(ctx) {
   function tick(dt) {
     if (!active) return;
     try {
-      remotePlanes.update(dt);
-      // Adaptive quality: drop detail if frames sag, restore with headroom.
-      if (dt > 0) fpsSamples.push(1 / dt);
-      if (fpsSamples.length >= 90) {
-        const avg = fpsSamples.reduce((a, b) => a + b, 0) / fpsSamples.length;
-        fpsSamples = [];
-        if (perfCooldown <= 0) {
-          if (avg < 45 && !perfForced) {
-            perfForced = true;
-            applyPerformance(ctx, true);
-            perfCooldown = 10;
-          } else if (avg > 58 && perfForced) {
-            perfForced = false;
-            applyPerformance(ctx, false);
-            perfCooldown = 10;
-          }
-        }
-      }
-      perfCooldown -= dt;
-
-      // Broadcast flight state (rate-limited inside net) after the sim step.
-      net.broadcastState({ ...state, isFlying: true });
-      refreshBadge();
+      // Remote motion is reconstructed from buffered snapshots; pass the
+      // local clock so it can place each plane on the sender's timeline.
+      remotePlanes.update(dt, performance.now());
     } catch (e) { /* multiplayer is best-effort; never break flight */ }
   }
 
@@ -554,10 +518,19 @@ export function initMp(ctx) {
   setInterval(() => {
     if (!active) return;
     updateDiag();
+    refreshBadge();
     if (phase !== "spawn") return;
     broadcastSpawn();
     updateSpawnGate();
   }, 300);
+
+  // Steady flight-state broadcast, on its own timer rather than the render
+  // loop: a dropped frame must not create a gap in everyone else's view of
+  // you, and the peer needs a regular stream to interpolate smoothly.
+  setInterval(() => {
+    if (!active || phase !== "flying") return;
+    try { net.broadcastState({ ...state }); } catch (e) { /* best effort */ }
+  }, 1000 / STATE_HZ);
 
   // ── UI events (all inside this module) ──
   try {
@@ -575,19 +548,21 @@ export function initMp(ctx) {
   });
   ui.mpBackBtn?.addEventListener("click", () => showScreen("menu"));
 
-  // Manual (no-server) connect.
-  ui.mpManualBtn?.addEventListener("click", () => {
-    showScreen("manual");
-    setStatus(ui.mnStatusEl, "");
-    if (!active) beginManualParty();
+  // Lobby → the two halves of the manual (no-server) handshake.
+  ui.mpCreateBtn?.addEventListener("click", () => hostParty());
+  ui.mpJoinBtn?.addEventListener("click", () => {
+    const code = (ui.mpCodeInput?.value || "").trim();
+    if (!code) {
+      setStatus(ui.mpStatusEl, "Paste the invite code you were sent first.", "error");
+      return;
+    }
+    joinParty(code);
   });
-  ui.mnBackBtn?.addEventListener("click", () => {
-    if (active && net.mode === "manual") leaveParty();
-    showScreen("lobby");
+  ui.mpCodeInput?.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter") return;
+    const code = (ui.mpCodeInput.value || "").trim();
+    if (code) joinParty(code);
   });
-  ui.mnCreateBtn?.addEventListener("click", () => manualCreateInvite());
-  ui.mnReplyBtn?.addEventListener("click", () => manualGenerateReply());
-  ui.mnFinishBtn?.addEventListener("click", () => manualFinish());
 
   const copyFrom = async (el, btn, doneLabel) => {
     const text = (el?.value || "").trim();
@@ -604,35 +579,13 @@ export function initMp(ctx) {
       el?.select?.();
     }
   };
-  ui.mnCopyInvite?.addEventListener("click", () => copyFrom(ui.mnInviteOut, ui.mnCopyInvite, "COPIED"));
-  ui.mnCopyReply?.addEventListener("click", () => copyFrom(ui.mnReplyOut, ui.mnCopyReply, "COPIED"));
-  ui.mpCreateBtn?.addEventListener("click", () => {
-    startParty(generateRoomCode(), ui.mpCallsign?.value || "PILOT");
-  });
-  ui.mpJoinBtn?.addEventListener("click", () => {
-    const code = normalizeRoomCode(ui.mpCodeInput?.value);
-    if (!code) {
-      setStatus(ui.mpStatusEl, "Enter a 5-character party code first.", "error");
-      return;
-    }
-    startParty(code, ui.mpCallsign?.value || "PILOT");
-  });
-  ui.mpCodeInput?.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") {
-      const code = normalizeRoomCode(ui.mpCodeInput.value);
-      if (code) startParty(code, ui.mpCallsign?.value || "PILOT");
-    }
-  });
-  ui.wrCopyBtn?.addEventListener("click", async () => {
-    if (!roomCode) return;
-    try {
-      await navigator.clipboard.writeText(roomCode);
-      ui.wrCopyBtn.textContent = "COPIED";
-      setTimeout(() => { if (ui.wrCopyBtn) ui.wrCopyBtn.textContent = "COPY"; }, 1500);
-    } catch (e) {
-      setStatus(ui.wrStatusEl, `Code: ${roomCode} — write it down.`, "busy");
-    }
-  });
+  ui.wrCopyInvite?.addEventListener("click", () => copyFrom(ui.wrInviteOut, ui.wrCopyInvite, "COPIED"));
+  ui.wrCopyReply?.addEventListener("click", () => copyFrom(ui.wrReplyOut, ui.wrCopyReply, "COPIED"));
+  ui.wrConnectBtn?.addEventListener("click", () => finishHostHandshake());
+  ui.wrReplyIn?.addEventListener("keydown", (e) => e.stopPropagation());
+  // Clicking a code field selects it, so a blocked clipboard is not a dead end.
+  ui.wrInviteOut?.addEventListener("click", (e) => e.target.select?.());
+  ui.wrReplyOut?.addEventListener("click", (e) => e.target.select?.());
   ui.wrLeaveBtn?.addEventListener("click", () => leaveParty());
 
   return {

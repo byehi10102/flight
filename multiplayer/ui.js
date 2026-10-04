@@ -42,7 +42,7 @@ export function buildMpUi(ctx) {
             <span class="logo-main">MULTIPLAYER</span>
             <span class="logo-sub">BETA</span>
           </div>
-          <p class="menu-desc">Peer-to-peer — the code is the only thing you share. No accounts, no servers holding your flight.</p>
+          <p class="menu-desc">Serverless — you and your partner swap two short codes by any means (Discord, SMS, email). No accounts, no server of ours in the middle.</p>
           <label class="mp-field">
             <span class="mp-field-label">CALLSIGN</span>
             <input id="mpCallsign" type="text" maxlength="14" placeholder="PILOT" autocomplete="off" />
@@ -50,63 +50,14 @@ export function buildMpUi(ctx) {
           <div class="mp-actions">
             <button id="mpCreateBtn" class="menu-btn">CREATE PARTY</button>
             <div class="mp-or"><span>OR JOIN WITH A CODE</span></div>
-            <div class="mp-join-row">
-              <input id="mpCodeInput" type="text" maxlength="5" placeholder="CODE" autocomplete="off" />
-              <button id="mpJoinBtn" class="menu-btn">JOIN</button>
-            </div>
+            <textarea id="mpCodeInput" class="mp-code" placeholder="paste the invite code you were sent"></textarea>
+            <button id="mpJoinBtn" class="menu-btn">JOIN</button>
           </div>
           <div id="mpStatus" class="mp-status"></div>
-          <button id="mpManualBtn" class="menu-btn menu-btn-ghost">MANUAL CONNECT (NO SERVER)</button>
           <button id="mpBackBtn" class="menu-btn menu-btn-ghost">BACK</button>
         </div>
       </div>`;
     document.body.appendChild(mpPanel);
-  }
-
-  // Manual (copy/paste) connect — no server, no relays.
-  let manualPanel = document.getElementById("manualPanel");
-  if (!manualPanel) {
-    manualPanel = document.createElement("div");
-    manualPanel.id = "manualPanel";
-    manualPanel.className = "overlay hidden";
-    manualPanel.innerHTML = `
-      <div class="menu-container wide">
-        <div class="menu-content">
-          <div class="menu-header">
-            <span class="logo-main">MANUAL CONNECT</span>
-            <span class="logo-sub">NO SERVER · CODE EXCHANGE</span>
-          </div>
-          <p class="menu-desc">Swap two text codes by any means (Discord, SMS, email).
-            Nothing of ours is involved — the two browsers talk directly.</p>
-
-          <div class="mn-cols">
-            <div class="mn-col">
-              <div class="mn-title">HOST</div>
-              <div class="mn-step">1. Create an invite, send it to your friend</div>
-              <button id="mnCreateBtn" class="menu-btn">CREATE INVITE</button>
-              <textarea id="mnInviteOut" class="mn-code" readonly placeholder="invite code appears here"></textarea>
-              <button id="mnCopyInvite" class="wr-copy">COPY INVITE</button>
-              <div class="mn-step">2. Paste the reply they send back</div>
-              <textarea id="mnReplyIn" class="mn-code" placeholder="paste their reply code here"></textarea>
-              <button id="mnFinishBtn" class="menu-btn">CONNECT</button>
-            </div>
-
-            <div class="mn-col">
-              <div class="mn-title">JOINER</div>
-              <div class="mn-step">1. Paste the invite you were sent</div>
-              <textarea id="mnInviteIn" class="mn-code" placeholder="paste the invite code here"></textarea>
-              <button id="mnReplyBtn" class="menu-btn">GENERATE REPLY</button>
-              <div class="mn-step">2. Send this reply back to the host</div>
-              <textarea id="mnReplyOut" class="mn-code" readonly placeholder="reply code appears here"></textarea>
-              <button id="mnCopyReply" class="wr-copy">COPY REPLY</button>
-            </div>
-          </div>
-
-          <div id="mnStatus" class="mp-status"></div>
-          <button id="mnBackBtn" class="menu-btn menu-btn-ghost">BACK</button>
-        </div>
-      </div>`;
-    document.body.appendChild(manualPanel);
   }
 
   // Waiting room.
@@ -116,20 +67,29 @@ export function buildMpUi(ctx) {
     waitingRoom.id = "waitingRoom";
     waitingRoom.className = "overlay hidden";
     waitingRoom.innerHTML = `
-      <div class="menu-container">
+      <div class="menu-container wide">
         <div class="menu-content">
           <div class="menu-header">
             <span class="logo-main">PARTY</span>
             <span class="logo-sub">WAITING ROOM</span>
           </div>
-          <div class="wr-code-block">
-            <span class="wr-label">ROOM CODE</span>
-            <div class="wr-code">
-              <span id="wrCode">-----</span>
-              <button id="wrCopyBtn" class="wr-copy" title="Copy code">COPY</button>
-            </div>
-            <span class="wr-hint">Your partner enters this under MULTIPLAYER → JOIN.</span>
+          <div id="wrRole" class="wr-role"></div>
+
+          <div id="wrHostBlock" class="wr-block hidden">
+            <div class="wr-step">1 · Send this invite to your partner (Discord, SMS, email)</div>
+            <textarea id="wrInviteOut" class="mp-code" readonly placeholder="invite code appears here"></textarea>
+            <button id="wrCopyInvite" class="wr-copy">COPY INVITE</button>
+            <div class="wr-step">2 · Paste the reply they send back</div>
+            <textarea id="wrReplyIn" class="mp-code" placeholder="paste their reply code here"></textarea>
+            <button id="wrConnectBtn" class="menu-btn">CONNECT</button>
           </div>
+
+          <div id="wrJoinBlock" class="wr-block hidden">
+            <div class="wr-step">Send this reply back to the host — you connect as soon as they paste it</div>
+            <textarea id="wrReplyOut" class="mp-code" readonly placeholder="reply code appears here"></textarea>
+            <button id="wrCopyReply" class="wr-copy">COPY REPLY</button>
+          </div>
+
           <div class="wr-players">
             <div id="wrSelf" class="wr-player">YOU</div>
             <div id="wrPeer" class="wr-player wr-peer-empty">WAITING FOR PLAYER…</div>
@@ -155,7 +115,6 @@ export function buildMpUi(ctx) {
   return {
     mpBtn,
     mpPanel,
-    manualPanel,
     waitingRoom,
     badge,
     mpCallsign: document.getElementById("mpCallsign"),
@@ -164,20 +123,15 @@ export function buildMpUi(ctx) {
     mpCodeInput: document.getElementById("mpCodeInput"),
     mpStatusEl: document.getElementById("mpStatus"),
     mpBackBtn: document.getElementById("mpBackBtn"),
-    mpManualBtn: document.getElementById("mpManualBtn"),
-    mnCreateBtn: document.getElementById("mnCreateBtn"),
-    mnInviteOut: document.getElementById("mnInviteOut"),
-    mnCopyInvite: document.getElementById("mnCopyInvite"),
-    mnReplyIn: document.getElementById("mnReplyIn"),
-    mnFinishBtn: document.getElementById("mnFinishBtn"),
-    mnInviteIn: document.getElementById("mnInviteIn"),
-    mnReplyBtn: document.getElementById("mnReplyBtn"),
-    mnReplyOut: document.getElementById("mnReplyOut"),
-    mnCopyReply: document.getElementById("mnCopyReply"),
-    mnStatusEl: document.getElementById("mnStatus"),
-    mnBackBtn: document.getElementById("mnBackBtn"),
-    wrCodeEl: document.getElementById("wrCode"),
-    wrCopyBtn: document.getElementById("wrCopyBtn"),
+    wrRoleEl: document.getElementById("wrRole"),
+    wrHostBlock: document.getElementById("wrHostBlock"),
+    wrJoinBlock: document.getElementById("wrJoinBlock"),
+    wrInviteOut: document.getElementById("wrInviteOut"),
+    wrCopyInvite: document.getElementById("wrCopyInvite"),
+    wrReplyIn: document.getElementById("wrReplyIn"),
+    wrConnectBtn: document.getElementById("wrConnectBtn"),
+    wrReplyOut: document.getElementById("wrReplyOut"),
+    wrCopyReply: document.getElementById("wrCopyReply"),
     wrSelfEl: document.getElementById("wrSelf"),
     wrPeerEl: document.getElementById("wrPeer"),
     wrStatusEl: document.getElementById("wrStatus"),

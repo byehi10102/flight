@@ -312,6 +312,7 @@ export class ManualLink {
   broadcastState(state) {
     if (!state) return;
     this._send("st", {
+      ts: performance.now(),
       lon: +state.lon.toFixed(5),
       lat: +state.lat.toFixed(5),
       alt: Math.round(state.alt),

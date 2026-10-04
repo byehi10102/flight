@@ -72,23 +72,22 @@ first click or keypress.
 
 ## Multiplayer (beta)
 
-Peer-to-peer flight with a friend — no server, no accounts, no API keys. A
-5-character room code is the only thing you share. The game's public relays
-(Nostr) are used only for the initial WebRTC handshake; after that all
-flight data flows directly between the two players.
+Peer-to-peer flight with a friend — no server, no accounts, no API keys. Two
+short text codes are the only thing you share, swapped by hand (Discord, SMS,
+email); the two browsers then talk directly. Nothing of ours is involved at
+any point.
 
 - **Mode select** — the home screen offers SINGLE PLAYER (unchanged) and
-  MULTIPLAYER (BETA). Multiplayer opens a lobby with two ways to connect:
-  - **Room code** — CREATE PARTY (generates a code) or JOIN with a shared
-    code; matchmaking runs over public Nostr relays.
-  - **MANUAL CONNECT (no server)** — a true serverless fallback: the host
-    clicks CREATE INVITE and sends the text code by any means (Discord,
-    SMS); the joiner pastes it and returns the reply code; the host pastes
-    that back and the two browsers connect directly. No relay, no server,
-    no account is involved at any point. Uses vanilla ICE (the code carries
-    every candidate) so it works from a single paste each way.
-- **Waiting room** — shows your code with a copy button and live peer
-  status. When the second player joins, both move to spawn selection.
+  MULTIPLAYER (BETA). The lobby *is* the code exchange — there is no separate
+  manual-connect screen:
+  - **CREATE PARTY** — builds an invite code and shows it in the waiting
+    room; paste the reply your partner sends back and you are connected.
+  - **JOIN** — paste the invite you were sent; the waiting room shows a reply
+    code for you to send back. You connect as soon as the host pastes it.
+- **Waiting room** — role-aware: the host sees "share your invite, then paste
+  their reply"; the joiner sees "send this reply back". Live peer status and
+  a direct-link readout. When the second player connects, both move to spawn
+  selection.
 - **Shared spawn gate** — each player picks on their own map and can see
   the other's placed dot (and live cursor). SPAWN HERE appears once *you*
   place but stays greyed until BOTH have committed; re-picking by either
@@ -97,41 +96,38 @@ flight data flows directly between the two players.
   nametags, and the minimap shows a red dot when a player is close, a rim
   arrow with their callsign when far. An MP badge shows link state
   (MP LIVE / SYNCING / OFFLINE) and peer count.
-- **Smooth at any speed** — remote planes are dead-reckoned locally with
-  the same movement math the sim uses; packets only correct drift, so a
-  10,000 mph pass reads as a pass instead of a teleport.
-- **Reliability** — no server of ours means the handshake must self-heal:
-  - **Relays are pinned, not left to Trystero's default.** Trystero's
-    pick is deterministic (seeded by the appId) and our appId landed on 5
-    relays of which only 3 worked — one dead, one that rejects publishing.
-    Two players could end up with no working shared relay, which is
-    exactly the "two separate lobbies, same code" failure. All 28 relays
-    are now health-checked and the 21 verified ones are passed explicitly
-    via `relayConfig.urls`, so both players always share many working
-    relays. (`turn-probe.html` and the relay health script document how.)
-  - **Live signaling readout** in the waiting room — "SIGNALING 19/21
-    RELAYS · PEERS 0/2" — so a blocked network is visible immediately
-    instead of looking like a silent lobby.
-  - **Actionable failures** — if no relay is reachable it says so; if
-    signaling is fine but the peer never arrives it explains that the two
-    networks could not reach each other directly.
-  - A failed handshake retries automatically (4 attempts, fresh offer).
-  - A dedicated liveness ping keeps presence alive while players sit in
-    menus (gameplay traffic is not required to stay connected).
-  - Presence is swept by heartbeat, so a hard-disconnected player is
-    cleaned up instead of leaving a ghost blocking the spawn gate.
+- **Smooth at any speed** — remote planes are reconstructed by **snapshot
+  interpolation**: each player sends a steady 20 Hz stream from its own timer
+  (so a dropped frame cannot punch a gap), and the receiver renders the plane
+  120 ms in the past, interpolating between two real positions/attitudes on
+  the sender's clock. No jitter, no rubber-banding, no corrective lag — a
+  head-on pass closes at the true rate instead of appearing to hang, and two
+  planes flying the same heading hold formation smoothly. Short packet gaps
+  extrapolate briefly, then hold; the plane never snaps. Minimap peer markers
+  come from the same interpolated position, redrawn at 20 Hz.
+- **Smooth world scroll** — the sim still advances in fixed 1/60 s steps, but
+  the rendered camera is interpolated between the previous and current step,
+  so the globe scrolls continuously instead of jumping whole steps at boost
+  speeds. Applies to single player too.
+- **Reliability** — with no server the handshake is one-shot, so it is made
+  hard to get wrong: the code carries every ICE candidate (vanilla ICE, a
+  single paste each way), ICE gathering has a timeout so a slow STUN server
+  cannot hang it, and the callsign handshake retries until acknowledged so
+  both players are labelled correctly. A dropped link is reported in the
+  waiting room and the badge rather than looking like a silent lobby.
 - **Known limit: no keyless TURN exists.** Two peers *both* behind
   symmetric NATs cannot connect directly, and every public TURN server
   tested (`openrelay`, `anyfirewall`, `expressturn`, metered) failed to
   allocate a relay candidate. STUN covers normal home/mobile networks;
   for symmetric-NAT pairs the game now says exactly what happened rather
   than hanging. Adding a TURN server to `ICE_SERVERS` in
-  `multiplayer/net.js` is the one-line fix if a hosted one is ever
+  `multiplayer/manual.js` is the one-line fix if a hosted one is ever
   available.
-- **Multiplayer graphics diet** — terrain detail relaxes one step, the
-  minimap renders at half resolution, and an adaptive guard drops detail
-  further if frame rate sags (restoring when headroom returns).
-  Single-player visuals are untouched.
+- **Multiplayer graphics diet** — terrain detail relaxes one step and the
+  minimap renders at half resolution, applied once at flight start. There is
+  deliberately NO adaptive LOD flipping during flight: changing Cesium's tile
+  detail mid-flight makes terrain visibly pop. Single-player visuals are
+  untouched.
 
 ### Verifying multiplayer
 
@@ -156,15 +152,17 @@ Cesium scene saturates its main thread):
 ```bash
 npm i -D puppeteer                  # not installed by default (heavy)
 npm run dev                         # in one terminal
-node dev-mp-browser-test.mjs        # manual connect, relay regression, single player
+node dev-mp-interp-test.mjs         # no browser: remote-plane reconstruction
+node dev-mp-browser-test.mjs        # in-lobby create/join, single player
 node dev-mp-manual-handshake.mjs    # the raw invite/reply WebRTC handshake
 ```
 
-Verified with them: the manual party merges (both players reach the shared
-spawn phase with a live 1/2 badge), the relay path still merges after the
-transport refactor, single player is untouched, and the handshake carries
-telemetry both ways, spawn presence, the back-to-picking signal and the
-disconnect notice.
+Verified with them: the interpolation advances at the true speed at cruise/
+max/boost with latency, jitter and 30% packet loss and holds through packet
+gaps; the in-lobby create/join merges the party (both players reach the
+shared spawn phase with a live 1/2 badge); single player is untouched; and
+the handshake carries telemetry both ways, spawn presence, the
+back-to-picking signal and the disconnect notice.
 
 ## Removing multiplayer
 
@@ -173,18 +171,19 @@ Everything the feature needs lives in one folder:
 ```
 multiplayer/
 ├── index.js            entry: party lifecycle, spawn gate, presence
-├── net.js              relay transport (room codes over Nostr relays)
-├── manual.js           serverless transport (copy/paste WebRTC codes)
-├── remotePlanes.js     remote aircraft + nametags in the 3D world
+├── manual.js           transport: the lobby's create/join code exchange
+├── remotePlanes.js     remote aircraft + nametags (snapshot interpolation)
 ├── spawnPresence.js    peer cursor + placed dot on the spawn map
-├── ui.js               mode button, lobby, manual panel, waiting room, badge
+├── ui.js               mode button, lobby, waiting room, badge
 ├── style.css           all multiplayer styles
-└── vendor/trystero.mjs bundled Trystero (used only by the relay transport)
+└── vendor/             unused: the old relay transport, kept for reference
+    └── trystero.mjs
 ```
 
-Both transports expose the same event surface, so the spawn gate, presence
-markers and remote planes are identical on either and neither knows which is
-in use.
+`net.js` (the old relay transport, room codes over Nostr relays) is no longer
+wired into the lobby but is kept in the folder as a working alternative
+transport — it exposes the same event surface as `manual.js`, so the spawn
+gate, presence markers and remote planes are identical on either.
 
 The host app loads it with a guarded dynamic import and talks to it only
 through optional chaining (`mp?.…`), so:

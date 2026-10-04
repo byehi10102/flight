@@ -95,6 +95,16 @@ let preloadTimer = 0;
 let minimapUpdateTimer = 0;
 let sunUpdateTimer = 0;
 let transitionGen = 0;
+
+/**
+ * Camera smoothing. The sim advances in fixed 1/60 s steps, but the camera is
+ * rendered with an interpolation between the previous and current step, so the
+ * world scrolls continuously instead of jumping a whole step at a time (a step
+ * is ~134 m at boost, which reads as a stutter). Sim behavior is unchanged.
+ */
+let camPosePrev = null;
+let camPoseCur = null;
+function resetCameraSmoothing() { camPosePrev = null; camPoseCur = null; }
 let lastGeocodePos = { lon: 0, lat: 0 };
 let currentRegionName = null;
 let terrainReady = false;
@@ -344,6 +354,37 @@ function setCameraToPlane(lon, lat, alt, heading, pitch, roll) {
     },
   });
   viewer.scene.requestRender();
+}
+
+/**
+ * Apply the camera for this rendered frame from the stored sim-step poses,
+ * interpolated by `alpha` (how far the render time sits between the previous
+ * step and the current one). Falls back to the current pose before the second
+ * step exists.
+ */
+function applySmoothedCamera(alpha) {
+  const b = camPoseCur;
+  if (!b) return;
+  const a = camPosePrev;
+  if (!a) {
+    setCameraToPlane(b.lon, b.lat, b.alt, b.h, b.p, b.r);
+    return;
+  }
+  const f = Math.max(0, Math.min(1, alpha));
+  let dLon = b.lon - a.lon;
+  while (dLon > 180) dLon -= 360;
+  while (dLon < -180) dLon += 360;
+  let dH = b.h - a.h;
+  while (dH > 180) dH -= 360;
+  while (dH < -180) dH += 360;
+  setCameraToPlane(
+    a.lon + dLon * f,
+    a.lat + (b.lat - a.lat) * f,
+    a.alt + (b.alt - a.alt) * f,
+    a.h + dH * f,
+    a.p + (b.p - a.p) * f,
+    a.r + (b.r - a.r) * f
+  );
 }
 
 // ── Spawn picker ─────────────────────────────────────────────────────────────
@@ -1169,6 +1210,7 @@ function confirmSpawn() {
             if (uiContainer) uiContainer.classList.remove("hidden");
             if (threeContainer) threeContainer.classList.remove("hidden");
             currentState = States.FLYING;
+            resetCameraSmoothing();
             hud.resetTime();
             hud.resetScore();
             soundManager.play("jet-engine", 1.0);
@@ -1241,6 +1283,7 @@ function confirmSpawn() {
       if (uiContainer) uiContainer.classList.remove("hidden");
       if (threeContainer) threeContainer.classList.remove("hidden");
       currentState = States.FLYING;
+      resetCameraSmoothing();
       hud.resetTime();
       hud.resetScore();
       // Multiplayer: same phase handoff as the healthy flight path.
@@ -1392,12 +1435,18 @@ function update(dt) {
   const finalQuat = Cesium.Quaternion.multiply(planeQuat, orbitQuat, new Cesium.Quaternion());
   const finalHPR = Cesium.HeadingPitchRoll.fromQuaternion(finalQuat);
 
-  setCameraToPlane(
-    state.lon, state.lat, state.alt,
-    Cesium.Math.toDegrees(finalHPR.heading),
-    Cesium.Math.toDegrees(finalHPR.pitch),
-    Cesium.Math.toDegrees(finalHPR.roll)
-  );
+  // Store this sim step's camera pose; the render loop applies it with
+  // sub-step interpolation so world motion is not quantized to 1/60 s steps
+  // (see applySmoothedCamera).
+  camPosePrev = camPoseCur;
+  camPoseCur = {
+    lon: state.lon,
+    lat: state.lat,
+    alt: state.alt,
+    h: Cesium.Math.toDegrees(finalHPR.heading),
+    p: Cesium.Math.toDegrees(finalHPR.pitch),
+    r: Cesium.Math.toDegrees(finalHPR.roll),
+  };
 
   // Speed-visible camera: FOV widens continuously with TRUE speed so 5000
   // mph already rushes and 10000 mph screams — boost adds an extra kick.
@@ -1580,6 +1629,9 @@ function animate() {
         steps++;
       }
       if (steps === SIM_MAX_STEPS) simAcc = 0;
+      // Render between the previous and current sim step so the world moves
+      // continuously rather than in whole-step jumps.
+      applySmoothedCamera(simAcc / SIM_STEP);
     } else if (currentState === States.TRANSITIONING && planeModel?.model) {
       // Keep the jet breathing (idle wobble, flames) through the spawn dive
       // so it never freezes a frame before flight starts.
@@ -1606,7 +1658,7 @@ function animate() {
     if (hud) hud.update(state, now);
 
     minimapUpdateTimer += dt;
-    if (minimapUpdateTimer > 0.1) {
+    if (minimapUpdateTimer > 0.05) {
       minimapUpdateTimer = 0;
       hud.updateMinimap(state);
       // Multiplayer peer markers draw on top of the base overlay.

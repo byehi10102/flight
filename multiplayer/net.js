@@ -76,8 +76,11 @@ const RELAY_URLS = [
 /** Unambiguous alphabet: no I/O/0/1 to keep codes easy to read aloud. */
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const CODE_LENGTH = 5;
-const STATE_HZ = 12;
-const STATE_INTERVAL_MS = 1000 / STATE_HZ;
+/**
+ * Flight-state send rate. A steady stream is what lets the peer interpolate
+ * smoothly, so this is decoupled from the (variable) render rate.
+ */
+export const STATE_HZ = 20;
 /** Presence ping interval; the sweep tolerates ~3 missed beats. */
 const HEARTBEAT_MS = 2000;
 /** A peer silent this long is considered gone (leave event not required). */
@@ -143,8 +146,6 @@ export class Net {
     this._sendHello = null;
     this._sendBack = null;
     this._sendHeartbeat = null;
-    this._lastStateSent = 0;
-    this._lastStatePayload = null;
     this._sweepTimer = null;
     this._heartbeatTimer = null;
   }
@@ -400,15 +401,18 @@ export class Net {
   }
 
   /**
-   * Broadcast own flight state. Rate-limited to STATE_HZ and skipped when
-   * nothing meaningful changed, so a stationary/slow jet costs no traffic.
+   * Broadcast own flight state.
+   *
+   * Sent on a steady caller-driven cadence (the game runs a 20 Hz timer) with
+   * no delta gate: a constant stream of small packets is what lets the peer
+   * interpolate smoothly. Gaps and bursts are precisely what cause remote
+   * planes to stutter, so "skip when barely moved" is the wrong trade here —
+   * a state packet is ~90 bytes.
    */
   broadcastState(state) {
     if (!this.active || !this._sendState) return;
-    const now = Date.now();
-    if (now - this._lastStateSent < STATE_INTERVAL_MS) return;
-
-    const payload = {
+    this._sendState({
+      ts: performance.now(),
       lon: +state.lon.toFixed(5),
       lat: +state.lat.toFixed(5),
       alt: Math.round(state.alt),
@@ -417,23 +421,7 @@ export class Net {
       r: +state.roll.toFixed(1),
       v: Math.round(state.speed),
       fly: state.isFlying ? 1 : 0,
-    };
-
-    // Delta gate: skip if position/attitude barely moved since last send.
-    const last = this._lastStatePayload;
-    if (last) {
-      const dLon = Math.abs(payload.lon - last.lon);
-      const dLat = Math.abs(payload.lat - last.lat);
-      const dAlt = Math.abs(payload.alt - last.alt);
-      const moved = dLon > 0.00002 || dLat > 0.00002 || dAlt > 3;
-      const turned = Math.abs(payload.h - last.h) > 0.4 || Math.abs(payload.p - last.p) > 0.4;
-      const speedChanged = Math.abs(payload.v - last.v) > 5;
-      if (!moved && !turned && !speedChanged && payload.fly === last.fly) return;
-    }
-
-    this._lastStateSent = now;
-    this._lastStatePayload = payload;
-    this._sendState(payload);
+    });
   }
 
   /** Broadcast own spawn-map presence (cursor + placed point). */
@@ -459,7 +447,6 @@ export class Net {
     this.active = false;
     this._teardownRoom();
     this.peers.clear();
-    this._lastStatePayload = null;
     this._setStatus("closed");
   }
 }
