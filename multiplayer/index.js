@@ -15,6 +15,7 @@
  * game state by reference, DOM handles, and the spawn-flow hooks.
  */
 import { Net, generateRoomCode, normalizeRoomCode } from "./net.js";
+import { ManualLink, looksLikeCode } from "./manual.js";
 import { createRemotePlanes } from "./remotePlanes.js";
 import { createSpawnPresence } from "./spawnPresence.js";
 import { buildMpUi } from "./ui.js";
@@ -45,7 +46,7 @@ export function initMp(ctx) {
   const ui = buildMpUi(ctx);
   const { state, dom } = ctx;
 
-  const net = new Net();
+  let net = new Net();
   const remotePlanes = createRemotePlanes({
     Cesium: ctx.Cesium,
     viewer: ctx.viewer,
@@ -77,6 +78,7 @@ export function initMp(ctx) {
   function showScreen(which) {
     if (dom.mainMenu) dom.mainMenu.classList.toggle("hidden", which !== "menu");
     if (ui.mpPanel) ui.mpPanel.classList.toggle("hidden", which !== "lobby");
+    if (ui.manualPanel) ui.manualPanel.classList.toggle("hidden", which !== "manual");
     if (ui.waitingRoom) ui.waitingRoom.classList.toggle("hidden", which !== "waiting");
   }
 
@@ -125,6 +127,22 @@ export function initMp(ctx) {
     const el = ui.wrDiagEl;
     if (!el) return;
     if (!active) { el.textContent = ""; el.className = "wr-diag"; return; }
+    if (net.mode === "manual") {
+      // No signaling to report in manual mode — say what the link is doing.
+      const peers = net.peerCount();
+      const label = {
+        idle: "WAITING FOR A CODE",
+        gathering: "BUILDING CODE…",
+        "awaiting-reply": "WAITING FOR THE REPLY CODE",
+        connecting: "CONNECTING DIRECTLY…",
+        online: "DIRECT LINK UP",
+        error: "LINK FAILED",
+        closed: "LINK CLOSED",
+      }[net.status] || net.status.toUpperCase();
+      el.textContent = `MANUAL · ${label} · PEERS ${peers}/2`;
+      el.className = "wr-diag" + (net.status === "error" ? " bad" : peers > 0 ? "" : " warn");
+      return;
+    }
     const { open, total } = net.relayStats();
     const peers = net.peerCount();
     let text = `SIGNALING ${open}/${total} RELAYS · PEERS ${peers}/2`;
@@ -140,36 +158,41 @@ export function initMp(ctx) {
     el.className = cls;
   }
 
-  async function startParty(code, callsign) {
-    roomCode = normalizeRoomCode(code);
-    active = true;
-    phase = "waiting";
-    spawnPlaced = false;
-    partnerLeft = false;
-    knownPeers = new Set();
-
-    showScreen("waiting");
-    updateWaitingRoom();
-    setStatus(ui.wrStatusEl, "Connecting to matchmaking…", "busy");
-
-    net
+  /**
+   * Shared transport wiring. Both the relay Net and the manual ManualLink
+   * expose the same events, so the spawn gate, presence markers and remote
+   * planes work identically on either — the game cannot tell them apart.
+   */
+  function attachHandlers(link) {
+    link
       .on("onStatus", (status, error) => {
         refreshBadge();
+        const manual = link.mode === "manual";
         if (status === "online") {
-          setStatus(ui.wrStatusEl, "Connected — share your code.", "ok");
+          setStatus(
+            manual ? ui.mnStatusEl : ui.wrStatusEl,
+            manual ? "Connected directly — no server involved." : "Connected — share your code.",
+            "ok"
+          );
           updateWaitingRoom();
         } else if (status === "error") {
-          // Say WHY, with the relay count, so a blocked network is obvious.
-          const { open, total } = net.relayStats();
           let msg = error || "Connection failed.";
-          if (total > 0 && open === 0) {
-            msg += " No signaling relay is reachable from this network.";
-          } else if (net.peerCount() === 0) {
-            msg += ` Signaling is fine (${open}/${total} relays) — the two` +
-              " networks could not reach each other directly (often a" +
-              " restrictive NAT). Try a different network, or a phone hotspot.";
+          if (!manual) {
+            // Say WHY, with the relay count, so a blocked network is obvious.
+            const { open, total } = link.relayStats();
+            if (total > 0 && open === 0) {
+              msg += " No signaling relay is reachable from this network.";
+            } else if (link.peerCount() === 0) {
+              msg += ` Signaling is fine (${open}/${total} relays) — the two` +
+                " networks could not reach each other directly (often a" +
+                " restrictive NAT). Try a different network, or a phone hotspot.";
+            }
+          } else if (link._lastStatusMessage) {
+            msg = link._lastStatusMessage;
           }
-          setStatus(ui.wrStatusEl, msg, "error");
+          setStatus(manual ? ui.mnStatusEl : ui.wrStatusEl, msg, "error");
+        } else if (manual && status === "connecting" && link._lastStatusMessage) {
+          setStatus(ui.mnStatusEl, link._lastStatusMessage, "busy");
         }
       })
       .on("onRetry", (attempt, max) => {
@@ -217,11 +240,89 @@ export function initMp(ctx) {
         remotePlanes.setCallsign(peerId, callsign);
         spawnPresence.setCallsign(peerId, callsign);
         updateWaitingRoom();
-      });
+      })
+      .on("onBack", () => goBackToPicking());
+  }
+
+  async function startParty(code, callsign) {
+    roomCode = normalizeRoomCode(code);
+    active = true;
+    phase = "waiting";
+    spawnPlaced = false;
+    partnerLeft = false;
+    knownPeers = new Set();
+
+    showScreen("waiting");
+    updateWaitingRoom();
+    setStatus(ui.wrStatusEl, "Connecting to matchmaking…", "busy");
+
+    net = new Net();
+    attachHandlers(net);
 
     const ok = await net.connect(roomCode, callsign);
     if (!ok) {
       setStatus(ui.wrStatusEl, net.error || "Could not connect.", "error");
+    }
+  }
+
+  // ── Manual (copy/paste) connect: no server, no relays ────────────────────
+  /** Puts the module into a manual party and shows the code panel. */
+  function beginManualParty() {
+    active = true;
+    phase = "waiting";
+    spawnPlaced = false;
+    partnerLeft = false;
+    knownPeers = new Set();
+    roomCode = "MANUAL";
+    showScreen("manual");
+    setStatus(ui.mnStatusEl, "");
+    updateDiag();
+    refreshBadge();
+  }
+
+  async function manualCreateInvite() {
+    if (!active) beginManualParty();
+    net = new ManualLink();
+    attachHandlers(net);
+    setStatus(ui.mnStatusEl, "Building your invite code…", "busy");
+    try {
+      const code = await net.createInvite(net.callsign || ui.mpCallsign?.value || "PILOT");
+      if (ui.mnInviteOut) ui.mnInviteOut.value = code;
+      setStatus(ui.mnStatusEl, "Send that invite, then paste the reply you get back.", "ok");
+    } catch (e) {
+      setStatus(ui.mnStatusEl, "Could not build an invite: " + e.message, "error");
+    }
+  }
+
+  async function manualGenerateReply() {
+    const invite = (ui.mnInviteIn?.value || "").trim();
+    if (!looksLikeCode(invite)) {
+      setStatus(ui.mnStatusEl, "That does not look like a Skyward invite code.", "error");
+      return;
+    }
+    beginManualParty();
+    net = new ManualLink();
+    attachHandlers(net);
+    setStatus(ui.mnStatusEl, "Building your reply code…", "busy");
+    try {
+      const reply = await net.acceptInvite(invite, ui.mpCallsign?.value || "PILOT");
+      if (ui.mnReplyOut) ui.mnReplyOut.value = reply;
+      setStatus(ui.mnStatusEl, "Send that reply back — you will connect as soon as the host pastes it.", "ok");
+    } catch (e) {
+      setStatus(ui.mnStatusEl, "Could not read that invite: " + e.message, "error");
+    }
+  }
+
+  async function manualFinish() {
+    const reply = (ui.mnReplyIn?.value || "").trim();
+    if (!looksLikeCode(reply)) {
+      setStatus(ui.mnStatusEl, "That does not look like a Skyward reply code.", "error");
+      return;
+    }
+    try {
+      await net.acceptReply(reply);
+    } catch (e) {
+      setStatus(ui.mnStatusEl, "Could not read that reply: " + e.message, "error");
     }
   }
 
@@ -473,6 +574,38 @@ export function initMp(ctx) {
     setStatus(ui.mpStatusEl, "");
   });
   ui.mpBackBtn?.addEventListener("click", () => showScreen("menu"));
+
+  // Manual (no-server) connect.
+  ui.mpManualBtn?.addEventListener("click", () => {
+    showScreen("manual");
+    setStatus(ui.mnStatusEl, "");
+    if (!active) beginManualParty();
+  });
+  ui.mnBackBtn?.addEventListener("click", () => {
+    if (active && net.mode === "manual") leaveParty();
+    showScreen("lobby");
+  });
+  ui.mnCreateBtn?.addEventListener("click", () => manualCreateInvite());
+  ui.mnReplyBtn?.addEventListener("click", () => manualGenerateReply());
+  ui.mnFinishBtn?.addEventListener("click", () => manualFinish());
+
+  const copyFrom = async (el, btn, doneLabel) => {
+    const text = (el?.value || "").trim();
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      if (btn) {
+        const was = btn.textContent;
+        btn.textContent = doneLabel;
+        setTimeout(() => { btn.textContent = was; }, 1500);
+      }
+    } catch (e) {
+      // Clipboard can be blocked; the field is selectable as a fallback.
+      el?.select?.();
+    }
+  };
+  ui.mnCopyInvite?.addEventListener("click", () => copyFrom(ui.mnInviteOut, ui.mnCopyInvite, "COPIED"));
+  ui.mnCopyReply?.addEventListener("click", () => copyFrom(ui.mnReplyOut, ui.mnCopyReply, "COPIED"));
   ui.mpCreateBtn?.addEventListener("click", () => {
     startParty(generateRoomCode(), ui.mpCallsign?.value || "PILOT");
   });

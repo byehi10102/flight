@@ -56,10 +56,57 @@ export function buildMpUi(ctx) {
             </div>
           </div>
           <div id="mpStatus" class="mp-status"></div>
+          <button id="mpManualBtn" class="menu-btn menu-btn-ghost">MANUAL CONNECT (NO SERVER)</button>
           <button id="mpBackBtn" class="menu-btn menu-btn-ghost">BACK</button>
         </div>
       </div>`;
     document.body.appendChild(mpPanel);
+  }
+
+  // Manual (copy/paste) connect — no server, no relays.
+  let manualPanel = document.getElementById("manualPanel");
+  if (!manualPanel) {
+    manualPanel = document.createElement("div");
+    manualPanel.id = "manualPanel";
+    manualPanel.className = "overlay hidden";
+    manualPanel.innerHTML = `
+      <div class="menu-container wide">
+        <div class="menu-content">
+          <div class="menu-header">
+            <span class="logo-main">MANUAL CONNECT</span>
+            <span class="logo-sub">NO SERVER · CODE EXCHANGE</span>
+          </div>
+          <p class="menu-desc">Swap two text codes by any means (Discord, SMS, email).
+            Nothing of ours is involved — the two browsers talk directly.</p>
+
+          <div class="mn-cols">
+            <div class="mn-col">
+              <div class="mn-title">HOST</div>
+              <div class="mn-step">1. Create an invite, send it to your friend</div>
+              <button id="mnCreateBtn" class="menu-btn">CREATE INVITE</button>
+              <textarea id="mnInviteOut" class="mn-code" readonly placeholder="invite code appears here"></textarea>
+              <button id="mnCopyInvite" class="wr-copy">COPY INVITE</button>
+              <div class="mn-step">2. Paste the reply they send back</div>
+              <textarea id="mnReplyIn" class="mn-code" placeholder="paste their reply code here"></textarea>
+              <button id="mnFinishBtn" class="menu-btn">CONNECT</button>
+            </div>
+
+            <div class="mn-col">
+              <div class="mn-title">JOINER</div>
+              <div class="mn-step">1. Paste the invite you were sent</div>
+              <textarea id="mnInviteIn" class="mn-code" placeholder="paste the invite code here"></textarea>
+              <button id="mnReplyBtn" class="menu-btn">GENERATE REPLY</button>
+              <div class="mn-step">2. Send this reply back to the host</div>
+              <textarea id="mnReplyOut" class="mn-code" readonly placeholder="reply code appears here"></textarea>
+              <button id="mnCopyReply" class="wr-copy">COPY REPLY</button>
+            </div>
+          </div>
+
+          <div id="mnStatus" class="mp-status"></div>
+          <button id="mnBackBtn" class="menu-btn menu-btn-ghost">BACK</button>
+        </div>
+      </div>`;
+    document.body.appendChild(manualPanel);
   }
 
   // Waiting room.
@@ -108,6 +155,7 @@ export function buildMpUi(ctx) {
   return {
     mpBtn,
     mpPanel,
+    manualPanel,
     waitingRoom,
     badge,
     mpCallsign: document.getElementById("mpCallsign"),
@@ -116,6 +164,18 @@ export function buildMpUi(ctx) {
     mpCodeInput: document.getElementById("mpCodeInput"),
     mpStatusEl: document.getElementById("mpStatus"),
     mpBackBtn: document.getElementById("mpBackBtn"),
+    mpManualBtn: document.getElementById("mpManualBtn"),
+    mnCreateBtn: document.getElementById("mnCreateBtn"),
+    mnInviteOut: document.getElementById("mnInviteOut"),
+    mnCopyInvite: document.getElementById("mnCopyInvite"),
+    mnReplyIn: document.getElementById("mnReplyIn"),
+    mnFinishBtn: document.getElementById("mnFinishBtn"),
+    mnInviteIn: document.getElementById("mnInviteIn"),
+    mnReplyBtn: document.getElementById("mnReplyBtn"),
+    mnReplyOut: document.getElementById("mnReplyOut"),
+    mnCopyReply: document.getElementById("mnCopyReply"),
+    mnStatusEl: document.getElementById("mnStatus"),
+    mnBackBtn: document.getElementById("mnBackBtn"),
     wrCodeEl: document.getElementById("wrCode"),
     wrCopyBtn: document.getElementById("wrCopyBtn"),
     wrSelfEl: document.getElementById("wrSelf"),

@@ -78,8 +78,15 @@ Peer-to-peer flight with a friend — no server, no accounts, no API keys. A
 flight data flows directly between the two players.
 
 - **Mode select** — the home screen offers SINGLE PLAYER (unchanged) and
-  MULTIPLAYER (BETA). Multiplayer opens a lobby: enter a callsign, then
-  CREATE PARTY (generates a code) or JOIN with a shared code.
+  MULTIPLAYER (BETA). Multiplayer opens a lobby with two ways to connect:
+  - **Room code** — CREATE PARTY (generates a code) or JOIN with a shared
+    code; matchmaking runs over public Nostr relays.
+  - **MANUAL CONNECT (no server)** — a true serverless fallback: the host
+    clicks CREATE INVITE and sends the text code by any means (Discord,
+    SMS); the joiner pastes it and returns the reply code; the host pastes
+    that back and the two browsers connect directly. No relay, no server,
+    no account is involved at any point. Uses vanilla ICE (the code carries
+    every candidate) so it works from a single paste each way.
 - **Waiting room** — shows your code with a copy button and live peer
   status. When the second player joins, both move to spawn selection.
 - **Shared spawn gate** — each player picks on their own map and can see
@@ -142,6 +149,23 @@ server running:
 These pages are excluded from the production build (they are not part of
 `index.html`; the three harness pages live at the project root).
 
+For the paths that a headless harness cannot reach, two browser tests drive
+the **real game** in a real browser (two Chromium processes, since a full
+Cesium scene saturates its main thread):
+
+```bash
+npm i -D puppeteer                  # not installed by default (heavy)
+npm run dev                         # in one terminal
+node dev-mp-browser-test.mjs        # manual connect, relay regression, single player
+node dev-mp-manual-handshake.mjs    # the raw invite/reply WebRTC handshake
+```
+
+Verified with them: the manual party merges (both players reach the shared
+spawn phase with a live 1/2 badge), the relay path still merges after the
+transport refactor, single player is untouched, and the handshake carries
+telemetry both ways, spawn presence, the back-to-picking signal and the
+disconnect notice.
+
 ## Removing multiplayer
 
 Everything the feature needs lives in one folder:
@@ -149,13 +173,18 @@ Everything the feature needs lives in one folder:
 ```
 multiplayer/
 ├── index.js            entry: party lifecycle, spawn gate, presence
-├── net.js              serverless WebRTC transport
+├── net.js              relay transport (room codes over Nostr relays)
+├── manual.js           serverless transport (copy/paste WebRTC codes)
 ├── remotePlanes.js     remote aircraft + nametags in the 3D world
 ├── spawnPresence.js    peer cursor + placed dot on the spawn map
-├── ui.js               mode button, lobby, waiting room, HUD badge
+├── ui.js               mode button, lobby, manual panel, waiting room, badge
 ├── style.css           all multiplayer styles
-└── vendor/trystero.mjs bundled Trystero (no npm runtime dependency)
+└── vendor/trystero.mjs bundled Trystero (used only by the relay transport)
 ```
+
+Both transports expose the same event surface, so the spawn gate, presence
+markers and remote planes are identical on either and neither knows which is
+in use.
 
 The host app loads it with a guarded dynamic import and talks to it only
 through optional chaining (`mp?.…`), so:

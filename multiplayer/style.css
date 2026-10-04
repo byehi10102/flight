@@ -168,6 +168,58 @@
 .wr-diag.bad { color: #ff8b8b; }
 .wr-diag.warn { color: #fc6; }
 
+/* Manual (copy/paste) connect panel */
+.menu-container.wide .menu-content { width: 720px; max-width: 94vw; }
+
+.mn-cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  text-align: left;
+}
+
+@media (max-width: 700px) {
+  .mn-cols { grid-template-columns: 1fr; }
+}
+
+.mn-col {
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(0, 255, 200, 0.25);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.mn-title {
+  font-size: 12px;
+  letter-spacing: 3px;
+  color: #0fe;
+  margin-bottom: 10px;
+}
+
+.mn-step {
+  font-size: 11px;
+  color: #8aa;
+  margin: 10px 0 5px;
+}
+
+.mn-code {
+  width: 100%;
+  height: 88px;
+  box-sizing: border-box;
+  resize: vertical;
+  background: rgba(0, 0, 0, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 5px;
+  color: #bfffe0;
+  font-family: Consolas, monospace;
+  font-size: 10px;
+  line-height: 1.35;
+  padding: 7px;
+  word-break: break-all;
+}
+
+.mn-code:focus { border-color: rgba(0, 255, 180, 0.7); outline: none; }
+
 .wr-players {
   display: flex;
   flex-direction: column;

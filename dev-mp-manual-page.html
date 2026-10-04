@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>manual webrtc test page</title>
+  </head>
+  <body>
+    <pre id="out"></pre>
+    <script type="module">
+      import { ManualLink } from "/manual.js";
+
+      const out = document.getElementById("out");
+      const write = (t) => { out.textContent += t + "\n"; };
+
+      let link = null;
+      window.__received = [];
+      window.__events = [];
+
+      function attach() {
+        link
+          .on("onStatus", (s, err) => {
+            window.__events.push({ e: "status", s, err: err || null });
+            write("status: " + s + (err ? " — " + err : ""));
+          })
+          .on("onPeerJoin", () => { window.__events.push({ e: "join" }); write("peer joined"); })
+          .on("onPeerLeave", () => { window.__events.push({ e: "leave" }); write("peer left"); })
+          .on("onHello", (_id, c) => { window.__events.push({ e: "hello", c }); write("hello: " + c); })
+          .on("onState", (_id, d) => { window.__received.push({ e: "state", d }); })
+          .on("onSpawn", (_id, d) => { window.__received.push({ e: "spawn", d }); })
+          .on("onBack", () => { window.__received.push({ e: "back" }); write("back-to-picking"); });
+      }
+
+      // The driver talks to the page only through this object.
+      window.api = {
+        async host(callsign) {
+          link = new ManualLink();
+          attach();
+          return await link.createInvite(callsign);
+        },
+        async reply(inviteCode, callsign) {
+          link = new ManualLink();
+          attach();
+          return await link.acceptInvite(inviteCode, callsign);
+        },
+        async finish(replyCode) {
+          return await link.acceptReply(replyCode);
+        },
+        sendState(payload) { link.broadcastState(payload); },
+        sendSpawn(payload) { link.broadcastSpawn(payload); },
+        sendBack() { link.broadcastBack(); },
+        status() {
+          return {
+            status: link ? link.status : "none",
+            error: link ? link.error : null,
+            peers: link ? link.peerCount() : 0,
+            mode: link ? link.mode : null,
+            received: window.__received,
+            events: window.__events,
+            raw: window.__raw || [],
+          };
+        },
+      };
+
+      write("ready");
+    </script>
+  </body>
+</html>

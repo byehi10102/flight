@@ -116,6 +116,7 @@ export function normalizeRoomCode(raw) {
 
 export class Net {
   constructor() {
+    this.mode = "relay";
     this.room = null;
     this.code = null;
     this.callsign = "PILOT";
