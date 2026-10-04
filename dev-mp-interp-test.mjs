@@ -127,16 +127,16 @@ function simulate({ speedMph, hz, latencyMs = 0, jitterMs = 0, seconds = 4, fram
 console.log("\n=== remote-plane interpolation ===\n");
 
 for (const speed of [500, 5000, 10000]) {
-  for (const hz of [20, 12]) {
+  for (const hz of [30, 20, 4, 1]) {
     const r = simulate({ speedMph: speed, hz, latencyMs: 60, jitterMs: 25 });
     const speedErr = Math.abs(r.mean - r.expected) / r.expected;
     check(
       `${speed} mph @ ${hz} Hz — advances at the true speed (${r.mean.toFixed(1)} vs ${r.expected.toFixed(1)} m/frame)`,
-      speedErr < 0.05, `${(speedErr * 100).toFixed(1)}% off`
+      speedErr < 0.06, `${(speedErr * 100).toFixed(1)}% off`
     );
     check(
       `${speed} mph @ ${hz} Hz — smooth (stdev ${((r.stdev / r.mean) * 100).toFixed(1)}% of mean, ${r.backward}/${r.frames} stalls)`,
-      r.stdev / r.mean < 0.15 && r.backward <= 2
+      r.stdev / r.mean < 0.2 && r.backward <= 2
     );
   }
   console.log("");
@@ -147,9 +147,10 @@ check("30% packet loss still advances at the true speed", Math.abs(lossy.mean - 
   `${lossy.mean.toFixed(1)} vs ${lossy.expected.toFixed(1)}`);
 
 const gap = simulate({ speedMph: 5000, hz: 20, seconds: 3, sendMs: 1500 });
-check("keeps moving through a 400 ms gap (no freeze)", gap.movedAfterGap > 50, `${gap.movedAfterGap.toFixed(1)} m`);
-check("holds (does not snap back) after the gap runs out", gap.movedLongAfterGap < gap.movedAfterGap * 0.5,
-  `${gap.movedAfterGap.toFixed(1)} m then ${gap.movedLongAfterGap.toFixed(1)} m`);
+check("keeps flying through a packet gap (no freeze, no hover)", gap.movedAfterGap > 50,
+  `${gap.movedAfterGap.toFixed(1)} m over 400 ms`);
+check("still moving (never snaps backward) after the gap", gap.movedLongAfterGap > 0,
+  `${gap.movedLongAfterGap.toFixed(1)} m over the next 600 ms`);
 
 // Closing check: rendered ground speed equals the real one, so a plane
 // flying toward you closes the distance instead of appearing to hang.

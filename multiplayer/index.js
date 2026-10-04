@@ -23,7 +23,7 @@ import { buildMpUi } from "./ui.js";
  * Flight-state send rate. Decoupled from the render loop so a dropped frame
  * cannot punch a gap into the other player's view of you.
  */
-const STATE_HZ = 20;
+const STATE_HZ = 30;
 
 // ── Performance mode (moved out of core/viewer.js so it lives here) ─────────
 let perfMode = false;

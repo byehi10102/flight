@@ -154,6 +154,7 @@ npm i -D puppeteer                  # not installed by default (heavy)
 npm run dev                         # in one terminal
 node dev-mp-interp-test.mjs         # no browser: remote-plane reconstruction
 node dev-mp-browser-test.mjs        # in-lobby create/join, single player
+node dev-mp-flight-probe.mjs        # two browsers fly together; checks state flows in flight
 node dev-mp-manual-handshake.mjs    # the raw invite/reply WebRTC handshake
 ```
 
@@ -163,6 +164,10 @@ gaps; the in-lobby create/join merges the party (both players reach the
 shared spawn phase with a live 1/2 badge); single player is untouched; and
 the handshake carries telemetry both ways, spawn presence, the
 back-to-picking signal and the disconnect notice.
+
+`dev-mp-flight-probe.mjs` additionally drives two browsers through connect →
+spawn → launch and confirms both sims advance and both minimaps show a peer
+marker that moves — the exact "are we actually flying together" check.
 
 ## Removing multiplayer
 

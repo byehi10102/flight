@@ -30,9 +30,17 @@
 
 const MPH_TO_MPS = 0.44704;
 /** Render remote planes this far behind the newest packet. */
-const INTERP_DELAY_MS = 120;
-/** Keep pushing along the last velocity through a gap this long, then hold. */
-const MAX_EXTRAP_MS = 400;
+const INTERP_DELAY_MS = 100;
+/**
+ * Keep pushing along the last known velocity through a gap this long, then
+ * hold. Generous on purpose: a throttled or backgrounded tab can drop to
+ * ~1 packet per second, and a short window would leave the other plane
+ * hovering between packets instead of flying. With a steady velocity the
+ * extrapolation and the next interpolation agree, so extending it costs no
+ * rubber-banding — it only means a crashed peer coasts a moment longer
+ * before the presence sweep removes it.
+ */
+const MAX_EXTRAP_MS = 2000;
 /** Snapshots older than this (relative to the newest) are dropped. */
 const SNAPSHOT_TTL_MS = 1200;
 const MODEL_URI = "models/f-15.glb";
@@ -266,22 +274,36 @@ export class RemotePlanes {
   }
 
   /**
+   * Coast along a snapshot's last known velocity. Used when the render time
+   * has run past the newest sample — INCLUDING the very first one, which is
+   * what keeps a plane moving from the moment it appears. Freezing on a lone
+   * snapshot until the second packet lands is precisely the hover-then-
+   * teleport symptom: the plane sits still, then jumps the whole accumulated
+   * gap in one frame.
+   */
+  _coast(snap, aheadMs) {
+    const ahead = Math.min(aheadMs, MAX_EXTRAP_MS);
+    if (ahead <= 0 || !snap.fly) return snap;
+    const mps = snap.v * MPH_TO_MPS * this.worldSpeedScale;
+    if (mps <= 0.01) return snap;
+    const np = movePosition(snap.lon, snap.lat, snap.alt, snap.h, snap.p, mps * (ahead / 1000));
+    return { t: snap.t + ahead, lon: np.lon, lat: np.lat, alt: np.alt, h: snap.h, p: snap.p, r: snap.r, v: snap.v, fly: snap.fly };
+  }
+
+  /**
    * Sample a peer's path at time `t`. Interpolates between the bracketing
-   * snapshots, extrapolates short gaps from the newest one, otherwise holds.
+   * snapshots, coasts forward from the newest one when the render time has
+   * run past it, otherwise holds.
    */
   _sample(plane, t) {
     const s = plane.snaps;
     if (!s.length) return plane.live;
-    if (s.length === 1 || t <= s[0].t) return s[0];
+    // Render time before our first sample: hold there (the peer has not
+    // started moving yet on our timeline).
+    if (t <= s[0].t) return s[0];
 
     const last = s[s.length - 1];
-    if (t >= last.t) {
-      const ahead = Math.min(t - last.t, MAX_EXTRAP_MS);
-      if (ahead <= 0 || !last.fly) return last;
-      const mps = last.v * MPH_TO_MPS * this.worldSpeedScale;
-      const np = movePosition(last.lon, last.lat, last.alt, last.h, last.p, mps * (ahead / 1000));
-      return { t, lon: np.lon, lat: np.lat, alt: np.alt, h: last.h, p: last.p, r: last.r, v: last.v, fly: last.fly };
-    }
+    if (t >= last.t) return this._coast(last, t - last.t);
 
     for (let i = s.length - 2; i >= 0; i--) {
       if (s[i].t <= t) {
