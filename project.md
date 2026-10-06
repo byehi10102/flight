@@ -974,3 +974,64 @@ particles spawn in the same frame, all while the sim's fixed-step catch-up may
 be running extra substeps. If the effect still reads late on a real GPU, the
 next lever is to spawn the explosion a frame *before* the state transition and
 to defer the pause-menu timer.
+
+## 17. Mobile landscape mode — dual virtual joysticks
+
+Touch input, landscape lock, and an on-screen cockpit for phones/tablets. No
+dependencies, vanilla Pointer Events. Desktop is byte-identical in behaviour
+— the whole mode is inert unless `MobileMode` detects a mobile device.
+
+### Detection and orientation (`src/ui/mobileMode.js`)
+
+`isMobileDevice()` = mobile UA (incl. iPadOS desktop-UA) OR (coarse pointer &&
+small screen). A touchscreen laptop keeps the desktop UI. On mobile the game
+tries `requestFullscreen()` + `screen.orientation.lock("landscape")` at the
+START gesture — best-effort: iOS allows neither, and every call is wrapped so
+a refusal never breaks the game. While the phone is in portrait, a
+full-screen "ROTATE YOUR PHONE" overlay covers the app (`#rotateOverlay`).
+
+### Joysticks (`src/ui/touchControls.js`)
+
+Two fixed hit zones, bottom-left and bottom-right (42% wide, 58% tall). On
+touch-down inside a zone the stick base re-centres under the thumb (floating
+origin, Brawl Stars style); the knob follows the finger clamped to the base
+radius. Zone styling is translucent-white; an active stick glows green. A
+10% dead zone zeros small wiggle; release snaps the knob home with a CSS
+recenter transition. First full deflection per engagement fires
+`navigator.vibrate(12)`.
+
+- LEFT  vertical = throttle (W/S hold semantics — a latching integrator, not
+  a fixed value), horizontal = yaw (A/D).
+- RIGHT vertical = pitch (up = ArrowUp semantics), horizontal = roll (arrows).
+
+Multi-touch is guaranteed by tracking the pointerId that claimed each stick;
+fingers never steal each other, and a second touch while one is held just
+opens the other zone.
+
+### Input merge (`src/plane/planeController.js`)
+
+The controller holds `stickLeft`/`stickRight` as plain -1..1 state set by
+TouchControls. `update()` SUMS the stick axes into the same clamped targets
+the keys produce and lerps toward them identically. One shared input state —
+the physics is not forked, mouse look is untouched, and keys + thumbs can be
+combined on hybrid devices.
+
+### HUD reposition (`src/ui/style.css`, `body.mobile-landscape`)
+
+Speed box to the left edge, AGL box to the right edge, above the stick tops;
+minimap to the top-right at 104px; compass narrower; boost/status compact
+bottom-centre; fonts shrink. Portrait never restyles — the overlay covers it.
+
+### Verification (`dev-mobile-test.mjs`)
+
+44 checks, 4 phases, zero screenshots: isolated page drives the shipped
+modules with synthetic PointerEvents (per-frame step counts, so headless-lag
+is neutralised); desktop phase asserts zero DOM/CSS change; landscape phase
+plays the real game with emulated touch asserting four live axes + HUD edge
+positions; portrait phase asserts the rotate overlay. `?devtest=1`-gated
+`window.SKY_DEV` exposes controller/state for the probe.
+
+### Known limits
+
+- Zoom/pinch on the map picker is unchanged — sticks only exist while flying.
+- Boost stays keyboard-only (mobile has no boost control yet).

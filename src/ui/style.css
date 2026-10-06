@@ -781,3 +781,164 @@ html, body {
   margin-bottom: 20px;
   letter-spacing: 4px;
 }
+
+/* ── Mobile mode: rotate overlay + dual virtual joysticks ─────────────────
+   Everything here is gated on body.mobile-mode (set by MobileMode) or on the
+   #touchControls container existing at all — desktop sees none of it. */
+
+#rotateOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  background: rgba(4, 6, 18, 0.94);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.rotate-card { text-align: center; font-family: "Consolas", monospace; }
+
+.rotate-phone {
+  width: 62px;
+  height: 108px;
+  border: 3px solid #fff;
+  border-radius: 14px;
+  margin: 0 auto 20px;
+  box-shadow: 0 0 24px rgba(255, 255, 255, 0.25);
+  animation: rotatePhone 1.8s ease-in-out infinite;
+}
+
+@keyframes rotatePhone {
+  0%, 25%  { transform: rotate(0deg); }
+  55%, 100% { transform: rotate(90deg); }
+}
+
+.rotate-title {
+  font-size: 20px;
+  letter-spacing: 5px;
+  color: #0f0;
+  text-shadow: 0 0 8px rgba(0, 255, 0, 0.5);
+  margin-bottom: 8px;
+}
+
+.rotate-sub { font-size: 12px; color: #999; letter-spacing: 2px; }
+
+/* Joystick root: covers the screen but is transparent to input everywhere
+   except its two zones, so HUD/pause taps behind it still land. */
+#touchControls {
+  position: fixed;
+  inset: 0;
+  z-index: 55;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: none;
+}
+
+.stick-zone {
+  position: absolute;
+  bottom: 0;
+  width: 42%;
+  height: 58%;
+  pointer-events: auto;
+  touch-action: none; /* no scroll/pinch/zoom: the thumb owns this zone */
+}
+
+.stick-zone-left  { left: 0; }
+.stick-zone-right { right: 0; }
+
+/* Idle base rings sit at zone centre as a placement affordance; on touch the
+   JS moves the base under the thumb (floating origin, Brawl Stars style). */
+.stick-base {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 128px;
+  height: 128px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.07);
+  border: 2px solid rgba(255, 255, 255, 0.32);
+  box-shadow: 0 0 20px rgba(0, 0, 0, 0.35);
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.stick-base.active {
+  opacity: 0.95;
+  background: rgba(255, 255, 255, 0.13);
+  border-color: rgba(90, 255, 120, 0.7);
+}
+
+.stick-knob {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 58px;
+  height: 58px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.22);
+  border: 2px solid rgba(255, 255, 255, 0.55);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
+  transform: translate(-50%, -50%);
+}
+
+/* Smooth recenter: applies only while the stick is NOT being dragged, so the
+   knob snaps back on release but tracks the finger 1:1 while held. */
+.stick-base:not(.active) .stick-knob { transition: transform 0.14s ease-out; }
+
+/* Per-zone axis hints ("YAW · THROTTLE" / "ROLL · PITCH") */
+.stick-hint {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: "Consolas", monospace;
+  font-size: 10px;
+  letter-spacing: 2px;
+  color: rgba(255, 255, 255, 0.45);
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+/* ── Mobile landscape HUD: edges get the instruments, corners get sticks ──
+   Speed/AGL to the left/right edges (above stick tops), minimap to top-right
+   below the FPS block, boost+status hug the free bottom-centre sliver, and
+   everything shrinks so a 360–440 px tall phone keeps breathing room. */
+body.mobile-landscape #compass-container { width: min(300px, 36vw); top: 6px; }
+body.mobile-landscape #heading-display { top: 36px; font-size: 12px; }
+
+body.mobile-landscape #hud-top-left { top: 8px; left: 12px; font-size: 11px; line-height: 1.4; }
+body.mobile-landscape #hud-top-right { top: 8px; right: 12px; font-size: 11px; line-height: 1.4; }
+
+body.mobile-landscape #hud-speed-box {
+  left: 14px; right: auto; bottom: auto; top: 27%;
+  transform: none; padding: 5px 10px;
+}
+body.mobile-landscape #hud-alt-box {
+  left: auto; right: 14px; bottom: auto; top: 27%;
+  transform: none; padding: 5px 10px;
+}
+body.mobile-landscape #hud-speed-box .value-box span,
+body.mobile-landscape #hud-alt-box .value-box span { font-size: 20px; }
+
+body.mobile-landscape #coords {
+  left: 14px; bottom: auto; top: calc(27% + 52px); font-size: 10px;
+}
+
+body.mobile-landscape #minimap-container {
+  left: auto; right: 14px; bottom: auto; top: 64px;
+  width: 104px; height: 104px;
+}
+
+body.mobile-landscape #boost-container {
+  width: min(190px, 26vw); bottom: 34px;
+}
+body.mobile-landscape #boost-label { font-size: 9px; margin-bottom: 2px; }
+body.mobile-landscape #hud-status { bottom: 10px; font-size: 10px; }
+
+body.mobile-landscape #region-notification { top: 44px; padding: 4px 12px; }
+body.mobile-landscape #pull-up-warning { font-size: 26px; }

@@ -40,6 +40,12 @@
             <b>/</b> — Search · <b>M</b> — Sound · <b>H</b> — Hide UI<br/>
             <b>C</b> — Clean View · <b>P</b> — Pause
           </div>
+          <div class="controls-help touch-help hidden">
+            <b>Controls:</b><br/>
+            LEFT STICK — Throttle ↑/↓ · Yaw ←/→<br/>
+            RIGHT STICK — Pitch ↑/↓ · Roll ←/→<br/>
+            Both sticks work at the same time.
+          </div>
         </div>
       </div>
     </div>
@@ -135,6 +141,17 @@
 
     <!-- Transition vignette -->
     <div id="transition-vignette"></div>
+
+    <!-- Mobile: shown on phones held in portrait; the game resumes the moment
+         the phone rotates. JS (src/ui/mobileMode.js) only populates this on
+         touch devices, so desktop never sees it. -->
+    <div id="rotateOverlay" class="hidden">
+      <div class="rotate-card">
+        <div class="rotate-phone"></div>
+        <div class="rotate-title">ROTATE YOUR PHONE</div>
+        <div class="rotate-sub">Landscape for both joysticks.</div>
+      </div>
+    </div>
 
     <!-- Pause Menu -->
     <div id="pauseMenu" class="overlay hidden">

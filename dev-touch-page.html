@@ -1,0 +1,41 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/><link rel="stylesheet" href="/src/ui/style.css"/></head>
+<body>
+<script type="module">
+  // Isolated harness: the SHIPPED PlaneController + SHIPPED TouchControls,
+  // no game. The puppeteer driver sends PointerEvents at the zones and reads
+  // the post-update input axes back out of this hook.
+  import { PlaneController } from "/src/plane/planeController.js";
+  import { TouchControls } from "/src/ui/touchControls.js";
+
+  const controller = new PlaneController();
+  window.__vibrateCalls = 0;
+  const origVibrate = navigator.vibrate?.bind(navigator);
+  try { navigator.vibrate = () => { window.__vibrateCalls++; return true; }; } catch (e) {}
+
+  const touch = new TouchControls({ onAxis: (side, x, y) => controller.setStickInput(side, x, y) });
+  touch.show();
+
+  window.MT = {
+    controller,
+    touch,
+    zones: {
+      left: document.querySelector(".stick-zone-left"),
+      right: document.querySelector(".stick-zone-right"),
+    },
+    origVibrate,
+    // Headless rAF is throttled (~3 fps on software WebGL). The control maths
+    // is per-frame, so step() runs fixed counts synchronously — the test then
+    // measures the SHIPPING update() semantics exactly, not a clock.
+    step: (n) => { for (let i = 0; i < n; i++) controller.update(); return controller.input; },
+    copies: () => ({
+      input: { ...controller.input },
+      axes: touch.axes(),
+      vibrateCalls: window.__vibrateCalls,
+    }),
+  };
+  window.MT_READY = true;
+</script>
+</body>
+</html>

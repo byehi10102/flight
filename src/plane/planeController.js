@@ -46,6 +46,21 @@ export class PlaneController {
 		};
 
 		this.sensitivity = 0.2;
+
+		// Analog touch-stick channels, -1..1 per axis, fed by TouchControls via
+		// setStickInput(). The keyboard and the sticks are two front-ends over
+		// THIS one input state: update() sums them into the same targets, so
+		// touch never forks the physics. left: x = yaw (A/D), y = throttle
+		// (W/S); right: x = roll (arrows), y = pitch (arrows).
+		this.stickLeft = { x: 0, y: 0 };
+		this.stickRight = { x: 0, y: 0 };
+	}
+
+	/** Feed one joystick's axes, -1..1 with 10% dead zone already applied. */
+	setStickInput(side, x, y) {
+		const stick = side === 'left' ? this.stickLeft : this.stickRight;
+		stick.x = x;
+		stick.y = y;
 	}
 
 	setSensitivity(value) {
@@ -62,14 +77,27 @@ export class PlaneController {
 		} else if (this.keys['s']) {
 			this.input.throttle = Math.max(0, this.input.throttle - accelRate * 0.016);
 		}
+		// Left stick vertical mirrors W/S at the same rate: full deflection up
+		// accelerates exactly like holding W; release holds the level, like
+		// releasing the key. Analog, so half-deflection throttles half-rate.
+		if (this.stickLeft.y !== 0) {
+			this.input.throttle = Math.min(1, Math.max(0, this.input.throttle + this.stickLeft.y * accelRate * 0.016));
+		}
 
-		const pitchTarget = (this.keys['arrowup'] ? -1 : (this.keys['arrowdown'] ? 1 : 0));
+		// The sticks sum into the SAME targets the keys set, clamped to the
+		// band the physics expects. push-up/on-the-right follows the arrow/A-D
+		// key semantics: stick-up == ArrowUp (-1), stick-down == ArrowDown (+1),
+		// stick-right == ArrowRight or D (+1).
+		const pitchTarget = this.clampAxis(
+			(this.keys['arrowup'] ? -1 : (this.keys['arrowdown'] ? 1 : 0)) - this.stickRight.y);
 		this.input.pitch = this.lerp(this.input.pitch, pitchTarget, 0.1);
 
-		const rollTarget = (this.keys['arrowleft'] ? -1 : (this.keys['arrowright'] ? 1 : 0));
+		const rollTarget = this.clampAxis(
+			(this.keys['arrowleft'] ? -1 : (this.keys['arrowright'] ? 1 : 0)) + this.stickRight.x);
 		this.input.roll = this.lerp(this.input.roll, rollTarget, 0.1);
 
-		const yawTarget = (this.keys['a'] ? -1 : (this.keys['d'] ? 1 : 0));
+		const yawTarget = this.clampAxis(
+			(this.keys['a'] ? -1 : (this.keys['d'] ? 1 : 0)) + this.stickLeft.x);
 		this.input.yaw = this.lerp(this.input.yaw, yawTarget, 0.1);
 
 		if (this.mouseDragging) {
@@ -100,9 +128,15 @@ export class PlaneController {
 		this.input.pitch = 0;
 		this.input.roll = 0;
 		this.input.yaw = 0;
+		this.stickLeft.x = 0; this.stickLeft.y = 0;
+		this.stickRight.x = 0; this.stickRight.y = 0;
 	}
 
 	lerp(start, end, amt) {
 		return (1 - amt) * start + amt * end;
+	}
+
+	clampAxis(v) {
+		return Math.max(-1, Math.min(1, v));
 	}
 }

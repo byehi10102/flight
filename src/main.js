@@ -8,6 +8,8 @@ import { PlanePhysics } from "./plane/planePhysics.js";
 import { PlaneController } from "./plane/planeController.js";
 import { PlaneModel } from "./plane/planeModel.js";
 import { Hud } from "./ui/hud.js";
+import { MobileMode } from "./ui/mobileMode.js";
+import { TouchControls } from "./ui/touchControls.js";
 import { particles } from "./utils/particles.js";
 import { soundManager } from "./utils/soundManager.js";
 import { reverseGeocode, reverseGeocodeDetailed, calculateDistance } from "./utils/geo.js";
@@ -63,6 +65,21 @@ let mp = null;
 let physics = new PlanePhysics();
 let controller = new PlaneController();
 let hud = new Hud();
+
+// Mobile front-end: on a phone/tablet this adds the rotate overlay and the
+// two virtual joysticks; on a desktop the MobileMode constructor returns
+// before touching the DOM, so nothing about the desktop game changes.
+const mobileMode = new MobileMode();
+const touchControls = mobileMode.enabled
+  ? new TouchControls({ onAxis: (side, x, y) => controller.setStickInput(side, x, y) })
+  : null;
+if (mobileMode.enabled) {
+  // Menu shows the stick scheme instead of the keyboard cheat-sheet.
+  const kb = document.querySelector(".controls-help:not(.touch-help)");
+  const th = document.querySelector(".controls-help.touch-help");
+  if (kb) kb.classList.add("hidden");
+  if (th) th.classList.remove("hidden");
+}
 let clock = new THREE.Clock();
 let groundSampler;
 // Sound state (ref-flight suite: engine/wind loops, warnings, UI).
@@ -391,6 +408,10 @@ function enterSpawnPicking(useVignette = true) {
   transitionGen++;
   spawnPending = false;
   const gen = transitionGen;
+  // Synchronous with the user's START tap, so user-activation still applies:
+  // best-effort landscape lock here. Refused on browsers that disallow it,
+  // where the rotate overlay takes over instead.
+  mobileMode.lockLandscape();
   stopAllFlyingSounds(0.3);
   soundManager.play("zoom-in");
   soundManager.play("wind", 1.0);
@@ -453,6 +474,8 @@ function enterSpawnPicking(useVignette = true) {
 
 function exitSpawnPicking() {
   transitionGen++;
+  // Leaving the game releases the orientation hold.
+  mobileMode.unlock();
   // Leaving the picker from a multiplayer room tears the party down.
   mp?.leaveParty();
   stopAllFlyingSounds(0.3);
@@ -1655,6 +1678,13 @@ function animate() {
     }
 
     state.isFlying = currentState === States.FLYING;
+
+    // Joysticks only while the plane is controllable and the phone is held
+    // sideways; hiding force-releases any held thumb so a state change can't
+    // pin an axis.
+    if (touchControls) {
+      touchControls.setVisible(currentState === States.FLYING && !mobileMode.isPortrait);
+    }
     if (hud) hud.update(state, now);
 
     minimapUpdateTimer += dt;
@@ -1854,4 +1884,22 @@ if (uiContainer) uiContainer.classList.add("hidden");
 if (threeContainer) threeContainer.classList.add("hidden");
 
 updateLoadingUI();
+
+// ── Test hook (dev-mobile-test.mjs) ─────────────────────────────────────────
+// Behind ?devtest=1 so production never exports it; the probe asserts raw
+// control state through here instead of screenshots.
+if (new URLSearchParams(location.search).has("devtest")) {
+  window.SKY_DEV = {
+    controller,
+    physics,
+    state,
+    get currentState() { return currentState; },
+    mobileMode,
+    touchControls,
+    // Deterministic spawn placement for integration tests — the game's own
+    // placement path, skipping the raster-tap that headless WebGL can't hit.
+    placeSpawn: (lon, lat, name) => selectSpawnPoint(lon, lat, 0, name, name, null),
+  };
+}
+
 animate();
