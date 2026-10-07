@@ -170,10 +170,36 @@ class VirtualStick {
 
 export class TouchControls {
   /**
-   * @param opts { onAxis(side:-1..1), radius, knobRadius, deadZone }
+   * @param opts { onAxis(side,-1..1), onBoost(), radius, knobRadius, deadZone }
    */
   constructor(opts = {}) {
     this.onAxis = opts.onAxis || null;
+    this.onBoost = opts.onBoost || null;
+    this._visible = false;
+    this._lastTap = null; // { t, x, y, id }
+
+    // Double-tap = boost (the mobile replacement for the spacebar). Any two
+    // quick taps outside the stick zones count; taps on a zone stay stick
+    // gestures. Only while the sticks are shown (i.e. actually flying), so
+    // menu buttons and the pause screen can't fire a stray boost.
+    const TAP_WINDOW_MS = 300;
+    const TAP_TRAVEL = 30; // px between the two taps before it stops being a double-tap
+    window.addEventListener("pointerdown", (e) => {
+      if (!this._visible || e.pointerType !== "touch") return;
+      if (e.target && e.target.closest && e.target.closest(".stick-zone")) return;
+      const now = performance.now();
+      const last = this._lastTap;
+      if (last && now - last.t <= TAP_WINDOW_MS
+          && Math.hypot(e.clientX - last.x, e.clientY - last.y) <= TAP_TRAVEL) {
+        this._lastTap = null;
+        if (this.onBoost) {
+          this.onBoost();
+          try { if (navigator.vibrate) navigator.vibrate(25); } catch (err) { /* unsupported */ }
+        }
+      } else {
+        this._lastTap = { t: now, x: e.clientX, y: e.clientY, id: e.pointerId };
+      }
+    }, { passive: true });
     this.radius = opts.radius ?? 56;
     this.deadZone = opts.deadZone ?? 0.10;
 
@@ -210,11 +236,14 @@ export class TouchControls {
 
   /** Show the zones (flying on mobile). Does not synthesize input. */
   show() {
+    this._visible = true;
     this.root.classList.remove("hidden");
   }
 
   /** Hide the zones and release any thumbs so stale axes can't linger. */
   hide() {
+    this._visible = false;
+    this._lastTap = null;
     this.root.classList.add("hidden");
     this.left.cancel();
     this.right.cancel();

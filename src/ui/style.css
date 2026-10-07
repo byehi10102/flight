@@ -904,41 +904,66 @@ html, body {
   white-space: nowrap;
 }
 
-/* ── Mobile landscape HUD: edges get the instruments, corners get sticks ──
-   Speed/AGL to the left/right edges (above stick tops), minimap to top-right
-   below the FPS block, boost+status hug the free bottom-centre sliver, and
-   everything shrinks so a 360–440 px tall phone keeps breathing room. */
+/* ── Mobile landscape HUD: the RIGHT edge holds the instruments ──────────
+   Stacked top-down: minimap (small), attitude/pitch panel (small), speed,
+   altitude, boost bar. The left half stays clear for the left stick, the
+   bottom corners for both sticks. Readouts are pointer-events:none so they
+   can never swallow a joystick touch where the zones overlap them. */
 body.mobile-landscape #compass-container { width: min(300px, 36vw); top: 6px; }
 body.mobile-landscape #heading-display { top: 36px; font-size: 12px; }
 
 body.mobile-landscape #hud-top-left { top: 8px; left: 12px; font-size: 11px; line-height: 1.4; }
 body.mobile-landscape #hud-top-right { top: 8px; right: 12px; font-size: 11px; line-height: 1.4; }
 
+body.mobile-landscape #hud-top-left,
+body.mobile-landscape #hud-top-right,
+body.mobile-landscape #hud-speed-box,
+body.mobile-landscape #hud-alt-box,
+body.mobile-landscape #coords,
+body.mobile-landscape #hud-status,
+body.mobile-landscape #boost-container,
+body.mobile-landscape #minimap-container { pointer-events: none; }
+
+/* Minimap: shrunk to a corner peep. */
+body.mobile-landscape #minimap-container {
+  left: auto; right: 10px; bottom: auto; top: 46px;
+  width: 78px; height: 78px;
+}
+
+/* Attitude / pitch panel: shrunk, same right column, below the minimap. */
+body.mobile-landscape #attitude-panel {
+  right: 10px; bottom: auto; top: 130px;
+  width: 78px; height: 78px; border-radius: 6px;
+}
+body.mobile-landscape #pitch-lines .pitch-line { font-size: 7px; }
+body.mobile-landscape #pitch-ref span { font-size: 8px; top: -11px; }
+body.mobile-landscape #pitch-ref { left: 4px; right: 4px; }
+
+/* Speed, altitude, boost bar: right column under the instruments. */
 body.mobile-landscape #hud-speed-box {
-  left: 14px; right: auto; bottom: auto; top: 27%;
-  transform: none; padding: 5px 10px;
+  left: auto; right: 10px; bottom: auto; top: 214px;
+  transform: none; padding: 4px 8px;
 }
 body.mobile-landscape #hud-alt-box {
-  left: auto; right: 14px; bottom: auto; top: 27%;
-  transform: none; padding: 5px 10px;
+  left: auto; right: 10px; bottom: auto; top: 256px;
+  transform: none; padding: 4px 8px;
 }
 body.mobile-landscape #hud-speed-box .value-box span,
-body.mobile-landscape #hud-alt-box .value-box span { font-size: 20px; }
-
-body.mobile-landscape #coords {
-  left: 14px; bottom: auto; top: calc(27% + 52px); font-size: 10px;
-}
-
-body.mobile-landscape #minimap-container {
-  left: auto; right: 14px; bottom: auto; top: 64px;
-  width: 104px; height: 104px;
-}
+body.mobile-landscape #hud-alt-box .value-box span { font-size: 18px; }
 
 body.mobile-landscape #boost-container {
-  width: min(190px, 26vw); bottom: 34px;
+  left: auto; right: 10px; bottom: auto; top: 298px;
+  transform: none; width: 88px;
 }
-body.mobile-landscape #boost-label { font-size: 9px; margin-bottom: 2px; }
-body.mobile-landscape #hud-status { bottom: 10px; font-size: 10px; }
+body.mobile-landscape #boost-container .boost-track { height: 8px; }
+body.mobile-landscape #boost-label { font-size: 8px; margin-bottom: 2px; }
+
+/* Coordinates tuck under the left info block, clear of the left stick. */
+body.mobile-landscape #coords {
+  left: 12px; bottom: auto; top: 52px; font-size: 10px;
+}
+
+body.mobile-landscape #hud-status { bottom: 8px; font-size: 10px; }
 
 body.mobile-landscape #region-notification { top: 44px; padding: 4px 12px; }
 body.mobile-landscape #pull-up-warning { font-size: 26px; }

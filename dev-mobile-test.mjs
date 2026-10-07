@@ -350,18 +350,37 @@ const browserMob = await puppeteer.launch(LAUNCH);
       root: document.querySelector(".stick-zone-left")?.closest("#touchControls"),
     };
     return { speed: R("hud-speed-box"), alt: R("hud-alt-box"), mm: R("minimap-container"),
+             boost: R("boost-container"), att: R("attitude-panel"),
              vw: innerWidth, vh: innerHeight,
              leftZone: { l: zones.left.left, t: zones.left.top, b: zones.left.bottom },
              rightZone: { r: zones.right.right, t: zones.right.top, b: zones.right.bottom } };
   });
-  check("speed box on the LEFT edge", hud.speed.l <= 30, `left=${hud.speed.l}`);
-  check("altitude box on the RIGHT edge", Math.abs(hud.alt.r - hud.vw) <= 30,
-    `right=${hud.alt.r} vw=${hud.vw}`);
-  check("instrument boxes do NOT intrude into the bottom-corner joysticks",
-    hud.speed.b <= hud.leftZone.t && hud.alt.b <= hud.rightZone.t,
-    `speed bottom ${hud.speed.b} vs left-zone top ${hud.leftZone.t}`);
-  check("minimap moved to top-right (small)", Math.abs(hud.mm.r - hud.vw) <= 30 && hud.mm.t < hud.vh * 0.3,
-    `right=${hud.mm.r} top=${hud.mm.t}`);
+  const onRight = (box) => Math.abs(box.r - hud.vw) <= 30;
+  check("speed box on the RIGHT edge", onRight(hud.speed), `right=${hud.speed.r} vw=${hud.vw}`);
+  check("altitude box on the RIGHT edge", onRight(hud.alt), `right=${hud.alt.r} vw=${hud.vw}`);
+  check("boost bar on the RIGHT edge", onRight(hud.boost), `right=${hud.boost.r} vw=${hud.vw}`);
+  check("right column does NOT intrude into the bottom-left joystick",
+    hud.speed.l > hud.leftZone.l + 40, `speed left ${hud.speed.l} vs left-zone left ${hud.leftZone.l}`);
+  check("minimap on the right (shrunk)", onRight(hud.mm) && hud.mm.r - hud.mm.l <= 120,
+    `right=${hud.mm.r} width=${hud.mm.r - hud.mm.l}`);
+  check("attitude/pitch panel on the right (shrunk)", onRight(hud.att) && hud.att.r - hud.att.l <= 120,
+    `right=${hud.att.r} width=${hud.att.r - hud.att.l}`);
+
+  // Double-tap the free area of the screen = boost (spacebar equivalent).
+  const tap = (x, y) => page.evaluate(({ x, y }) => {
+    const opts = { bubbles: true, clientX: x, clientY: y, pointerType: "touch", isPrimary: true };
+    window.dispatchEvent(new PointerEvent("pointerdown", opts));
+  }, { x, y });
+  const cx = Math.floor(hud.vw / 2), cy = Math.floor(hud.vh * 0.75);
+  await tap(cx, cy); await sleep(80); await tap(cx, cy);
+  const tapDiag = await page.evaluate(() => ({
+    visible: window.SKY_DEV.touchControls._visible,
+    boostTap: window.SKY_DEV.controller.boostTap,
+  }));
+  const boosted = await page.waitForFunction(() =>
+    window.SKY_DEV.physics.isBoosting || window.SKY_DEV.controller.input.boost,
+    { timeout: 8000, polling: 100 }).then(() => true).catch(() => false);
+  check("DOUBLE TAP fired the boost", boosted, JSON.stringify(tapDiag));
 
   // ── THE headline check: synthetic touches change the LIVE flight state ──
   const before = await page.evaluate(() => ({

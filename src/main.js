@@ -71,7 +71,10 @@ let hud = new Hud();
 // before touching the DOM, so nothing about the desktop game changes.
 const mobileMode = new MobileMode();
 const touchControls = mobileMode.enabled
-  ? new TouchControls({ onAxis: (side, x, y) => controller.setStickInput(side, x, y) })
+  ? new TouchControls({
+      onAxis: (side, x, y) => controller.setStickInput(side, x, y),
+      onBoost: () => controller.requestBoost(),
+    })
   : null;
 if (mobileMode.enabled) {
   // Menu shows the stick scheme instead of the keyboard cheat-sheet.

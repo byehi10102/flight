@@ -975,18 +975,18 @@ be running extra substeps. If the effect still reads late on a real GPU, the
 next lever is to spawn the explosion a frame *before* the state transition and
 to defer the pause-menu timer.
 
-## 17. Mobile landscape mode — dual virtual joysticks
+## 17. Mobile landscape mode ï¿½ dual virtual joysticks
 
 Touch input, landscape lock, and an on-screen cockpit for phones/tablets. No
 dependencies, vanilla Pointer Events. Desktop is byte-identical in behaviour
-— the whole mode is inert unless `MobileMode` detects a mobile device.
+ï¿½ the whole mode is inert unless `MobileMode` detects a mobile device.
 
 ### Detection and orientation (`src/ui/mobileMode.js`)
 
 `isMobileDevice()` = mobile UA (incl. iPadOS desktop-UA) OR (coarse pointer &&
 small screen). A touchscreen laptop keeps the desktop UI. On mobile the game
 tries `requestFullscreen()` + `screen.orientation.lock("landscape")` at the
-START gesture — best-effort: iOS allows neither, and every call is wrapped so
+START gesture ï¿½ best-effort: iOS allows neither, and every call is wrapped so
 a refusal never breaks the game. While the phone is in portrait, a
 full-screen "ROTATE YOUR PHONE" overlay covers the app (`#rotateOverlay`).
 
@@ -1000,9 +1000,14 @@ radius. Zone styling is translucent-white; an active stick glows green. A
 recenter transition. First full deflection per engagement fires
 `navigator.vibrate(12)`.
 
-- LEFT  vertical = throttle (W/S hold semantics — a latching integrator, not
+- LEFT  vertical = throttle (W/S hold semantics ï¿½ a latching integrator, not
   a fixed value), horizontal = yaw (A/D).
 - RIGHT vertical = pitch (up = ArrowUp semantics), horizontal = roll (arrows).
+- DOUBLE TAP anywhere outside the stick zones = boost (spacebar
+  equivalent): two taps within 300 ms and 30 px fire `onBoost`, which the
+  game routes to `controller.requestBoost()` - a ~150 ms input pulse into
+  the same edge-triggered boost path the spacebar uses. Only live while the
+  sticks are shown (flying), so menu taps can never boost.
 
 Multi-touch is guaranteed by tracking the pointerId that claimed each stick;
 fingers never steal each other, and a second touch while one is held just
@@ -1011,27 +1016,33 @@ opens the other zone.
 ### Input merge (`src/plane/planeController.js`)
 
 The controller holds `stickLeft`/`stickRight` as plain -1..1 state set by
-TouchControls. `update()` SUMS the stick axes into the same clamped targets
-the keys produce and lerps toward them identically. One shared input state —
-the physics is not forked, mouse look is untouched, and keys + thumbs can be
-combined on hybrid devices.
+TouchControls, plus `boostTap`, a decaying pulse set by `requestBoost()`.
+`update()` SUMS the stick axes into the same clamped targets the keys
+produce, lerps toward them identically, and ORs `boostTap > 0` with the
+spacebar into `input.boost`. One shared input state - the physics is not
+forked, mouse look is untouched, and keys + thumbs can be combined on
+hybrid devices.
 
 ### HUD reposition (`src/ui/style.css`, `body.mobile-landscape`)
 
-Speed box to the left edge, AGL box to the right edge, above the stick tops;
-minimap to the top-right at 104px; compass narrower; boost/status compact
-bottom-centre; fonts shrink. Portrait never restyles — the overlay covers it.
+Everything instrumental stacks on the RIGHT edge so the left half and the
+bottom corners stay clear for the sticks: minimap shrunk to 78px, then the
+attitude/pitch panel shrunk to 78px, then speed, altitude and the boost bar
+stacked beneath, all `pointer-events: none` so they can never swallow a
+stick touch where the zones overlap. Compass narrowed; coordinates tuck
+below the left info block; status shrinks bottom-centre. Portrait never
+restyles - the overlay covers it.
 
 ### Verification (`dev-mobile-test.mjs`)
 
-44 checks, 4 phases, zero screenshots: isolated page drives the shipped
+Checks run in 4 phases, zero screenshots: isolated page drives the shipped
 modules with synthetic PointerEvents (per-frame step counts, so headless-lag
 is neutralised); desktop phase asserts zero DOM/CSS change; landscape phase
-plays the real game with emulated touch asserting four live axes + HUD edge
-positions; portrait phase asserts the rotate overlay. `?devtest=1`-gated
-`window.SKY_DEV` exposes controller/state for the probe.
+plays the real game with emulated touch asserting four live axes, the
+double-tap boost, and the right-edge HUD stack; portrait phase asserts the
+rotate overlay. `?devtest=1`-gated `window.SKY_DEV` exposes controller/state
+for the probe.
 
 ### Known limits
 
-- Zoom/pinch on the map picker is unchanged — sticks only exist while flying.
-- Boost stays keyboard-only (mobile has no boost control yet).
+- Zoom/pinch on the map picker is unchanged - sticks only exist while flying.

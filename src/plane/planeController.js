@@ -54,6 +54,16 @@ export class PlaneController {
 		// (W/S); right: x = roll (arrows), y = pitch (arrows).
 		this.stickLeft = { x: 0, y: 0 };
 		this.stickRight = { x: 0, y: 0 };
+
+		// Seconds remaining on a touch double-tap boost press. The physics boost
+		// is edge-triggered, so one pulse is all it takes; 0.4 s survives frame
+		// jitter but ends long before the 3 s meter refill could re-trigger.
+		this.boostTap = 0;
+	}
+
+	/** Mobile double-tap: behaves like a quick spacebar tap. */
+	requestBoost() {
+		this.boostTap = 0.4;
 	}
 
 	/** Feed one joystick's axes, -1..1 with 10% dead zone already applied. */
@@ -68,7 +78,9 @@ export class PlaneController {
 	}
 
 	update() {
-		this.input.boost = !!this.keys[' '];
+		// Spacebar OR a touch double-tap pulse. Same edge the physics wants.
+		if (this.boostTap > 0) this.boostTap -= 0.016;
+		this.input.boost = !!this.keys[' '] || this.boostTap > 0;
 		this.input.isDragging = this.mouseDragging;
 
 		const accelRate = 0.5;
@@ -130,6 +142,7 @@ export class PlaneController {
 		this.input.yaw = 0;
 		this.stickLeft.x = 0; this.stickLeft.y = 0;
 		this.stickRight.x = 0; this.stickRight.y = 0;
+		this.boostTap = 0;
 	}
 
 	lerp(start, end, amt) {
