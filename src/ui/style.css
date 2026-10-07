@@ -269,42 +269,6 @@ html, body {
   border-bottom: none;
 }
 
-#zoom-controls {
-  position: fixed;
-  right: 22px;
-  bottom: 120px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  pointer-events: auto;
-  z-index: 70;
-}
-
-#zoom-controls button {
-  width: 56px;
-  height: 56px;
-  font-size: 30px;
-  font-weight: 300;
-  line-height: 1;
-  color: #fff;
-  background: rgba(10, 18, 28, 0.72);
-  border: 1px solid rgba(0, 255, 0, 0.45);
-  border-radius: 50%;
-  cursor: pointer;
-  backdrop-filter: blur(6px);
-  box-shadow: 0 0 14px rgba(0, 255, 0, 0.18), 0 2px 10px rgba(0, 0, 0, 0.5);
-  transition: transform 0.12s ease, box-shadow 0.12s ease, background 0.12s ease;
-}
-
-#zoom-controls button:hover {
-  background: rgba(0, 120, 60, 0.8);
-  box-shadow: 0 0 18px rgba(0, 255, 0, 0.45), 0 2px 10px rgba(0, 0, 0, 0.5);
-}
-
-#zoom-controls button:active {
-  transform: scale(0.92);
-}
-
 #confirmSpawnBtn {
   position: absolute;
   bottom: 60px;

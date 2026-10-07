@@ -345,6 +345,54 @@ const browserMob = await puppeteer.launch(LAUNCH);
     !document.getElementById("spawnInstruction").classList.contains("hidden"),
     { timeout: 30000 });
 
+  // ── Picker UI on mobile ────────────────────────────────────────────────
+  // The old +/- zoom buttons were removed (pinch zoom is native); assert the
+  // DOM is clean and the remaining picker chrome is on-screen.
+  {
+    const picker = await page.evaluate(() => {
+      const vRect = (el) => { const r = el?.getBoundingClientRect(); return r ? [r.left, r.top, r.right, r.bottom].map(Math.round) : null; };
+      const input = document.getElementById("locationSearch");
+      const chip = document.getElementById("instruction-text");
+      return {
+        zoomGone: !document.getElementById("zoom-controls") && !document.getElementById("zoomInBtn"),
+        chipRect: vRect(chip),
+        inputRect: vRect(input),
+        vw: innerWidth, vh: innerHeight,
+      };
+    });
+    check("picker's +/- zoom buttons REMOVED", picker.zoomGone);
+    const onScreen = (r) => r && r[0] >= 0 && r[1] >= 0 && r[2] <= picker.vw && r[3] <= picker.vh;
+    check("instruction chip fully on-screen", onScreen(picker.chipRect), JSON.stringify(picker));
+    check("search input fully on-screen", onScreen(picker.inputRect), JSON.stringify(picker));
+
+    // Search flow: type a city, wait for a result item, tap it -> placement
+    // (its own path in selectSpawnPoint) and the SPAWN HERE button arms.
+    await page.evaluate(() => {
+      const i = document.getElementById("locationSearch");
+      i.value = "Berlin";
+      i.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    const resultShown = await page.waitForFunction(() => {
+      const items = document.querySelectorAll("#search-results .search-result-item:not(.search-status)");
+      return items.length > 0;
+    }, { timeout: 15000, polling: 300 }).then(() => true).catch(() => false);
+    check("mobile search returns results (one of 3 keyless providers)", resultShown);
+    if (resultShown) {
+      const clicked = await page.evaluate(() => {
+        const first = document.querySelector("#search-results .search-result-item");
+        if (!first || first.classList.contains("search-status")) return { ok: false };
+        first.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+        return { ok: true, label: first.textContent };
+      });
+      const armed = await page.waitForFunction(() => {
+        const b = document.getElementById("confirmSpawnBtn");
+        return b && !b.classList.contains("hidden");
+      }, { timeout: 8000, polling: 250 }).then(() => true).catch(() => false);
+      check("tapping a search result places the point + arms SPAWN HERE",
+        clicked.ok && armed, clicked.ok ? clicked.label : "no clickable result");
+    }
+  }
+
   // Spawn-tap regression: the map CENTRE must never be eaten by overlays
   // (the Loading Terrain spinner used to swallow it) or by the search-box
   // guard band. Raster picking itself is unreliable on headless WebGL, so

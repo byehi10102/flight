@@ -1040,6 +1040,9 @@ overlay covers it.
 The "Loading Terrain..." indicator (`.loading-container`) is
 `pointer-events: none` - it appears/reappears with tile streaming while
 picking, and without this it swallowed taps through the middle of the map.
+The picker's on-screen +/- zoom buttons were removed (their `fixed`-
+inside-`transform` positioning pinned them off-viewport anyway): phones
+pinch-zoom natively; desktops keep wheel, double-click and +/- keys.
 
 ### Verification (`dev-mobile-test.mjs`)
 

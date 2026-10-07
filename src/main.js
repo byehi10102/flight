@@ -732,7 +732,7 @@ function setupSpawnPicker() {
     // ~440x230 px band across the middle of a phone screen.)
     const el = document.elementFromPoint(click.position.x, click.position.y);
     if (el && el.closest &&
-        el.closest(".spawn-hud-top, #confirmSpawnBtn, #zoom-controls")) {
+        el.closest(".spawn-hud-top, #confirmSpawnBtn")) {
       return;
     }
 
@@ -758,24 +758,17 @@ function setupSpawnPicker() {
     }
   }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
 
-  // Double-click dives toward the clicked point (third zoom path).
+  // Double-click dives toward the clicked point (desktop zoom path; phones
+  // pinch with Cesium's native touch zoom).
   handler.setInputAction((click) => {
     if (currentState !== States.PICK_SPAWN) return;
     pickerZoom(-1);
   }, Cesium.ScreenSpaceEventType.LEFT_DOUBLE_CLICK);
-
-  document.getElementById("zoomInBtn")?.addEventListener("click", (e) => {
-    e.stopPropagation();
-    pickerZoom(-1);
-  });
-  document.getElementById("zoomOutBtn")?.addEventListener("click", (e) => {
-    e.stopPropagation();
-    pickerZoom(1);
-  });
 }
 
-// Module-level picker zoom shared by buttons, double-click and keyboard.
-// Amount scales with height: street detail up close, regions far out.
+// Module-level picker zoom shared by double-click and keyboard (the picker
+// on-screen +/- buttons were removed; phones pinch, desktops can also use
+// +/- keys or the mouse wheel).
 function pickerZoom(dir) {
   try {
     if (currentState !== States.PICK_SPAWN) return;
