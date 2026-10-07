@@ -724,44 +724,16 @@ function setupSpawnPicker() {
   handler.setInputAction((click) => {
     if (currentState !== States.PICK_SPAWN) return;
 
-    const clickX = click.position.x;
-    const clickY = click.position.y;
-    const searchRect = locationSearch ? locationSearch.getBoundingClientRect() : null;
-    if (searchRect) {
-      const pad = 20;
-      if (
-        clickX >= searchRect.left - pad &&
-        clickX <= searchRect.right + pad &&
-        clickY >= searchRect.top - pad - 40 &&
-        clickY <= searchRect.bottom + pad + 100
-      ) {
-        return;
-      }
-    }
-    const confirmRect = confirmSpawnBtn ? confirmSpawnBtn.getBoundingClientRect() : null;
-    if (confirmRect) {
-      const pad = 20;
-      if (
-        clickX >= confirmRect.left - pad &&
-        clickX <= confirmRect.right + pad &&
-        clickY >= confirmRect.top - pad &&
-        clickY <= confirmRect.bottom + pad
-      ) {
-        return;
-      }
-    }
-
-    const zoomRect = document.getElementById("zoom-controls")?.getBoundingClientRect();
-    if (zoomRect) {
-      const pad = 12;
-      if (
-        clickX >= zoomRect.left - pad &&
-        clickX <= zoomRect.right + pad &&
-        clickY >= zoomRect.top - pad &&
-        clickY <= zoomRect.bottom + pad
-      ) {
-        return;
-      }
+    // Reject only taps that actually LAND on picker UI (search field, results
+    // list, zoom buttons, confirm button). elementFromPoint respects
+    // pointer-events:none and visibility, so every other pixel of the map -
+    // including directly under the transient loading spinner - places a
+    // point. (The old padded-rect guard around the search box blanked a
+    // ~440x230 px band across the middle of a phone screen.)
+    const el = document.elementFromPoint(click.position.x, click.position.y);
+    if (el && el.closest &&
+        el.closest(".spawn-hud-top, #confirmSpawnBtn, #zoom-controls")) {
+      return;
     }
 
     // Landmarks first: tapping a named pin spawns right there.
@@ -1899,6 +1871,7 @@ if (new URLSearchParams(location.search).has("devtest")) {
     get currentState() { return currentState; },
     mobileMode,
     touchControls,
+    viewer,
     // Deterministic spawn placement for integration tests — the game's own
     // placement path, skipping the raster-tap that headless WebGL can't hit.
     placeSpawn: (lon, lat, name) => selectSpawnPoint(lon, lat, 0, name, name, null),

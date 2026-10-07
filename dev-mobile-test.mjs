@@ -132,6 +132,28 @@ async function phaseIsolated() {
   await page.waitForFunction("window.MT_READY === true", { timeout: 15000 });
 
   const p = pagePointer(page);
+
+  // FIXED-base contract: grabbing the stick at the zone's corner must NOT
+  // move the base ring — its centre stays pinned at the zone centre.
+  const fixedBase = await page.evaluate(() => {
+    const zone = document.querySelector(".stick-zone-left");
+    const base = zone.querySelector(".stick-base");
+    const zr = zone.getBoundingClientRect();
+    const before = { x: base.getBoundingClientRect().left, y: base.getBoundingClientRect().top };
+    zone.dispatchEvent(new PointerEvent("pointerdown", {
+      pointerId: 9100, pointerType: "touch", isPrimary: true,
+      clientX: zr.left + 12, clientY: zr.top + 12, bubbles: true, cancelable: true,
+    }));
+    const after = { x: base.getBoundingClientRect().left, y: base.getBoundingClientRect().top };
+    const axes = { ...window.MT.touch.axes().left };
+    window.dispatchEvent(new PointerEvent("pointerup", { pointerId: 9100, bubbles: true }));
+    return { before, after, axes, zr };
+  });
+  check("stick base NEVER moves (fixed sticks, corner grab)",
+    Math.abs(fixedBase.before.x - fixedBase.after.x) < 1 && Math.abs(fixedBase.before.y - fixedBase.after.y) < 1,
+    `moved ${JSON.stringify(fixedBase)}`);
+  check("corner grab still DRIVES the axes from the fixed anchor",
+    fixedBase.axes.x < 0 && fixedBase.axes.y > 0, JSON.stringify(fixedBase.axes));
   // 30 update() steps ≈ half a second of 60fps input — deterministic, unlike
   // wall-clock sleeps on a throttled headless renderer.
   await p("left", "down");
@@ -322,6 +344,30 @@ const browserMob = await puppeteer.launch(LAUNCH);
   await page.waitForFunction(() =>
     !document.getElementById("spawnInstruction").classList.contains("hidden"),
     { timeout: 30000 });
+
+  // Spawn-tap regression: the map CENTRE must never be eaten by overlays
+  // (the Loading Terrain spinner used to swallow it) or by the search-box
+  // guard band. Raster picking itself is unreliable on headless WebGL, so
+  // the hard assert is the hit-test; a real placement still counts first.
+  await sleep(600);
+  {
+    const v = await page.viewport();
+    const tapX = Math.floor(v.width / 2), tapY = Math.floor(v.height / 2);
+    // Force the spinner ON during the tap - the exact condition that used to
+    // absorb centre taps.
+    await page.evaluate(() => document.getElementById("loadingIndicator").classList.remove("hidden"));
+    await page.touchscreen.tap(tapX, tapY);
+    await sleep(800);
+    const r = await page.evaluate(({ x, y }) => {
+      const el = document.elementFromPoint(x, y);
+      const hit = el ? (el.tagName === "CANVAS" ? "canvas" : (el.id ? "#" + el.id : el.className || el.tagName)) : "none";
+      const placed = !document.getElementById("confirmSpawnBtn").classList.contains("hidden");
+      return { hit, placed, state: window.SKY_DEV.currentState };
+    }, { x: tapX, y: tapY });
+    await page.evaluate(() => document.getElementById("loadingIndicator").classList.add("hidden"));
+    check("map CENTRE tap reaches the globe (spinner/search band can't eat it)",
+      r.placed || (r.hit === "canvas" && r.state === "PICK_SPAWN"), JSON.stringify(r));
+  }
   await page.evaluate(() => window.SKY_DEV.placeSpawn(-117.9143, 33.8366, "TEST"));
   await page.waitForFunction(() => {
     const b = document.getElementById("confirmSpawnBtn");
@@ -358,7 +404,9 @@ const browserMob = await puppeteer.launch(LAUNCH);
   const onRight = (box) => Math.abs(box.r - hud.vw) <= 30;
   check("speed box on the RIGHT edge", onRight(hud.speed), `right=${hud.speed.r} vw=${hud.vw}`);
   check("altitude box on the RIGHT edge", onRight(hud.alt), `right=${hud.alt.r} vw=${hud.vw}`);
-  check("boost bar on the RIGHT edge", onRight(hud.boost), `right=${hud.boost.r} vw=${hud.vw}`);
+  check("boost bar bottom-CENTRE (under the plane)",
+    Math.abs(hud.boost.cx - hud.vw / 2) <= 40 && Math.abs(hud.boost.b - hud.vh) <= 60,
+    `cx=${hud.boost.cx} vw=${hud.vw} bottom=${hud.boost.b} vh=${hud.vh}`);
   check("right column does NOT intrude into the bottom-left joystick",
     hud.speed.l > hud.leftZone.l + 40, `speed left ${hud.speed.l} vs left-zone left ${hud.leftZone.l}`);
   check("minimap on the right (shrunk)", onRight(hud.mm) && hud.mm.r - hud.mm.l <= 120,

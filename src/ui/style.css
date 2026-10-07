@@ -153,6 +153,7 @@ html, body {
   align-items: center;
   gap: 12px;
   z-index: 200;
+  pointer-events: none; /* info-only: tapping the map underneath must always work */
 }
 
 .spinner {
@@ -850,8 +851,8 @@ html, body {
 .stick-zone-left  { left: 0; }
 .stick-zone-right { right: 0; }
 
-/* Idle base rings sit at zone centre as a placement affordance; on touch the
-   JS moves the base under the thumb (floating origin, Brawl Stars style). */
+/* Base rings sit pinned at zone centre (fixed sticks, no wandering) and only
+   glow on touch. */
 .stick-base {
   position: absolute;
   left: 50%;
@@ -952,8 +953,8 @@ body.mobile-landscape #hud-speed-box .value-box span,
 body.mobile-landscape #hud-alt-box .value-box span { font-size: 18px; }
 
 body.mobile-landscape #boost-container {
-  left: auto; right: 10px; bottom: auto; top: 298px;
-  transform: none; width: 88px;
+  left: 50%; right: auto; bottom: 26px; top: auto;
+  transform: translateX(-50%); width: min(96px, 18vw);
 }
 body.mobile-landscape #boost-container .boost-track { height: 8px; }
 body.mobile-landscape #boost-label { font-size: 8px; margin-bottom: 2px; }

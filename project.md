@@ -992,10 +992,11 @@ full-screen "ROTATE YOUR PHONE" overlay covers the app (`#rotateOverlay`).
 
 ### Joysticks (`src/ui/touchControls.js`)
 
-Two fixed hit zones, bottom-left and bottom-right (42% wide, 58% tall). On
-touch-down inside a zone the stick base re-centres under the thumb (floating
-origin, Brawl Stars style); the knob follows the finger clamped to the base
-radius. Zone styling is translucent-white; an active stick glows green. A
+Two fixed hit zones, bottom-left and bottom-right (42% wide, 58% tall). The
+sticks are FIXED: the base ring stays pinned at the zone centre no matter
+where the thumb lands inside the zone; the knob follows the finger relative
+to that anchor, clamped to the base radius. Zone styling is
+translucent-white; an active stick glows green. A
 10% dead zone zeros small wiggle; release snaps the knob home with a CSS
 recenter transition. First full deflection per engagement fires
 `navigator.vibrate(12)`.
@@ -1025,13 +1026,20 @@ hybrid devices.
 
 ### HUD reposition (`src/ui/style.css`, `body.mobile-landscape`)
 
-Everything instrumental stacks on the RIGHT edge so the left half and the
-bottom corners stay clear for the sticks: minimap shrunk to 78px, then the
-attitude/pitch panel shrunk to 78px, then speed, altitude and the boost bar
-stacked beneath, all `pointer-events: none` so they can never swallow a
-stick touch where the zones overlap. Compass narrowed; coordinates tuck
-below the left info block; status shrinks bottom-centre. Portrait never
-restyles - the overlay covers it.
+The RIGHT edge stacks the instruments so the left half and the bottom
+corners stay clear for the sticks: minimap shrunk to 78px with the
+attitude/pitch panel shrunk to 78px beneath it, then speed and altitude
+under those, all `pointer-events: none` so they can never swallow a stick
+touch where the zones overlap. The boost bar sits bottom-CENTRE (under the
+jet, between the two stick zones) above the status line. Compass narrowed;
+coordinates tuck below the left info block. Portrait never restyles - the
+overlay covers it.
+
+### Spawn picking on touch
+
+The "Loading Terrain..." indicator (`.loading-container`) is
+`pointer-events: none` - it appears/reappears with tile streaming while
+picking, and without this it swallowed taps through the middle of the map.
 
 ### Verification (`dev-mobile-test.mjs`)
 

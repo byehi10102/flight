@@ -10,10 +10,10 @@
  *
  * ── Layout ─────────────────────────────────────────────────────────────────
  * Two fixed hit zones: bottom-left (throttle + yaw, mirrors W/S + A/D) and
- * bottom-right (pitch + roll, mirrors arrow keys). The base rings are visible
- * as affordances; touching a zone centres its knob on the THUMB, not the
- * zone, then the knob follows the finger — the floating-knob Brawl Stars
- * feel. Release recenters smoothly (CSS transition).
+ * bottom-right (pitch + roll, mirrors arrow keys). The sticks are FIXED: the
+ * base ring never moves; touching anywhere in a zone drives the knob relative
+ * to that one anchor point, so the controls can't wander across the screen.
+ * Release recenters smoothly (CSS transition).
  *
  * ── Output ─────────────────────────────────────────────────────────────────
  * Normalized -1..1 per axis with a 10% dead zone, pushed through
@@ -89,16 +89,18 @@ class VirtualStick {
     try { this.zone.setPointerCapture(e.pointerId); } catch (err) { /* idiom */ }
     this.pointerId = e.pointerId;
 
+    // FIXED base: the stick never re-centres under the thumb. The knob's
+    // origin is always the base's own centre (CSS pins the base at 50%/50%),
+    // so tapping anywhere in the zone starts steering from that one anchor.
     const rect = this.zone.getBoundingClientRect();
-    // Floating origin: knob centres on where the thumb actually landed.
-    const cx = clamp(e.clientX - rect.left, this.radius, rect.width - this.radius);
-    const cy = clamp(e.clientY - rect.top, this.radius, rect.height - this.radius);
-    this.originX = cx;
-    this.originY = cy;
-    this.base.style.left = `${cx}px`;
-    this.base.style.top = `${cy}px`;
+    this.originX = rect.width / 2;
+    this.originY = rect.height / 2;
     this.knob.style.transform = "translate(-50%, -50%)";
     this.base.classList.add("active");
+
+    // First contact can already be a displacement from the fixed centre -
+    // run one move pass so the knob jumps to the finger immediately.
+    this._move(e);
   }
 
   _move(e) {
