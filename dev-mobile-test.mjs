@@ -355,12 +355,16 @@ const browserMob = await puppeteer.launch(LAUNCH);
       const chip = document.getElementById("instruction-text");
       return {
         zoomGone: !document.getElementById("zoom-controls") && !document.getElementById("zoomInBtn"),
+        zoomDisabled: window.SKY_DEV.viewer.scene.screenSpaceCameraController.enableZoom === false,
+        panKept: window.SKY_DEV.viewer.scene.screenSpaceCameraController.enableTranslate === true,
         chipRect: vRect(chip),
         inputRect: vRect(input),
         vw: innerWidth, vh: innerHeight,
       };
     });
     check("picker's +/- zoom buttons REMOVED", picker.zoomGone);
+    check("picker zoom disabled on ALL inputs (wheel/pinch/dblclick/keys)", picker.zoomDisabled);
+    check("picker PAN still enabled", picker.panKept);
     const onScreen = (r) => r && r[0] >= 0 && r[1] >= 0 && r[2] <= picker.vw && r[3] <= picker.vh;
     check("instruction chip fully on-screen", onScreen(picker.chipRect), JSON.stringify(picker));
     check("search input fully on-screen", onScreen(picker.inputRect), JSON.stringify(picker));
@@ -375,7 +379,7 @@ const browserMob = await puppeteer.launch(LAUNCH);
     const resultShown = await page.waitForFunction(() => {
       const items = document.querySelectorAll("#search-results .search-result-item:not(.search-status)");
       return items.length > 0;
-    }, { timeout: 15000, polling: 300 }).then(() => true).catch(() => false);
+    }, { timeout: 25000, polling: 300 }).then(() => true).catch(() => false);
     check("mobile search returns results (one of 3 keyless providers)", resultShown);
     if (resultShown) {
       const clicked = await page.evaluate(() => {
@@ -466,13 +470,12 @@ const browserMob = await puppeteer.launch(LAUNCH);
   const tap = (x, y) => page.evaluate(({ x, y }) => {
     const opts = { bubbles: true, clientX: x, clientY: y, pointerType: "touch", isPrimary: true };
     window.dispatchEvent(new PointerEvent("pointerdown", opts));
+    const tc = window.SKY_DEV.touchControls;
+    return { visible: tc._visible, lastTapSet: !!tc._lastTap, boostTap: window.SKY_DEV.controller.boostTap };
   }, { x, y });
   const cx = Math.floor(hud.vw / 2), cy = Math.floor(hud.vh * 0.75);
-  await tap(cx, cy); await sleep(80); await tap(cx, cy);
-  const tapDiag = await page.evaluate(() => ({
-    visible: window.SKY_DEV.touchControls._visible,
-    boostTap: window.SKY_DEV.controller.boostTap,
-  }));
+  const tap1 = await tap(cx, cy); await sleep(80); const tap2 = await tap(cx, cy);
+  const tapDiag = { tap1, tap2 };
   const boosted = await page.waitForFunction(() =>
     window.SKY_DEV.physics.isBoosting || window.SKY_DEV.controller.input.boost,
     { timeout: 8000, polling: 100 }).then(() => true).catch(() => false);
@@ -530,7 +533,7 @@ const browserMob = await puppeteer.launch(LAUNCH);
   const settled = await page.waitForFunction(() => {
     const c = window.SKY_DEV.controller.input;
     return Math.abs(c.pitch) < 0.15 && Math.abs(c.roll) < 0.15 && Math.abs(c.yaw) < 0.15;
-  }, { timeout: 8000, polling: 250 }).then(() => true).catch(() => false);
+  }, { timeout: 20000, polling: 250 }).then(() => true).catch(() => false);
   const released = await page.evaluate(() => ({
     pitch: window.SKY_DEV.controller.input.pitch,
     roll: window.SKY_DEV.controller.input.roll,

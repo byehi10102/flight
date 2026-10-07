@@ -446,8 +446,8 @@ function enterSpawnPicking(useVignette = true) {
 
     const ctrl = viewer.scene.screenSpaceCameraController;
     ctrl.enableRotate = true;
-    ctrl.enableTranslate = true;
-    ctrl.enableZoom = true;
+    ctrl.enableTranslate = true;   // pan only
+    ctrl.enableZoom = false;       // no wheel / pinch / dbl-click zoom while picking
     ctrl.enableTilt = true;
     ctrl.enableLook = true;
 
@@ -598,7 +598,7 @@ async function performSearch(query) {
     if (!stillCurrent()) return;
     searchResults.innerHTML = "";
     if (!items.length) {
-      searchResults.innerHTML = '<div class="search-result-item">No results found — try a bigger nearby city</div>';
+      searchResults.innerHTML = '<div class="search-result-item search-status">No results found — try a bigger nearby city</div>';
       return;
     }
     items.forEach((item) => {
@@ -611,28 +611,17 @@ async function performSearch(query) {
     searchResults.style.display = "block";
   };
 
-  // Three keyless providers in order; ANY failure cascades to the next, so
-  // one throttled or blocked host can never take search down by itself.
-  // Nominatim answers rate limits with HTML (no JSON body), which is why
-  // the old code died with "unavailable" instead of falling through.
+  // Three keyless geocoders, tried in order of reliability for browser
+  // calls: Photon first (CORS-clean and fast), then Open-Meteo, Nominatim
+  // last - it rate-limits browsers hardest, so it must not be on the happy
+  // path. ANY failure cascades to the next, so one throttled or blocked
+  // host can never take search down by itself.
   try {
     showStatus("Searching…");
     const q = encodeURIComponent(query);
     let anySuccess = false;
     try {
-      const data = await fetchJsonOk(
-        `https://nominatim.openstreetmap.org/search?format=json&q=${q}&limit=5`, 7000
-      );
-      anySuccess = true;
-      if (Array.isArray(data) && data.length) {
-        renderItems(data);
-        return;
-      }
-    } catch (err) { console.warn("Search: nominatim failed, trying backup:", err?.status || err); }
-    if (!stillCurrent()) return;
-    showStatus("Trying backup map server…");
-    try {
-      const photon = await fetchJsonOk(`https://photon.komoot.io/api/?q=${q}&limit=5`, 7000);
+      const photon = await fetchJsonOk(`https://photon.komoot.io/api/?q=${q}&limit=5`, 5000);
       anySuccess = true;
       const items = photonToItems(photon);
       if (items.length) {
@@ -641,9 +630,10 @@ async function performSearch(query) {
       }
     } catch (err) { console.warn("Search: photon failed, trying backup:", err?.status || err); }
     if (!stillCurrent()) return;
+    showStatus("Trying backup map server…");
     try {
       const geo = await fetchJsonOk(
-        `https://geocoding-api.open-meteo.com/v1/search?name=${q}&count=5&language=en&format=json`, 7000
+        `https://geocoding-api.open-meteo.com/v1/search?name=${q}&count=5&language=en&format=json`, 5000
       );
       anySuccess = true;
       const items = openMeteoToItems(geo);
@@ -651,7 +641,18 @@ async function performSearch(query) {
         renderItems(items);
         return;
       }
-    } catch (err) { console.warn("Search: open-meteo failed:", err?.status || err); }
+    } catch (err) { console.warn("Search: open-meteo failed, trying backup:", err?.status || err); }
+    if (!stillCurrent()) return;
+    try {
+      const data = await fetchJsonOk(
+        `https://nominatim.openstreetmap.org/search?format=json&q=${q}&limit=5`, 5000
+      );
+      anySuccess = true;
+      if (Array.isArray(data) && data.length) {
+        renderItems(data);
+        return;
+      }
+    } catch (err) { console.warn("Search: nominatim failed:", err?.status || err); }
     if (!stillCurrent()) return;
     if (!anySuccess) {
       // All three hosts unreachable from this network — keep any good
@@ -659,7 +660,7 @@ async function performSearch(query) {
       const hasPlaces = searchResults.querySelector(".search-result-item:not(.search-status)");
       if (!hasPlaces) {
         searchResults.style.display = "block";
-        searchResults.innerHTML = '<div class="search-result-item">Search is offline right now — check connection and retry</div>';
+        searchResults.innerHTML = '<div class="search-result-item search-status">Search is offline right now — check connection and retry</div>';
       }
     } else {
       renderItems([]);
@@ -670,7 +671,7 @@ async function performSearch(query) {
     const hasPlaces = searchResults.querySelector(".search-result-item:not(.search-status)");
     if (!hasPlaces) {
       searchResults.style.display = "block";
-      searchResults.innerHTML = '<div class="search-result-item">Search is offline right now — check connection and retry</div>';
+      searchResults.innerHTML = '<div class="search-result-item search-status">Search is offline right now — check connection and retry</div>';
     }
   }
 }
@@ -758,25 +759,7 @@ function setupSpawnPicker() {
     }
   }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
 
-  // Double-click dives toward the clicked point (desktop zoom path; phones
-  // pinch with Cesium's native touch zoom).
-  handler.setInputAction((click) => {
-    if (currentState !== States.PICK_SPAWN) return;
-    pickerZoom(-1);
-  }, Cesium.ScreenSpaceEventType.LEFT_DOUBLE_CLICK);
-}
-
-// Module-level picker zoom shared by double-click and keyboard (the picker
-// on-screen +/- buttons were removed; phones pinch, desktops can also use
-// +/- keys or the mouse wheel).
-function pickerZoom(dir) {
-  try {
-    if (currentState !== States.PICK_SPAWN) return;
-    const h = viewer.camera.positionCartographic?.height || 10000;
-    const amt = Math.max(100, h * 0.35);
-    if (dir > 0) viewer.camera.zoomOut(amt);
-    else viewer.camera.zoomIn(amt);
-  } catch (e) { /* cosmetic */ }
+  // No double-click zoom: the picker is pan-only by design.
 }
 
 // ── Spawn selection shared by map clicks, landmark pins and search ──────────
@@ -1814,9 +1797,7 @@ window.addEventListener("keydown", (e) => {
       soundManager.listener.setMasterVolume(soundMuted ? 0.0 : 1.0);
     } catch (e) { /* audio not ready */ }
   }
-  // Picker zoom keys (+/-/=: location search input stops propagation).
-  if (currentState === States.PICK_SPAWN && (key === "+" || key === "=")) pickerZoom(-1);
-  if (currentState === States.PICK_SPAWN && (key === "-" || key === "_")) pickerZoom(1);
+  // Picker is pan-only: no zoom shortcuts either.
 });
 
 window.addEventListener("resize", () => {
