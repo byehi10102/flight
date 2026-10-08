@@ -10,9 +10,10 @@ import { PlaneModel } from "./plane/planeModel.js";
 import { Hud } from "./ui/hud.js";
 import { MobileMode } from "./ui/mobileMode.js";
 import { TouchControls } from "./ui/touchControls.js";
+import { Bullets } from "./weapon/bullet.js";
 import { particles } from "./utils/particles.js";
 import { soundManager } from "./utils/soundManager.js";
-import { reverseGeocode, reverseGeocodeDetailed, calculateDistance } from "./utils/geo.js";
+import { reverseGeocode, reverseGeocodeDetailed, calculateDistance, movePosition } from "./utils/geo.js";
 
 const States = {
   MENU: "MENU",
@@ -65,6 +66,7 @@ let mp = null;
 let physics = new PlanePhysics();
 let controller = new PlaneController();
 let hud = new Hud();
+const bullets = new Bullets();
 
 // Mobile front-end: on a phone/tablet this adds the rotate overlay and the
 // two virtual joysticks; on a desktop the MobileMode constructor returns
@@ -74,6 +76,7 @@ const touchControls = mobileMode.enabled
   ? new TouchControls({
       onAxis: (side, x, y) => controller.setStickInput(side, x, y),
       onBoost: () => controller.requestBoost(),
+      onFire: (x, y) => fireBulletAtScreen(x, y),
     })
   : null;
 if (mobileMode.enabled) {
@@ -261,6 +264,7 @@ function initThree() {
 
   planeModel = new PlaneModel(scene);
   particles.init(scene);
+  bullets.attach(scene, viewer);
 
   // ── MULTIPLAYER WIRING ──────────────────────────────────────────────────
   // The whole feature lives in multiplayer/ (project root) and loads
@@ -324,6 +328,7 @@ async function initSounds() {
     soundManager.loadSound("explosion-1", "/sounds/explosion-1.mp3", false, 0.8),
     soundManager.loadSound("explosion-2", "/sounds/explosion-2.mp3", false, 0.8),
     soundManager.loadSound("explosion-3", "/sounds/explosion-3.mp3", false, 0.8),
+    soundManager.loadSound("gunshot", "/sounds/m61-firing.mp3", false, 0.5),
     soundManager.loadSound("ambient-crash", "/sounds/ambient.mp3", true, 0.5),
     soundManager.loadSound("jet-engine", "/sounds/jet-engine.mp3", true, 0.5),
     soundManager.loadSound("spawn", "/sounds/spawn.mp3", false, 0.5),
@@ -416,6 +421,7 @@ function enterSpawnPicking(useVignette = true) {
   // where the rotate overlay takes over instead.
   mobileMode.lockLandscape();
   stopAllFlyingSounds(0.3);
+  bullets.clear();
   soundManager.play("zoom-in");
   soundManager.play("wind", 1.0);
   try {
@@ -1117,6 +1123,7 @@ function confirmSpawn() {
     physics = new PlanePhysics();
     physics.reset(state.lon, state.lat, state.alt, state.heading, state.pitch, state.roll);
     particles.clear();
+    bullets.clear();
     planeModel.reset();
 
     if (spawnInstruction) spawnInstruction.classList.add("hidden");
@@ -1452,6 +1459,9 @@ function update(dt) {
     physicsResult.isBoosting
   );
 
+  // Live rounds keep flying their frozen paths.
+  bullets.update(dt);
+
   const now = Date.now();
   const distFromLast = calculateDistance(state.lon, state.lat, lastGeocodePos.lon, lastGeocodePos.lat);
   if (now - geocodeTimer > 10000 || distFromLast > 1000) {
@@ -1466,18 +1476,56 @@ function update(dt) {
   }
 }
 
-function movePosition(lon, lat, alt, heading, pitch, distance) {
-  const headingRad = Cesium.Math.toRadians(heading);
-  const pitchRad = Cesium.Math.toRadians(pitch);
-  const R = 6371000;
-  const dLat = (distance * Math.cos(headingRad) * Math.cos(pitchRad)) / R;
-  const dLon = (distance * Math.sin(headingRad) * Math.cos(pitchRad)) / (R * Math.cos(Cesium.Math.toRadians(lat)));
-  const dAlt = distance * Math.sin(pitchRad);
-  return {
-    lon: lon + Cesium.Math.toDegrees(dLon),
-    lat: lat + Cesium.Math.toDegrees(dLat),
-    alt: alt + dAlt,
-  };
+// ── Wing-gun fire (click / tap) ─────────────────────────────────────────────
+// A click fires a laser bullet on a FIXED path: the aim heading/pitch come
+// from the camera pick ray through the click point, sampled once. The bullet
+// never reads the plane again - turning after the shot does not bend it.
+const FIRE_MIN_INTERVAL_MS = 120;
+let lastBulletFireAt = 0;
+
+function fireBulletAtScreen(x, y) {
+  if (currentState !== States.FLYING) return;
+  const now = performance.now();
+  if (now - lastBulletFireAt < FIRE_MIN_INTERVAL_MS) return;
+  try {
+    const ray = viewer.camera.getPickRay(new Cesium.Cartesian2(x, y));
+    if (!ray || !ray.direction) return;
+
+    // Click ray direction (ECEF) into ENU at the plane, then to heading/pitch.
+    const planePos = Cesium.Cartesian3.fromDegrees(state.lon, state.lat, state.alt);
+    const enu = Cesium.Transforms.eastNorthUpToFixedFrame(planePos);
+    const d = ray.direction;
+    const dE = d.x * enu[0] + d.y * enu[1] + d.z * enu[2];        // east column
+    const dN = d.x * enu[4] + d.y * enu[5] + d.z * enu[6];        // north column
+    const dU = d.x * enu[8] + d.y * enu[9] + d.z * enu[10];       // up column
+    const aimHeading = Cesium.Math.toDegrees(Math.atan2(dE, dN));
+    const aimPitch = Cesium.Math.toDegrees(Math.asin(Math.max(-1, Math.min(1, dU))));
+
+    lastBulletFireAt = now;
+    bullets.fire(state, aimHeading, aimPitch, MPH_TO_MPS * WORLD_SPEED_SCALE);
+  } catch (e) { /* gunfire must never break the frame */ }
+}
+
+// Desktop: quick click fires; dragging (camera look) does not. Mobile taps go
+// through TouchControls instead, so this path is desktop-only.
+if (!mobileMode.enabled) {
+  let pendingShot = null;
+  window.addEventListener("pointerdown", (e) => {
+    if (e.pointerType !== "mouse" || currentState !== States.FLYING) return;
+    if (e.target && e.target.closest && e.target.closest("button, input, .overlay, a")) return;
+    pendingShot = { x: e.clientX, y: e.clientY, t: performance.now(), moved: 0 };
+  });
+  window.addEventListener("pointermove", (e) => {
+    if (pendingShot) pendingShot.moved = Math.max(pendingShot.moved, Math.hypot(e.clientX - pendingShot.x, e.clientY - pendingShot.y));
+  });
+  window.addEventListener("pointerup", (e) => {
+    if (!pendingShot) return;
+    const shot = pendingShot;
+    pendingShot = null;
+    if (performance.now() - shot.t < 350 && shot.moved < 6) {
+      fireBulletAtScreen(shot.x, shot.y);
+    }
+  });
 }
 
 function checkGPWS() {
@@ -1845,7 +1893,10 @@ if (new URLSearchParams(location.search).has("devtest")) {
     get currentState() { return currentState; },
     mobileMode,
     touchControls,
+    bullets,
     viewer,
+    // Fire + aim exactly like a real click at the given screen point.
+    fireBulletAtScreen,
     // Deterministic spawn placement for integration tests — the game's own
     // placement path, skipping the raster-tap that headless WebGL can't hit.
     placeSpawn: (lon, lat, name) => selectSpawnPoint(lon, lat, 0, name, name, null),

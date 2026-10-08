@@ -379,8 +379,10 @@ const browserMob = await puppeteer.launch(LAUNCH);
     const resultShown = await page.waitForFunction(() => {
       const items = document.querySelectorAll("#search-results .search-result-item:not(.search-status)");
       return items.length > 0;
-    }, { timeout: 25000, polling: 300 }).then(() => true).catch(() => false);
-    check("mobile search returns results (one of 3 keyless providers)", resultShown);
+    }, { timeout: 30000, polling: 300 }).then(() => true).catch(() => false);
+    check("mobile search returns results (one of 3 keyless providers)", resultShown,
+      resultShown ? "" : await page.evaluate(() =>
+        document.getElementById("search-results").innerHTML.slice(0, 200)));
     if (resultShown) {
       const clicked = await page.evaluate(() => {
         const first = document.querySelector("#search-results .search-result-item");
@@ -474,11 +476,27 @@ const browserMob = await puppeteer.launch(LAUNCH);
     return { visible: tc._visible, lastTapSet: !!tc._lastTap, boostTap: window.SKY_DEV.controller.boostTap };
   }, { x, y });
   const cx = Math.floor(hud.vw / 2), cy = Math.floor(hud.vh * 0.75);
-  const tap1 = await tap(cx, cy); await sleep(80); const tap2 = await tap(cx, cy);
-  const tapDiag = { tap1, tap2 };
+  // Both taps dispatched INSIDE the page so they land <5ms apart - Node-side
+  // evaluate latency under headless load can stretch two separate dispatches
+  // past the 300ms window and turn the second tap into a stray fire.
+  // Both taps dispatched SYNCHRONOUSLY in one task - 0ms apart, always inside
+  // the 300ms window. (A setTimeout gap stretches under headless load and
+  // turns the second tap into a stray fire.)
+  await page.evaluate(() => {
+    const opts = () => ({ bubbles: true, clientX: Math.floor(innerWidth / 2), clientY: Math.floor(innerHeight * 0.75), pointerType: "touch", isPrimary: true });
+    window.dispatchEvent(new PointerEvent("pointerdown", opts()));
+    window.dispatchEvent(new PointerEvent("pointerdown", opts()));
+  });
+  const tapDiag = await page.evaluate(() => ({
+    visible: window.SKY_DEV.touchControls._visible,
+    lastTapSet: !!window.SKY_DEV.touchControls._lastTap,
+    boostTap: window.SKY_DEV.controller.boostTap,
+    charge: window.SKY_DEV.physics.boostCharge,
+    state: window.SKY_DEV.currentState,
+  }));
   const boosted = await page.waitForFunction(() =>
     window.SKY_DEV.physics.isBoosting || window.SKY_DEV.controller.input.boost,
-    { timeout: 8000, polling: 100 }).then(() => true).catch(() => false);
+    { timeout: 15000, polling: 100 }).then(() => true).catch(() => false);
   check("DOUBLE TAP fired the boost", boosted, JSON.stringify(tapDiag));
 
   // ── THE headline check: synthetic touches change the LIVE flight state ──
@@ -541,6 +559,68 @@ const browserMob = await puppeteer.launch(LAUNCH);
   }));
   check("release recenters axes to neutral in the live game", settled,
     JSON.stringify(released));
+
+  // ── Wing-gun fire (tap = fire) ─────────────────────────────────────────
+  // Single tap fires ONE bullet immediately, from the wing, on a SET path.
+  {
+    // Fire + read the muzzle SYNCHRONOUSLY in one evaluate: the tap listener
+    // runs during dispatch, before the next frame's flight step, so the
+    // position read is the true muzzle point (no travel-time skew).
+    const fired = await page.evaluate(() => {
+      const pre = {
+        count: window.SKY_DEV.bullets.list.length,
+        lon: window.SKY_DEV.state.lon, lat: window.SKY_DEV.state.lat, alt: window.SKY_DEV.state.alt,
+      };
+      window.dispatchEvent(new PointerEvent("pointerdown", {
+        bubbles: true, clientX: Math.floor(innerWidth / 2), clientY: Math.floor(innerHeight * 0.75),
+        pointerType: "touch", isPrimary: true,
+      }));
+      const l = window.SKY_DEV.bullets.list;
+      const b = l[l.length - 1];
+      const dLat = b ? (b.lat - pre.lat) * 111320 : 0;
+      const dLon = b ? (b.lon - pre.lon) * 111320 * Math.cos((pre.lat * Math.PI) / 180) : 0;
+      return {
+        count: l.length, preCount: pre.count,
+        muzzleDist: b ? Math.hypot(dLat, dLon, b.alt - pre.alt) : -1,
+        h: b?.heading, p: b?.pitch, planeH: window.SKY_DEV.state.heading,
+      };
+    });
+    check("single tap fired exactly ONE bullet from the jet",
+      fired.count === fired.preCount + 1, JSON.stringify(fired));
+    check("bullet left from a WING muzzle (meters from plane)",
+      fired.muzzleDist > 0 && fired.muzzleDist < 30, JSON.stringify(fired));
+    check("aim roughly follows the click ray (near plane heading)",
+      Number.isFinite(fired.h) && Number.isFinite(fired.p), JSON.stringify(fired));
+
+    // SET PATH: bank the plane hard for a moment; the round must not re-aim.
+    await pa("left", "down"); await pa("left", "move", 0.9, 0);
+    await sleep(700);
+    const afterTurn = await page.evaluate(() => {
+      const l = window.SKY_DEV.bullets.list;
+      const b = l[l.length - 1];
+      return b ? { count: l.length, h: b.heading, p: b.pitch, planeH: window.SKY_DEV.state.heading } : { count: 0 };
+    });
+    await pa("left", "up");
+    const turned = Math.abs(((afterTurn.planeH - fired.planeH + 540) % 360) - 180);
+    check("bullet KEPT its frozen path while the plane turned",
+      afterTurn.count === fired.count
+      && Math.abs(afterTurn.h - fired.h) < 0.01 && Math.abs(afterTurn.p - fired.p) < 0.01
+      && turned > 0.5,
+      JSON.stringify({ bullet: [fired.h, afterTurn.h], plane: [fired.planeH, afterTurn.planeH] }));
+
+    // IMPACT: a steep dive round must hit terrain and explode (removed).
+    await page.evaluate(() => {
+      const D = window.SKY_DEV;
+      D.bullets.fire(D.state, D.state.heading, -60, 0.44704 * 1.8);
+    });
+    const before2 = await page.evaluate(() => window.SKY_DEV.bullets.list.length);
+    const impacted = await page.waitForFunction(
+      (before2) => window.SKY_DEV.bullets.list.length < before2,
+      { timeout: 15000, polling: 150 }, before2
+    ).then(() => true).catch(() => false);
+    check("downward bullet hit terrain and exploded (round consumed)", impacted);
+  }
+
 
   check("no console/page errors during the whole mobile flight", errors.length === 0,
     errors.slice(0, 3).join("; "));

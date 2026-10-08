@@ -177,13 +177,15 @@ export class TouchControls {
   constructor(opts = {}) {
     this.onAxis = opts.onAxis || null;
     this.onBoost = opts.onBoost || null;
+    this.onFire = opts.onFire || null;
     this._visible = false;
-    this._lastTap = null; // { t, x, y, id }
+    this._lastTap = null; // { t, x, y }
 
-    // Double-tap = boost (the mobile replacement for the spacebar). Any two
-    // quick taps outside the stick zones count; taps on a zone stay stick
-    // gestures. Only while the sticks are shown (i.e. actually flying), so
-    // menu buttons and the pause screen can't fire a stray boost.
+    // Tap = fire, double-tap = boost (the mobile replacement for the
+    // spacebar). A tap fires IMMEDIATELY so shots feel instant; if the second
+    // tap lands inside the window it is claimed by boost and never fires a
+    // second round. Taps on a stick zone stay stick gestures. Only while the
+    // sticks are shown (i.e. actually flying), so menu taps are inert.
     const TAP_WINDOW_MS = 300;
     const TAP_TRAVEL = 30; // px between the two taps before it stops being a double-tap
     window.addEventListener("pointerdown", (e) => {
@@ -199,7 +201,8 @@ export class TouchControls {
           try { if (navigator.vibrate) navigator.vibrate(25); } catch (err) { /* unsupported */ }
         }
       } else {
-        this._lastTap = { t: now, x: e.clientX, y: e.clientY, id: e.pointerId };
+        this._lastTap = { t: now, x: e.clientX, y: e.clientY };
+        if (this.onFire) this.onFire(e.clientX, e.clientY);
       }
     }, { passive: true });
     this.radius = opts.radius ?? 56;

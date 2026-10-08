@@ -120,3 +120,20 @@ export function calculateDistance(lon1, lat1, lon2, lat2) {
 
   return R * c;
 }
+
+/** Move along a straight great-circle path by `distance` meters. Frozen-path
+ *  motion: callers pass heading/pitch captured once; nothing steers mid-path.
+ *  (Shared by the sim's own world motion and by projectiles.) */
+export function movePosition(lon, lat, alt, heading, pitch, distance) {
+  const headingRad = (heading * Math.PI) / 180;
+  const pitchRad = (pitch * Math.PI) / 180;
+  const R = 6371000;
+  const dLat = (distance * Math.cos(headingRad) * Math.cos(pitchRad)) / R;
+  const dLon = (distance * Math.sin(headingRad) * Math.cos(pitchRad)) / (R * Math.cos((lat * Math.PI) / 180));
+  const dAlt = distance * Math.sin(pitchRad);
+  return {
+    lon: lon + (dLon * 180) / Math.PI,
+    lat: lat + (dLat * 180) / Math.PI,
+    alt: alt + dAlt,
+  };
+}
