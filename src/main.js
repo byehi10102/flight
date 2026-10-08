@@ -264,7 +264,7 @@ function initThree() {
 
   planeModel = new PlaneModel(scene);
   particles.init(scene);
-  bullets.attach(scene, viewer);
+  bullets.attach(viewer);
 
   // ── MULTIPLAYER WIRING ──────────────────────────────────────────────────
   // The whole feature lives in multiplayer/ (project root) and loads
@@ -1895,6 +1895,9 @@ if (new URLSearchParams(location.search).has("devtest")) {
     touchControls,
     bullets,
     viewer,
+    renderer,
+    get threeCamera() { return camera; },
+    get threeScene() { return scene; },
     // Fire + aim exactly like a real click at the given screen point.
     fireBulletAtScreen,
     // Deterministic spawn placement for integration tests — the game's own
