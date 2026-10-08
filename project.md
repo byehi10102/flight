@@ -1059,3 +1059,58 @@ for the probe.
 ### Known limits
 
 - Zoom/pinch on the map picker is unchanged - sticks only exist while flying.
+
+## 18. Wing-gun tracers (ref-flight gun mechanics)
+
+Adapted from ref-flight's `src/weapon/bullet.js` + `src/systems/weaponSystem.js`,
+trimmed to this game's needs (no NPCs, missile lock or flares). Tap/click
+anywhere for an aimed round; hold the trigger for the reference cannon stream.
+
+- **Set path.** The round captures lon/lat/alt + heading/pitch at fire time
+  and steps a straight great-circle via `utils/geo.js#movePosition` (shared
+  with the sim's own world motion) every frame. It never reads the plane
+  again; turning after the shot does not bend the bullet.
+- **Gun mechanics (ref-flight weaponSystem).** Hold F/Enter (desktop) or
+  hold a finger on the screen (mobile, 250 ms) for a 20 Hz stream straight
+  off the nose; a quick click/tap still fires one AIMED round at the clicked
+  point (pick-ray aim). Heat +2%/round; at 100% the gun jams (warning sound)
+  until it cools below 30% (cooling 20%/s). No ammo limit. The m61 sample
+  loops while the trigger is held, like ref-flight. Round speed keeps the
+  reference's constant over-the-jet ratio: (speed mph + 1500) with the
+  game's own m/s conversion.
+- **Aim from the click.** `camera.getPickRay(x, y)` -> ENU at the plane ->
+  heading/pitch, computed once per shot. Origin alternates between the two
+  wing-root muzzles (F-15 gun position), offset in the plane's live attitude
+  (heading/pitch/roll) so the muzzle follows the wings when you bank.
+- **HUD.** A thin GUN heat bar sits above the boost meter (bottom-centre,
+  72px on mobile landscape); it turns red and reads GUN OVERHEAT when jammed.
+- **Visuals.** In-world Cesium tracers: PolylineCollection PolylineGlow tube
+  (direct per-frame position updates) + PointPrimitiveCollection hot tip and
+  impact flash. Correct perspective at any range; entity polylines were
+  rejected because generateArc throws on fast tracer updates, and the Three
+  overlay's fixed 75 deg FOV does not line up with the ~30 deg Cesium frustum.
+- **Impact.** Per-frame `globe.getHeight` check; on contact a cesium flash
+  point (any range) + camera-local `particles.spawnExplosion` when the hit is
+  within 400 m + a random explosion-1/2/3 sound. Max life 3 s covers misses.
+- **Input split.** Desktop: quick click (<350 ms, <6 px) fires an aimed
+  round; camera-drag never does; hold F/Enter for the stream. Mobile: tap
+  fires instantly (aimed), a second tap inside the 300 ms window is claimed
+  by boost (no second bullet), holding past 250 ms arms the stream. Sticks
+  own their zones; menu/picker taps are inert.
+- Cleared on respawn / return to menu. Single-player only (no multiplayer
+  sync).
+
+### Verification
+
+`dev-mobile-test.mjs` phase C: single tap fires exactly one round from a
+wing muzzle, aim follows the click ray, the round keeps its frozen
+heading/pitch while the plane yaws, a steep shot is consumed by a terrain
+hit, hold streams rounds at the reference rate, the stream heats the gun,
+and the jam-at-100%/recover-below-30% thresholds hold.
+
+### Geocoding providers
+
+Search runs Photon -> Open-Meteo -> Nominatim; reverse geocoding (region
+names) runs BigDataCloud -> Nominatim. Nominatim hard-denies many browser
+origins (HTML "Access denied" that surfaces as a CORS console error even
+when a fallback succeeds), so it is last everywhere.

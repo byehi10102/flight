@@ -67,6 +67,7 @@ let physics = new PlanePhysics();
 let controller = new PlaneController();
 let hud = new Hud();
 const bullets = new Bullets();
+let gunOverheatWarned = false;
 
 // Mobile front-end: on a phone/tablet this adds the rotate overlay and the
 // two virtual joysticks; on a desktop the MobileMode constructor returns
@@ -328,7 +329,7 @@ async function initSounds() {
     soundManager.loadSound("explosion-1", "/sounds/explosion-1.mp3", false, 0.8),
     soundManager.loadSound("explosion-2", "/sounds/explosion-2.mp3", false, 0.8),
     soundManager.loadSound("explosion-3", "/sounds/explosion-3.mp3", false, 0.8),
-    soundManager.loadSound("gunshot", "/sounds/m61-firing.mp3", false, 0.5),
+    soundManager.loadSound("gunshot", "/sounds/m61-firing.mp3", true, 0.5),
     soundManager.loadSound("ambient-crash", "/sounds/ambient.mp3", true, 0.5),
     soundManager.loadSound("jet-engine", "/sounds/jet-engine.mp3", true, 0.5),
     soundManager.loadSound("spawn", "/sounds/spawn.mp3", false, 0.5),
@@ -1462,6 +1463,33 @@ function update(dt) {
   // Live rounds keep flying their frozen paths.
   bullets.update(dt);
 
+  // ── Gun trigger, ref-flight style ────────────────────────────────────────
+  // Hold F/Enter (desktop) or hold a finger on the screen (mobile) for a
+  // 20 Hz stream straight off the nose; the gun heats and jams as in the
+  // reference. Aimed shots still come from clicks/taps via fireBulletAtScreen.
+  const triggerHeld = currentState === States.FLYING && (
+    !!controller.keys["f"] || !!controller.keys["enter"] || !!(touchControls && touchControls.isHoldingFire && touchControls.isHoldingFire())
+  );
+  if (triggerHeld) {
+    bullets.fire(state, state.heading, state.pitch, MPH_TO_MPS * WORLD_SPEED_SCALE);
+  }
+  // M61 loop while the trigger is down (stopped by overheat), like ref-flight.
+  try {
+    if (triggerHeld && !bullets.isGunOverheated) {
+      if (!soundManager.isPlaying("gunshot")) soundManager.play("gunshot", 0.05);
+    } else if (soundManager.isPlaying("gunshot")) {
+      soundManager.stop("gunshot", 0.05);
+    }
+    if (bullets.isGunOverheated && !gunOverheatWarned) {
+      soundManager.play("warning");
+      gunOverheatWarned = true;
+    } else if (!bullets.isGunOverheated) {
+      gunOverheatWarned = false;
+    }
+  } catch (e) { /* audio not ready */ }
+  state.gunHeat = bullets.heat;
+  state.gunOverheated = bullets.isGunOverheated;
+
   const now = Date.now();
   const distFromLast = calculateDistance(state.lon, state.lat, lastGeocodePos.lon, lastGeocodePos.lat);
   if (now - geocodeTimer > 10000 || distFromLast > 1000) {
@@ -1476,17 +1504,12 @@ function update(dt) {
   }
 }
 
-// ── Wing-gun fire (click / tap) ─────────────────────────────────────────────
+// ── Wing-gun fire (click / tap / held trigger) ──────────────────────────────
 // A click fires a laser bullet on a FIXED path: the aim heading/pitch come
 // from the camera pick ray through the click point, sampled once. The bullet
 // never reads the plane again - turning after the shot does not bend it.
-const FIRE_MIN_INTERVAL_MS = 120;
-let lastBulletFireAt = 0;
-
 function fireBulletAtScreen(x, y) {
   if (currentState !== States.FLYING) return;
-  const now = performance.now();
-  if (now - lastBulletFireAt < FIRE_MIN_INTERVAL_MS) return;
   try {
     const ray = viewer.camera.getPickRay(new Cesium.Cartesian2(x, y));
     if (!ray || !ray.direction) return;
@@ -1501,7 +1524,6 @@ function fireBulletAtScreen(x, y) {
     const aimHeading = Cesium.Math.toDegrees(Math.atan2(dE, dN));
     const aimPitch = Cesium.Math.toDegrees(Math.asin(Math.max(-1, Math.min(1, dU))));
 
-    lastBulletFireAt = now;
     bullets.fire(state, aimHeading, aimPitch, MPH_TO_MPS * WORLD_SPEED_SCALE);
   } catch (e) { /* gunfire must never break the frame */ }
 }

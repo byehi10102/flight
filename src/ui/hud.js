@@ -28,6 +28,8 @@ export class Hud {
     this.statusEl = document.getElementById("hud-status");
     this.boostFill = document.getElementById("boost-fill");
     this.boostLabel = document.getElementById("boost-label");
+    this.gunHeatFill = document.getElementById("gun-heat-fill");
+    this.gunHeatLabel = document.getElementById("gun-heat-label");
     this.uiContainer = document.getElementById("uiContainer");
     this.vignette = document.getElementById("transition-vignette");
 
@@ -330,6 +332,17 @@ export class Hud {
       this.boostLabel.innerText = state.isBoosting
         ? "BOOST"
         : charge >= 0.999 ? "BOOST READY" : `CHARGING ${Math.round(charge * 100)}%`;
+    }
+
+    // Gun heat (ref-flight M61): fills while the cannon streams, jams at 100%
+    // until it cools below 30%.
+    const gunHeat = Math.max(0, Math.min(1, state.gunHeat ?? 0));
+    if (this.gunHeatFill) {
+      this.gunHeatFill.style.width = `${Math.round(gunHeat * 100)}%`;
+      this.gunHeatFill.classList.toggle("hot", !!state.gunOverheated || gunHeat > 0.7);
+    }
+    if (this.gunHeatLabel) {
+      this.gunHeatLabel.innerText = state.gunOverheated ? "GUN OVERHEAT" : "GUN";
     }
 
     // â”€â”€ Horizon follows smoothed attitude â”€â”€

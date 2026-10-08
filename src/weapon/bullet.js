@@ -35,6 +35,14 @@ const IMPACT_PAD_M = 2;           // meters above terrain that count as a hit
 const TRAIL_LEN = 70;             // meters of glowing tracer behind the round
 const FLASH_LIFE = 0.5;           // s the impact flash burns
 
+// Gun mechanics, ref-flight weaponSystem: a 20 Hz stream while the trigger is
+// held, heating 2% per round. At 100% the gun jams until it cools below 30%
+// (cooling 20%/s). No ammo limit.
+const GUN_FIRE_RATE = 0.05;       // s between rounds (ref-flight M61 cadence)
+const GUN_HEAT_PER_SHOT = 0.02;
+const GUN_COOL_RATE = 0.2;        // heat units per second
+const GUN_RECOVER_HEAT = 0.3;     // overheat clears below this
+
 // Wing muzzle offsets in the plane's local frame (meters). The F-15 carries
 // the M61 in the right wing root; shots alternate L/R muzzles so stream fire
 // looks like both wing stations trading shots.
@@ -170,6 +178,9 @@ export class Bullets {
   constructor() {
     this.list = [];
     this._side = 1; // alternating wing muzzle: 1 = right, -1 = left
+    this.heat = 0;               // 0..1, ref-flight gun heat
+    this.isGunOverheated = false;
+    this.lastGunFire = 0;        // s, performance.now()*0.001 like ref-flight
   }
 
   attach(viewer) {
@@ -192,12 +203,22 @@ export class Bullets {
    */
   fire(player, aimHeading, aimPitch, mphToMps) {
     if (!this.viewer || !this.tracers) return null;
+    // Ref-flight gun gate: fire rate + heat. (Overheat warning sound is the
+    // caller's job - the loop knows whether this was a held trigger.)
+    const now = performance.now() * 0.001;
+    if (this.isGunOverheated) return null;
+    if (now - this.lastGunFire < GUN_FIRE_RATE) return null;
+    this.lastGunFire = now;
+    this.heat += GUN_HEAT_PER_SHOT;
+    if (this.heat >= 1.0) {
+      this.heat = 1.0;
+      this.isGunOverheated = true;
+    }
     this._side *= -1;
     const muzzle = this._wingMuzzle(player, this._side);
     const speedMps = (player.speed + SPEED_BONUS_MPH) * mphToMps;
     const bullet = new Bullet(this.tracers, this.sparks, this.viewer, muzzle, aimHeading, aimPitch, speedMps);
     this.list.push(bullet);
-    try { soundManager.play("gunshot"); } catch (e) { /* audio not ready */ }
     return bullet;
   }
 
@@ -249,6 +270,11 @@ export class Bullets {
   }
 
   update(dt) {
+    // Ref-flight gun cooling: 20%/s, overheat clears below 30%.
+    if (this.heat > 0) {
+      this.heat = Math.max(0, this.heat - dt * GUN_COOL_RATE);
+      if (this.isGunOverheated && this.heat < GUN_RECOVER_HEAT) this.isGunOverheated = false;
+    }
     for (let i = this.list.length - 1; i >= 0; i--) {
       const b = this.list[i];
       b.update(dt);

@@ -535,6 +535,46 @@ html, body {
   box-shadow: 0 0 12px rgba(255, 255, 0, 0.9);
 }
 
+/* Gun heat (ref-flight M61): thin bar above the boost meter */
+#gun-heat-container {
+  position: absolute;
+  bottom: 86px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 140px;
+  text-align: center;
+}
+
+#gun-heat-label {
+  font-size: 9px;
+  font-family: "Consolas", monospace;
+  letter-spacing: 2px;
+  color: #6cf;
+  text-shadow: 0 0 4px rgba(100, 200, 255, 0.5);
+  margin-bottom: 3px;
+}
+
+.gun-heat-track {
+  height: 4px;
+  background: rgba(0, 0, 0, 0.6);
+  border: 1px solid rgba(100, 200, 255, 0.4);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+#gun-heat-fill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, #06a, #6cf);
+  box-shadow: 0 0 6px rgba(100, 200, 255, 0.7);
+  transition: width 0.1s linear;
+}
+
+#gun-heat-fill.hot {
+  background: linear-gradient(90deg, #a00, #f33);
+  box-shadow: 0 0 10px rgba(255, 60, 60, 0.9);
+}
+
 /* Minimap (above the corner attitude panel) */
 #minimap-container {
   position: absolute;
@@ -927,6 +967,12 @@ body.mobile-landscape #boost-label { font-size: 8px; margin-bottom: 2px; }
 body.mobile-landscape #coords {
   left: 12px; bottom: auto; top: 52px; font-size: 10px;
 }
+
+body.mobile-landscape #gun-heat-container {
+  left: 50%; right: auto; bottom: 58px; top: auto;
+  transform: translateX(-50%); width: 72px;
+}
+body.mobile-landscape #gun-heat-label { font-size: 7px; }
 
 body.mobile-landscape #hud-status { bottom: 8px; font-size: 10px; }
 

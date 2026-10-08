@@ -36,6 +36,7 @@
             <b>Controls:</b><br/>
             W/S — Throttle · Arrows — Pitch/Roll<br/>
             A/D — Yaw · Space — Boost<br/>
+            <b>F</b> — Cannon (hold) · Click — Aimed Shot<br/>
             Mouse Drag — Look Around<br/>
             <b>/</b> — Search · <b>M</b> — Sound · <b>H</b> — Hide UI<br/>
             <b>C</b> — Clean View · <b>P</b> — Pause
@@ -44,7 +45,7 @@
             <b>Controls:</b><br/>
             LEFT STICK — Throttle ↑/↓ · Yaw ←/→<br/>
             RIGHT STICK — Pitch ↑/↓ · Roll ←/→<br/>
-            TAP — Fire · DOUBLE TAP — Boost<br/>
+            TAP — Fire · HOLD — Cannon · DOUBLE TAP — Boost<br/>
             Both sticks work at the same time.
           </div>
         </div>
@@ -117,6 +118,14 @@
         <div id="boost-label">BOOST READY</div>
         <div class="boost-track">
           <div id="boost-fill"></div>
+        </div>
+      </div>
+
+      <!-- Gun heat (ref-flight M61): fills as the cannon streams, jams at 100% -->
+      <div id="gun-heat-container">
+        <div id="gun-heat-label">GUN</div>
+        <div class="gun-heat-track">
+          <div id="gun-heat-fill"></div>
         </div>
       </div>
 

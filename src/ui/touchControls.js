@@ -180,14 +180,18 @@ export class TouchControls {
     this.onFire = opts.onFire || null;
     this._visible = false;
     this._lastTap = null; // { t, x, y }
+    this._holdPointerId = null; // finger holding the cannon trigger
+    this._holdStart = 0;
 
-    // Tap = fire, double-tap = boost (the mobile replacement for the
-    // spacebar). A tap fires IMMEDIATELY so shots feel instant; if the second
-    // tap lands inside the window it is claimed by boost and never fires a
-    // second round. Taps on a stick zone stay stick gestures. Only while the
-    // sticks are shown (i.e. actually flying), so menu taps are inert.
+    // Tap = fire, double-tap = boost, HOLD = cannon stream (ref-flight).
+    // A tap fires IMMEDIATELY so shots feel instant; if the second tap lands
+    // inside the window it is claimed by boost and never fires a second
+    // round. Holding the finger past HOLD_FIRE_MS arms the continuous stream
+    // (main.js polls isHoldingFire() every frame). Taps on a stick zone stay
+    // stick gestures. Only while the sticks are shown (i.e. actually flying).
     const TAP_WINDOW_MS = 300;
     const TAP_TRAVEL = 30; // px between the two taps before it stops being a double-tap
+    const HOLD_FIRE_MS = 250;
     window.addEventListener("pointerdown", (e) => {
       if (!this._visible || e.pointerType !== "touch") return;
       if (e.target && e.target.closest && e.target.closest(".stick-zone")) return;
@@ -196,15 +200,24 @@ export class TouchControls {
       if (last && now - last.t <= TAP_WINDOW_MS
           && Math.hypot(e.clientX - last.x, e.clientY - last.y) <= TAP_TRAVEL) {
         this._lastTap = null;
+        this._holdPointerId = null;
         if (this.onBoost) {
           this.onBoost();
           try { if (navigator.vibrate) navigator.vibrate(25); } catch (err) { /* unsupported */ }
         }
       } else {
         this._lastTap = { t: now, x: e.clientX, y: e.clientY };
+        this._holdPointerId = e.pointerId;
+        this._holdStart = now;
         if (this.onFire) this.onFire(e.clientX, e.clientY);
       }
     }, { passive: true });
+    window.addEventListener("pointerup", (e) => {
+      if (this._holdPointerId === e.pointerId) this._holdPointerId = null;
+    });
+    window.addEventListener("pointercancel", (e) => {
+      if (this._holdPointerId === e.pointerId) this._holdPointerId = null;
+    });
     this.radius = opts.radius ?? 56;
     this.deadZone = opts.deadZone ?? 0.10;
 
@@ -239,6 +252,13 @@ export class TouchControls {
     return this.root;
   }
 
+  /** True while a finger is held on the screen (outside stick zones) long
+   *  enough to count as the cannon stream trigger. */
+  isHoldingFire() {
+    return this._visible && this._holdPointerId !== null
+      && (performance.now() - this._holdStart) > 250;
+  }
+
   /** Show the zones (flying on mobile). Does not synthesize input. */
   show() {
     this._visible = true;
@@ -249,6 +269,7 @@ export class TouchControls {
   hide() {
     this._visible = false;
     this._lastTap = null;
+    this._holdPointerId = null;
     this.root.classList.add("hidden");
     this.left.cancel();
     this.right.cancel();

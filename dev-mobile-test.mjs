@@ -486,6 +486,7 @@ const browserMob = await puppeteer.launch(LAUNCH);
     const opts = () => ({ bubbles: true, clientX: Math.floor(innerWidth / 2), clientY: Math.floor(innerHeight * 0.75), pointerType: "touch", isPrimary: true });
     window.dispatchEvent(new PointerEvent("pointerdown", opts()));
     window.dispatchEvent(new PointerEvent("pointerdown", opts()));
+    window.dispatchEvent(new PointerEvent("pointerup", opts())); // release the trigger
   });
   const tapDiag = await page.evaluate(() => ({
     visible: window.SKY_DEV.touchControls._visible,
@@ -575,8 +576,10 @@ const browserMob = await puppeteer.launch(LAUNCH);
         bubbles: true, clientX: Math.floor(innerWidth / 2), clientY: Math.floor(innerHeight * 0.75),
         pointerType: "touch", isPrimary: true,
       }));
+      window.dispatchEvent(new PointerEvent("pointerup", { bubbles: true })); // release the trigger
       const l = window.SKY_DEV.bullets.list;
       const b = l[l.length - 1];
+      b.testTag = "aim"; // frozen-path check finds THIS round, not a later one
       const dLat = b ? (b.lat - pre.lat) * 111320 : 0;
       const dLon = b ? (b.lon - pre.lon) * 111320 * Math.cos((pre.lat * Math.PI) / 180) : 0;
       return {
@@ -596,17 +599,16 @@ const browserMob = await puppeteer.launch(LAUNCH);
     await pa("left", "down"); await pa("left", "move", 0.9, 0);
     await sleep(700);
     const afterTurn = await page.evaluate(() => {
-      const l = window.SKY_DEV.bullets.list;
-      const b = l[l.length - 1];
-      return b ? { count: l.length, h: b.heading, p: b.pitch, planeH: window.SKY_DEV.state.heading } : { count: 0 };
+      const b = window.SKY_DEV.bullets.list.find((x) => x.testTag === "aim");
+      return b ? { h: b.heading, p: b.pitch, planeH: window.SKY_DEV.state.heading } : null;
     });
     await pa("left", "up");
-    const turned = Math.abs(((afterTurn.planeH - fired.planeH + 540) % 360) - 180);
+    const turned = afterTurn ? Math.abs(((afterTurn.planeH - fired.planeH + 540) % 360) - 180) : 0;
     check("bullet KEPT its frozen path while the plane turned",
-      afterTurn.count === fired.count
+      afterTurn
       && Math.abs(afterTurn.h - fired.h) < 0.01 && Math.abs(afterTurn.p - fired.p) < 0.01
       && turned > 0.5,
-      JSON.stringify({ bullet: [fired.h, afterTurn.h], plane: [fired.planeH, afterTurn.planeH] }));
+      JSON.stringify({ bullet: [fired.h, afterTurn?.h], plane: [fired.planeH, afterTurn?.planeH] }));
 
     // IMPACT: a steep dive round must hit terrain and explode (removed).
     await page.evaluate(() => {
@@ -619,6 +621,50 @@ const browserMob = await puppeteer.launch(LAUNCH);
       { timeout: 15000, polling: 150 }, before2
     ).then(() => true).catch(() => false);
     check("downward bullet hit terrain and exploded (round consumed)", impacted);
+
+    // ── Ref-flight gun mechanics ───────────────────────────────────────────
+    // Hold the trigger (a synthetic touch with no pointerup) -> 20 Hz stream
+    // straight off the nose, until pointerup releases it.
+    {
+      const preStream = await page.evaluate(() => window.SKY_DEV.bullets.list.length);
+      await page.evaluate(() => {
+        window.dispatchEvent(new PointerEvent("pointerdown", {
+          bubbles: true, clientX: 500, clientY: 170, pointerType: "touch", isPrimary: true,
+        }));
+      });
+      const streamCount = await page.waitForFunction(
+        (preStream) => window.SKY_DEV.bullets.list.length >= preStream + 3,
+        { timeout: 12000, polling: 200 }, preStream
+      ).then(() => true).catch(() => false);
+      const heatDiag = await page.evaluate(() => ({
+        count: window.SKY_DEV.bullets.list.length,
+        heat: +window.SKY_DEV.bullets.heat.toFixed(3),
+        holding: window.SKY_DEV.touchControls.isHoldingFire(),
+      }));
+      await page.evaluate(() => {
+        window.dispatchEvent(new PointerEvent("pointerup", { bubbles: true }));
+      });
+      check("HOLD streams rounds straight off the nose (ref-fire-rate)", streamCount,
+        JSON.stringify(heatDiag));
+      check("stream heats the gun (+0.02/round)", heatDiag.heat > 0, JSON.stringify(heatDiag));
+
+      // Overheat jam + recovery, ref-flight thresholds.
+      const jam = await page.evaluate(() => {
+        const D = window.SKY_DEV;
+        D.bullets.lastGunFire = 0; // clear the 50ms rate gate so the test is deterministic
+        D.bullets.heat = 0.99;
+        const pre = D.bullets.list.length;
+        const firedHot = !!D.bullets.fire(D.state, D.state.heading, D.state.pitch, 0.44704 * 1.8);
+        const jammed = D.bullets.isGunOverheated;
+        const blocked = !D.bullets.fire(D.state, D.state.heading, D.state.pitch, 0.44704 * 1.8);
+        D.bullets.heat = 0.2;
+        D.bullets.update(1 / 60);
+        const recovered = !D.bullets.isGunOverheated;
+        return { firedHot, jammed, blocked, recovered };
+      });
+      check("gun jams at 100% heat and recovers below 30% (ref-flight)",
+        jam.jammed && jam.blocked && jam.recovered, JSON.stringify(jam));
+    }
   }
 
 

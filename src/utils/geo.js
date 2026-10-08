@@ -74,22 +74,24 @@ async function fetchJson(url, timeoutMs) {
   }
 }
 
-/** Shared reverse core: Nominatim detail first, BigDataCloud second. */
+/** Shared reverse core: BigDataCloud first (keyless, CORS-clean, fast),
+ *  Nominatim second - it hard-denies many browser origins with an HTML page
+ *  that surfaces as a CORS console error even when the fallback succeeds. */
 async function reverseCore(lon, lat, zoom) {
-  try {
-    const data = await fetchJson(
-      `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=${zoom}&addressdetails=1`,
-      6000
-    );
-    const place = formatPlace(data && data.address);
-    if (place) return place;
-  } catch (error) { /* fall through to BigDataCloud */ }
   try {
     const bdc = await fetchJson(
       `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lon}&localityLanguage=en`,
       8000
     );
     const place = formatBigDataCloud(bdc);
+    if (place) return place;
+  } catch (error) { /* fall through to Nominatim */ }
+  try {
+    const data = await fetchJson(
+      `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=${zoom}&addressdetails=1`,
+      6000
+    );
+    const place = formatPlace(data && data.address);
     if (place) return place;
   } catch (error) { /* caller falls back */ }
   return null;
