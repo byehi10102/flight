@@ -1070,14 +1070,15 @@ anywhere for an aimed round; hold the trigger for the reference cannon stream.
   and steps a straight great-circle via `utils/geo.js#movePosition` (shared
   with the sim's own world motion) every frame. It never reads the plane
   again; turning after the shot does not bend the bullet.
-- **Gun mechanics (ref-flight weaponSystem).** Hold F/Enter (desktop) or
-  hold a finger on the screen (mobile, 250 ms) for a 20 Hz stream straight
-  off the nose; a quick click/tap still fires one AIMED round at the clicked
-  point (pick-ray aim). Heat +2%/round; at 100% the gun jams (warning sound)
-  until it cools below 30% (cooling 20%/s). No ammo limit. The m61 sample
-  loops while the trigger is held, like ref-flight. Round speed keeps the
-  reference's constant over-the-jet ratio: (speed mph + 1500) with the
-  game's own m/s conversion.
+- **Gun mechanics (ref-flight weaponSystem).** Hold F/Enter (desktop) or the
+  green FIRE stick (mobile) for a 20 Hz stream straight off the nose; a
+  quick click (desktop) or green-stick tap (mobile) fires one round. On
+  desktop the click round is AIMED at the clicked point; on mobile every
+  round takes the plane's nose direction at fire time. Heat +2%/round; at
+  100% the gun jams (warning sound) until it cools below 30% (cooling
+  20%/s). No ammo limit. The m61 sample loops while the trigger is held,
+  like ref-flight. Round speed keeps the reference's constant over-the-jet
+  ratio: (speed mph + 1500) with the game's own m/s conversion.
 - **Aim from the click.** `camera.getPickRay(x, y)` -> ENU at the plane ->
   heading/pitch, computed once per shot. Origin alternates between the two
   wing-root muzzles (F-15 gun position), offset in the plane's live attitude
@@ -1092,11 +1093,14 @@ anywhere for an aimed round; hold the trigger for the reference cannon stream.
 - **Impact.** Per-frame `globe.getHeight` check; on contact a cesium flash
   point (any range) + camera-local `particles.spawnExplosion` when the hit is
   within 400 m + a random explosion-1/2/3 sound. Max life 3 s covers misses.
-- **Input split.** Desktop: quick click (<350 ms, <6 px) fires an aimed
-  round; camera-drag never does; hold F/Enter for the stream. Mobile: tap
-  fires instantly (aimed), a second tap inside the 300 ms window is claimed
-  by boost (no second bullet), holding past 250 ms arms the stream. Sticks
-  own their zones; menu/picker taps are inert.
+- **Input split.** Mobile: the GREEN FIRE STICK (a third, smaller trigger
+  stick below-left of the right stick) owns firing - a quick tap fires one
+  round, holding it streams. Each round takes the plane's CURRENT nose
+  direction at its own fire moment and freezes it; moving the plane never
+  bends an in-flight round. Plain screen taps no longer fire (double-tap
+  anywhere outside the sticks still boosts). Desktop unchanged: quick click
+  (<350 ms, <6 px) fires an AIMED round at the clicked point; camera-drag
+  never does; hold F/Enter for the stream.
 - Cleared on respawn / return to menu. Single-player only (no multiplayer
   sync).
 

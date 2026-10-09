@@ -29,6 +29,7 @@
 export const STICK_LABELS = {
   left:  { horizontal: "YAW",     vertical: "THROTTLE", up: "FULL", down: "SLOW" },
   right: { horizontal: "ROLL",    vertical: "PITCH",    up: "UP",   down: "DOWN" },
+  fire:  { horizontal: "FIRE",    vertical: "HOLD",     up: "",     down: "" },
 };
 
 const FULL_DEFLECTION = 0.92; // normalized value that fires the haptic tick
@@ -43,14 +44,16 @@ function toAxis(delta, radius) {
 
 class VirtualStick {
   /**
-   * @param zone the fixed hit-zone element (left or right)
-   * @param opts { side, radius, knobRadius, onAxis, deadZone, labels }
+   * @param zone the fixed hit-zone element (left, right or fire)
+   * @param opts { side, radius, deadZone, onAxis, labels, onStart, onEnd }
    */
   constructor(zone, opts) {
     this.zone = zone;
     this.side = opts.side;
     this.radius = opts.radius;
     this.onAxis = opts.onAxis;
+    this.onStart = opts.onStart || null; // trigger-style sticks: grab
+    this.onEnd = opts.onEnd || null;    // trigger-style sticks: release
     this.deadZone = opts.deadZone;
     this.pointerId = null; // the ONE finger this stick owns; null = free
     this.x = 0;
@@ -97,6 +100,7 @@ class VirtualStick {
     this.originY = rect.height / 2;
     this.knob.style.transform = "translate(-50%, -50%)";
     this.base.classList.add("active");
+    if (this.onStart) this.onStart();
 
     // First contact can already be a displacement from the fixed centre -
     // run one move pass so the knob jumps to the finger immediately.
@@ -154,6 +158,7 @@ class VirtualStick {
     // transform, so the knob floats back to centre instead of snapping.
     this.knob.style.transform = "translate(-50%, -50%)";
     if (this.onAxis) this.onAxis(this.side, 0, 0);
+    if (this.onEnd) this.onEnd();
   }
 
   /** Hard-reset (state changed, e.g. leaving flight): release any thumb. */
@@ -166,6 +171,7 @@ class VirtualStick {
       this.base.classList.remove("active");
       this.knob.style.transform = "translate(-50%, -50%)";
       if (this.onAxis) this.onAxis(this.side, 0, 0);
+      if (this.onEnd) this.onEnd();
     }
   }
 }
@@ -177,21 +183,16 @@ export class TouchControls {
   constructor(opts = {}) {
     this.onAxis = opts.onAxis || null;
     this.onBoost = opts.onBoost || null;
-    this.onFire = opts.onFire || null;
     this._visible = false;
     this._lastTap = null; // { t, x, y }
-    this._holdPointerId = null; // finger holding the cannon trigger
-    this._holdStart = 0;
+    this.fireHeld = false; // the green fire stick's trigger state
 
-    // Tap = fire, double-tap = boost, HOLD = cannon stream (ref-flight).
-    // A tap fires IMMEDIATELY so shots feel instant; if the second tap lands
-    // inside the window it is claimed by boost and never fires a second
-    // round. Holding the finger past HOLD_FIRE_MS arms the continuous stream
-    // (main.js polls isHoldingFire() every frame). Taps on a stick zone stay
-    // stick gestures. Only while the sticks are shown (i.e. actually flying).
+    // Double-tap anywhere outside the sticks = boost (the mobile replacement
+    // for the spacebar). Firing is NOT tap-anywhere anymore - it lives on the
+    // green fire stick. Taps on a stick zone stay stick gestures. Only while
+    // the sticks are shown (i.e. actually flying), so menu taps are inert.
     const TAP_WINDOW_MS = 300;
     const TAP_TRAVEL = 30; // px between the two taps before it stops being a double-tap
-    const HOLD_FIRE_MS = 250;
     window.addEventListener("pointerdown", (e) => {
       if (!this._visible || e.pointerType !== "touch") return;
       if (e.target && e.target.closest && e.target.closest(".stick-zone")) return;
@@ -200,29 +201,19 @@ export class TouchControls {
       if (last && now - last.t <= TAP_WINDOW_MS
           && Math.hypot(e.clientX - last.x, e.clientY - last.y) <= TAP_TRAVEL) {
         this._lastTap = null;
-        this._holdPointerId = null;
         if (this.onBoost) {
           this.onBoost();
           try { if (navigator.vibrate) navigator.vibrate(25); } catch (err) { /* unsupported */ }
         }
       } else {
         this._lastTap = { t: now, x: e.clientX, y: e.clientY };
-        this._holdPointerId = e.pointerId;
-        this._holdStart = now;
-        if (this.onFire) this.onFire(e.clientX, e.clientY);
       }
     }, { passive: true });
-    window.addEventListener("pointerup", (e) => {
-      if (this._holdPointerId === e.pointerId) this._holdPointerId = null;
-    });
-    window.addEventListener("pointercancel", (e) => {
-      if (this._holdPointerId === e.pointerId) this._holdPointerId = null;
-    });
     this.radius = opts.radius ?? 56;
     this.deadZone = opts.deadZone ?? 0.10;
 
     // Root overlay covering the whole screen but NEVER intercepting input
-    // except on its two zones — the game behind keeps pointer events for
+    // except on its three zones — the game behind keeps pointer events for
     // minimap/HUD taps.
     this.root = document.createElement("div");
     this.root.id = "touchControls";
@@ -232,6 +223,8 @@ export class TouchControls {
     this.zoneLeft.className = "stick-zone stick-zone-left";
     this.zoneRight = document.createElement("div");
     this.zoneRight.className = "stick-zone stick-zone-right";
+    this.zoneFire = document.createElement("div");
+    this.zoneFire.className = "stick-zone stick-zone-fire";
 
     this.left = new VirtualStick(this.zoneLeft, {
       side: "left", radius: this.radius, deadZone: this.deadZone,
@@ -241,9 +234,25 @@ export class TouchControls {
       side: "right", radius: this.radius, deadZone: this.deadZone,
       onAxis: this.onAxis, labels: STICK_LABELS.right,
     });
+    // Green trigger stick: smaller, below-left of the right stick. Pushing it
+    // fires along the plane's CURRENT nose direction - main.js polls
+    // isFiringHeld() every frame and streams rounds off the nose while held;
+    // each round freezes its path at its own fire moment.
+    this.fire = new VirtualStick(this.zoneFire, {
+      side: "fire", radius: 46, deadZone: 0.05,
+      onAxis: null, labels: STICK_LABELS.fire,
+      onStart: () => {
+        this.fireHeld = true;
+        try { if (navigator.vibrate) navigator.vibrate(10); } catch (err) { /* unsupported */ }
+      },
+      onEnd: () => { this.fireHeld = false; },
+    });
 
     this.root.appendChild(this.zoneLeft);
     this.root.appendChild(this.zoneRight);
+    // The fire zone overlaps the right zone's lower-left corner; being LAST
+    // in the DOM keeps it on top so those grabs belong to the trigger.
+    this.root.appendChild(this.zoneFire);
 
     document.body.appendChild(this.root);
   }
@@ -252,11 +261,10 @@ export class TouchControls {
     return this.root;
   }
 
-  /** True while a finger is held on the screen (outside stick zones) long
-   *  enough to count as the cannon stream trigger. */
-  isHoldingFire() {
-    return this._visible && this._holdPointerId !== null
-      && (performance.now() - this._holdStart) > 250;
+  /** True while the green fire stick is held: main.js streams rounds off the
+   *  plane's nose (each frozen at its own fire moment). */
+  isFiringHeld() {
+    return this._visible && this.fireHeld;
   }
 
   /** Show the zones (flying on mobile). Does not synthesize input. */
@@ -269,10 +277,11 @@ export class TouchControls {
   hide() {
     this._visible = false;
     this._lastTap = null;
-    this._holdPointerId = null;
+    this.fireHeld = false;
     this.root.classList.add("hidden");
     this.left.cancel();
     this.right.cancel();
+    this.fire.cancel();
   }
 
   /** Frame-rate idempotent show/hide — safe to call every frame. */

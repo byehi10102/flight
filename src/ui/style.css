@@ -855,6 +855,43 @@ html, body {
 .stick-zone-left  { left: 0; }
 .stick-zone-right { right: 0; }
 
+/* Green trigger stick: smaller, below-left of the right stick. Overlaps the
+   right zone's lower-left corner; DOM order puts it on top so grabs there
+   belong to the trigger. */
+.stick-zone-fire {
+  left: 55%;
+  bottom: 1%;
+  width: 19%;
+  height: 26%;
+}
+
+.stick-zone-fire .stick-base {
+  width: 92px;
+  height: 92px;
+  border-color: rgba(90, 255, 120, 0.55);
+  background: rgba(90, 255, 120, 0.07);
+  opacity: 0.45;
+}
+
+.stick-zone-fire .stick-base.active {
+  opacity: 0.95;
+  background: rgba(90, 255, 120, 0.14);
+  border-color: rgba(120, 255, 150, 0.85);
+}
+
+.stick-zone-fire .stick-knob {
+  width: 44px;
+  height: 44px;
+  background: rgba(90, 255, 120, 0.20);
+  border-color: rgba(140, 255, 170, 0.6);
+}
+
+.stick-zone-fire .stick-hint {
+  color: rgba(140, 255, 170, 0.55);
+  font-size: 9px;
+  bottom: 2px;
+}
+
 /* Base rings sit pinned at zone centre (fixed sticks, no wandering) and only
    glow on touch. */
 .stick-base {

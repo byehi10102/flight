@@ -77,7 +77,6 @@ const touchControls = mobileMode.enabled
   ? new TouchControls({
       onAxis: (side, x, y) => controller.setStickInput(side, x, y),
       onBoost: () => controller.requestBoost(),
-      onFire: (x, y) => fireBulletAtScreen(x, y),
     })
   : null;
 if (mobileMode.enabled) {
@@ -1464,11 +1463,13 @@ function update(dt) {
   bullets.update(dt);
 
   // ── Gun trigger, ref-flight style ────────────────────────────────────────
-  // Hold F/Enter (desktop) or hold a finger on the screen (mobile) for a
-  // 20 Hz stream straight off the nose; the gun heats and jams as in the
-  // reference. Aimed shots still come from clicks/taps via fireBulletAtScreen.
+  // Hold F/Enter (desktop) or the green FIRE stick (mobile) for a 20 Hz
+  // stream straight off the nose; the gun heats and jams as in the
+  // reference. Each round freezes its path at its own fire moment, so
+  // moving the plane never bends an in-flight round. Desktop quick clicks
+  // still fire an AIMED round via fireBulletAtScreen.
   const triggerHeld = currentState === States.FLYING && (
-    !!controller.keys["f"] || !!controller.keys["enter"] || !!(touchControls && touchControls.isHoldingFire && touchControls.isHoldingFire())
+    !!controller.keys["f"] || !!controller.keys["enter"] || !!(touchControls && touchControls.isFiringHeld && touchControls.isFiringHeld())
   );
   if (triggerHeld) {
     bullets.fire(state, state.heading, state.pitch, MPH_TO_MPS * WORLD_SPEED_SCALE);
