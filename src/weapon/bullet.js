@@ -206,10 +206,9 @@ export class Bullet {
 	}
 
 	/**
-	 * Terrain hit: a LITTLE crash-style explosion (the same system the
-	 * airplane crash uses - flash, detonation light, fireballs, smoke - at
-	 * modest counts) placed at the impact's raw camera-space point, so
-	 * distance gives the perspective exactly like the terrain does.
+	 * Terrain hit: a crash-style explosion, WORLD-ANCHORED at the detonation
+	 * point (it stays put when the plane moves on) and distance-scaled so it
+	 * stays noticeable at any range. Distance still gives the perspective.
 	 */
 	checkTerrainCollision() {
 		const cartographic = Cesium.Cartographic.fromDegrees(this.lon, this.lat);
@@ -218,7 +217,14 @@ export class Bullet {
 			try {
 				const world = Cesium.Cartesian3.fromDegrees(this.lon, this.lat, this.alt, undefined, new Cesium.Cartesian3());
 				const view = Cesium.Matrix4.multiplyByPoint(this.viewer.camera.viewMatrix, world, new Cesium.Cartesian3());
-				particles.spawnExplosion(new THREE.Vector3(view.x, view.y, view.z), { big: true, count: 18, smokeCount: 4 });
+				const camDist = Cesium.Cartesian3.distance(this.viewer.camera.positionWC, world);
+				particles.spawnExplosion(new THREE.Vector3(view.x, view.y, view.z), {
+					big: true,
+					count: 48,
+					smokeCount: 10,
+					worldAnchor: { lon: this.lon, lat: this.lat, alt: this.alt },
+					scale: Math.max(1, camDist / 60),
+				});
 				soundManager.play(`explosion-${1 + Math.floor(Math.random() * 3)}`);
 			} catch (e) { /* cosmetic */ }
 			this.destroy();
@@ -244,9 +250,10 @@ export class Bullets {
     this.lastGunFire = 0;        // s, performance.now()*0.001 like ref-flight
   }
 
-  attach(scene, viewer) {
+  attach(scene, viewer, planeModel) {
     this.scene = scene;
     this.viewer = viewer;
+    this.planeModel = planeModel || null;
   }
 
   /**
@@ -264,7 +271,7 @@ export class Bullets {
     this.heat = Math.min(1, this.heat + GUN_HEAT_PER_SHOT);
     if (this.heat >= 1.0) this.isGunOverheated = true;
     this._side *= -1;
-    const muzzle = this._wingMuzzle(player, this._side);
+    const muzzle = this._gunMuzzle(player, this._side);
     const speedMps = (player.speed + SPEED_BONUS_MPH) * mphToMps;
     const bullet = new Bullet(this.scene, this.viewer, muzzle, aimHeading, aimPitch, speedMps);
     this.list.push(bullet);
@@ -288,6 +295,57 @@ export class Bullets {
   clear() {
     for (const b of this.list) b.destroy();
     this.list.length = 0;
+  }
+
+  /**
+   * ref-flight weaponSystem.calculateWeaponPos, copied: the muzzle is the
+   * DRAWN jet's wing station (the Three overlay model's live position and
+   * quaternion), converted from overlay-75deg units to world meters via the
+   * live FOV factor and expressed through the Cesium camera basis. This is
+   * why the reference's rounds visibly erupt from the on-screen jet: they
+   * spawn at the world point matching where the wing APPEARS, not at the
+   * true airframe 60 m out. Alternates L/R wing stations. Falls back to the
+   * attitude wing offset if the model is not loaded yet.
+   */
+  _gunMuzzle(player, side) {
+    try {
+      const model = this.planeModel && this.planeModel.model;
+      const cam = this.viewer && this.viewer.camera;
+      if (!model || !cam || !cam.positionWC) return this._wingMuzzle(player, side);
+
+      // Wing-root gun station in the F-15 model's local frame (model units).
+      const offset = new THREE.Vector3(2.2 * side, -0.3, -1.5);
+      const scale = model.scale.x;
+      offset.multiplyScalar(scale);
+      offset.applyQuaternion(model.quaternion);
+      offset.add(model.position);
+
+      // Overlay-75deg drawn units -> world meters through the live FOV.
+      const planeFov = 75;
+      const worldFov = Cesium.Math.toDegrees(cam.frustum.fovy);
+      const factor = Math.tan(Cesium.Math.toRadians(worldFov) * 0.5)
+        / Math.tan(Cesium.Math.toRadians(planeFov) * 0.5);
+      offset.x *= factor;
+      offset.y *= factor;
+
+      const right = cam.right, up = cam.up, dir = cam.direction;
+      const worldOffset = new Cesium.Cartesian3();
+      const xVec = Cesium.Cartesian3.multiplyByScalar(right, offset.x, new Cesium.Cartesian3());
+      const yVec = Cesium.Cartesian3.multiplyByScalar(up, offset.y, new Cesium.Cartesian3());
+      const zVec = Cesium.Cartesian3.multiplyByScalar(dir, -offset.z, new Cesium.Cartesian3());
+      Cesium.Cartesian3.add(xVec, yVec, worldOffset);
+      Cesium.Cartesian3.add(worldOffset, zVec, worldOffset);
+
+      const finalPos = Cesium.Cartesian3.add(cam.positionWC, worldOffset, new Cesium.Cartesian3());
+      const carto = Cesium.Cartographic.fromCartesian(finalPos);
+      return {
+        lon: Cesium.Math.toDegrees(carto.longitude),
+        lat: Cesium.Math.toDegrees(carto.latitude),
+        alt: carto.height,
+      };
+    } catch (e) {
+      return this._wingMuzzle(player, side);
+    }
   }
 
   /**
