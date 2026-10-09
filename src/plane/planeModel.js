@@ -169,6 +169,21 @@ export class PlaneModel {
 
     this.model.position.copy(this.visualOffset);
 
+    // FOV-compensated placement. main.js syncs the overlay camera's FOV to
+    // the Cesium frustum (~30 deg vertical) so ref-flight bullets line up
+    // with the world; these fixed offsets were tuned for the old 75 deg
+    // overlay FOV. Under the narrow cone the raw offset falls OUTSIDE the
+    // frustum's bottom edge (invisible jet). Lateral offset and size scale
+    // by the live ratio k = tan(fov/2)/tan(75/2) while the DEPTH is kept:
+    // (y*k)/z / tan(fov/2) == y/z / tan(37.5 deg), so the jet keeps its
+    // exact original on-screen position and size at any synced FOV.
+    const k = this.fovScale || 1;
+    if (k !== 1) {
+      this.model.position.set(this.model.position.x * k, this.model.position.y * k, this.model.position.z);
+      const s = CONFIG.aircraft.modelScale * k;
+      this.model.scale.set(s, s, s);
+    }
+
     const flightLagQ = new THREE.Quaternion().setFromEuler(
       new THREE.Euler(this.visualRotation.x, this.visualRotation.y, this.visualRotation.z + this.boostRoll)
     );

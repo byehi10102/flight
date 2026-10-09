@@ -1771,16 +1771,16 @@ function animate() {
         camera.fov = targetFov;
         camera.aspect = window.innerWidth / window.innerHeight;
         camera.updateProjectionMatrix();
-        // The jet is drawn at a fixed camera-space offset tuned for the
-        // overlay's original 75 deg FOV. Under the synced (~30 deg) FOV every
-        // fixed camera-space size renders ~2.9x larger angularly - which
-        // swallowed the whole view in tail metal ("can't see the plane").
-        // Shrink the drawn jet by the same live ratio so the on-screen plane
-        // keeps its original apparent size at any FOV.
+        // The jet is drawn at fixed camera-space offsets tuned for the
+        // overlay's original 75 deg FOV. Under the synced (~30 deg) FOV the
+        // narrow frustum cone pushed the jet outside its bottom edge (the
+        // "can't see the airplane" regression). PlaneModel.update applies
+        // the live ratio to the jet's lateral offset and size each frame;
+        // at k=1 (fov 75) everything is a no-op, so the original look is
+        // restored exactly.
         const planeScale = Math.tan(Cesium.Math.toRadians(camera.fov) / 2)
           / Math.tan(Cesium.Math.toRadians(CONFIG.camera.fov) / 2);
-        const s = CONFIG.aircraft.modelScale * planeScale;
-        if (planeModel && planeModel.model) planeModel.model.scale.set(s, s, s);
+        if (planeModel) planeModel.fovScale = planeScale;
       }
     } catch (e) { /* fov sync is cosmetic-critical but must never break the frame */ }
     camera.layers.set(1);
