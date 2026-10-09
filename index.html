@@ -68,8 +68,14 @@
       <div id="spawn-top-ui" class="spawn-hud-top">
         <div id="spawn-instruction">
           <span id="instruction-text">CLICK ANYWHERE ON THE MAP OR SEARCH FOR A LOCATION</span>
-          <input type="text" id="locationSearch" placeholder="Search city, zipcode, or location..." />
+          <input type="text" id="locationSearch" placeholder="ENTER LOCATION NAME..." style="display:none" />
           <div id="search-results"></div>
+        </div>
+        <div id="search-toggle-btn" title="Toggle Search">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="11" cy="11" r="8"></circle>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+          </svg>
         </div>
       </div>
       <button id="confirmSpawnBtn" class="menu-btn hidden spawn-confirm-btn">SPAWN HERE</button>
@@ -147,6 +153,23 @@
       <div id="minimap-container">
         <div id="minimapCesium"></div>
         <canvas id="minimap"></canvas>
+      </div>
+
+      <!-- Weapons HUD (ref-flight panel: gun station + aircraft plate) -->
+      <div id="weapons-hud">
+        <div id="weapon-list">
+          <div class="weapon-item active" id="weapon-gun">
+            <div class="weapon-progress"></div>
+            <span class="weapon-name">M61A1 VULCAN</span>
+            <span class="weapon-ammo">INF</span>
+          </div>
+        </div>
+        <div id="aircraft-icon">
+          <svg viewBox="0 0 64 64" width="44" height="44">
+            <path fill="#0f0" d="M32 4 L36 20 L58 32 L58 36 L36 32 L35 44 L42 52 L42 55 L32 51 L22 55 L22 52 L29 44 L28 32 L6 36 L6 32 L28 20 Z"/>
+          </svg>
+          <div id="aircraft-label">F-15</div>
+        </div>
       </div>
     </div>
 

@@ -541,6 +541,15 @@ function enterSpawnPicking(useVignette = true) {
     }
     pendingSpawnName = null;
 
+    // ref-flow: the picker opens with the instruction visible and the
+    // search input tucked away behind the magnifier toggle.
+    if (locationSearch) {
+      locationSearch.value = "";
+      locationSearch.style.display = "none";
+    }
+    if (instructionText) instructionText.style.display = "block";
+    if (searchResults) searchResults.style.display = "none";
+
     viewer.camera.flyTo({
       destination: Cesium.Cartesian3.fromDegrees(state.lon, state.lat, 15000),
       duration: 2.0,
@@ -596,6 +605,33 @@ let searchDebounce = null;
 
 function setupSearch() {
   if (!locationSearch) return;
+
+  // ref-flight's search toggle: the magnifier button reveals/hides the
+  // input; the instruction text swaps out while typing; the icon becomes a
+  // spinner while a query is in flight (set in performSearch).
+  const searchToggleBtn = document.getElementById("search-toggle-btn");
+  const originalSearchIcon = searchToggleBtn ? searchToggleBtn.innerHTML : "";
+  if (searchToggleBtn) {
+    searchToggleBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const isSearching = locationSearch.style.display === "block";
+      if (isSearching) {
+        locationSearch.style.display = "none";
+        if (instructionText) instructionText.style.display = "block";
+        searchResults.style.display = "none";
+      } else {
+        locationSearch.style.display = "block";
+        if (instructionText) instructionText.style.display = "none";
+        locationSearch.focus();
+      }
+    });
+  }
+  window.__setSearchBusy = (busy) => {
+    if (!searchToggleBtn) return;
+    searchToggleBtn.innerHTML = busy
+      ? '<div class="loader-spinner"></div>'
+      : originalSearchIcon;
+  };
 
   locationSearch.addEventListener("input", () => {
     clearTimeout(searchDebounce);
@@ -691,15 +727,27 @@ async function performSearch(query) {
     searchResults.style.display = "block";
   };
 
-  // Three keyless geocoders, tried in order of reliability for browser
-  // calls: Photon first (CORS-clean and fast), then Open-Meteo, Nominatim
-  // last - it rate-limits browsers hardest, so it must not be on the happy
-  // path. ANY failure cascades to the next, so one throttled or blocked
-  // host can never take search down by itself.
+  // Three keyless geocoders: Nominatim FIRST (ref-flight's backend, no API
+  // key), then Photon, then Open-Meteo as silent fallbacks for when Nominatim
+  // rate-limits or denies a browser origin. ANY failure cascades to the
+  // next, so one throttled or blocked host can never take search down.
   try {
     showStatus("Searching…");
+    try { window.__setSearchBusy?.(true); } catch (e) { /* cosmetic */ }
     const q = encodeURIComponent(query);
     let anySuccess = false;
+    try {
+      const data = await fetchJsonOk(
+        `https://nominatim.openstreetmap.org/search?format=json&q=${q}&limit=5`, 5000
+      );
+      anySuccess = true;
+      if (Array.isArray(data) && data.length) {
+        renderItems(data);
+        return;
+      }
+    } catch (err) { console.warn("Search: nominatim failed, trying backup:", err?.status || err); }
+    if (!stillCurrent()) return;
+    showStatus("Trying backup map server…");
     try {
       const photon = await fetchJsonOk(`https://photon.komoot.io/api/?q=${q}&limit=5`, 5000);
       anySuccess = true;
@@ -710,7 +758,6 @@ async function performSearch(query) {
       }
     } catch (err) { console.warn("Search: photon failed, trying backup:", err?.status || err); }
     if (!stillCurrent()) return;
-    showStatus("Trying backup map server…");
     try {
       const geo = await fetchJsonOk(
         `https://geocoding-api.open-meteo.com/v1/search?name=${q}&count=5&language=en&format=json`, 5000
@@ -721,18 +768,7 @@ async function performSearch(query) {
         renderItems(items);
         return;
       }
-    } catch (err) { console.warn("Search: open-meteo failed, trying backup:", err?.status || err); }
-    if (!stillCurrent()) return;
-    try {
-      const data = await fetchJsonOk(
-        `https://nominatim.openstreetmap.org/search?format=json&q=${q}&limit=5`, 5000
-      );
-      anySuccess = true;
-      if (Array.isArray(data) && data.length) {
-        renderItems(data);
-        return;
-      }
-    } catch (err) { console.warn("Search: nominatim failed:", err?.status || err); }
+    } catch (err) { console.warn("Search: open-meteo failed:", err?.status || err); }
     if (!stillCurrent()) return;
     if (!anySuccess) {
       // All three hosts unreachable from this network — keep any good
@@ -753,6 +789,8 @@ async function performSearch(query) {
       searchResults.style.display = "block";
       searchResults.innerHTML = '<div class="search-result-item search-status">Search is offline right now — check connection and retry</div>';
     }
+  } finally {
+    try { window.__setSearchBusy?.(false); } catch (e) { /* cosmetic */ }
   }
 }
 
@@ -774,7 +812,7 @@ function selectSearchResult(lon, lat, name) {
   }).catch(() => {});
 
   viewer.camera.flyTo({
-    destination: Cesium.Cartesian3.fromDegrees(lon, lat, 5000),
+    destination: Cesium.Cartesian3.fromDegrees(lon, lat, 15000),
     duration: 1.5,
   });
 
@@ -1235,101 +1273,47 @@ function confirmSpawn() {
       viewer.scene.requestRender();
     } catch (e) { /* warm-up is best-effort */ }
 
-    // Spawn flight (ref-flight style, two phases): pull up high first so
-    // confirming always plays the dive-down-onto-the-spawn swoop, then drop
-    // onto the spawn point in the plane's own attitude. Both legs scale with
-    // the actual drop distance, so a globe-view descent and a 2 km hop each
-    // play smooth — no violent plunge, no instant pop.
-    const startH = viewer.camera.positionCartographic?.height || state.alt + 6000;
-    const drop = Math.max(0, startH - state.alt);
-    const phase1dur = Math.min(2.0, Math.max(0.6, 0.4 + drop / 20000));
-    const phase2dur = Math.min(4.5, Math.max(1.8, 1.2 + drop / 6000));
-    const diveToSpawn = () => {
-      // The airplane fades in as the dive begins so it appears mid-flight.
-      if (threeContainer) threeContainer.classList.remove("hidden");
-      viewer.camera.flyTo({
-        destination: Cesium.Cartesian3.fromDegrees(state.lon, state.lat, state.alt),
-        orientation: {
-          heading: Cesium.Math.toRadians(state.heading),
-          pitch: Cesium.Math.toRadians(state.pitch),
-          roll: Cesium.Math.toRadians(state.roll),
-        },
-        duration: phase2dur,
-        easingFunction: Cesium.EasingFunction.QUADRATIC_IN_OUT,
-        complete: () => {
-          if (gen !== transitionGen) return;
-          setTimeout(() => {
-            if (gen !== transitionGen) return;
-            flightStartTime = Date.now();
-            if (uiContainer) uiContainer.classList.remove("hidden");
-            if (threeContainer) threeContainer.classList.remove("hidden");
-            currentState = States.FLYING;
-            resetCameraSmoothing();
-            hud.resetTime();
-            hud.resetScore();
-            soundManager.play("jet-engine", 1.0);
-            soundManager.play("wind", 1.0);
-            if (state.spawnName) hud.showRegion(`SPAWN · ${state.spawnName}`);
-            // Multiplayer: flight phase begins — presence markers hand off
-            // to live remote planes, and the performance diet turns on.
-            mp?.onFlightStart();
-          try {
-            getMiniViewer()?.resize();
-          } catch (e) { /* minimap is cosmetic */ }
-            if (vignette) {
-              vignette.style.opacity = "0";
-              vignette.classList.remove("solid");
-            }
-          }, 300);
-        },
-      });
-    };
-    // Hold-for-tiles: perch above the spawn until the globe reports its
-    // tiles loaded twice in a row (or 6 s pass), so the dive lands on
-    // high-detail terrain instead of soft placeholders that sharpen
-    // mid-flight. The longer budget is deliberate: at boost speeds the jet
-    // covers ~8 km/s and never gets a second chance at first-load tiles.
-    const waitForTilesThenDive = () => {
-      const start = performance.now();
-      const budgetMs = 6000;
-      let readyStreak = 0;
-      if (loadingIndicator && loadingText) {
-        loadingText.textContent = "Loading high-detail terrain...";
-        loadingIndicator.classList.remove("hidden");
-      }
-      const poll = () => {
-        if (gen !== transitionGen) return;
-        if (currentState !== States.TRANSITIONING) return;
-        let ready = false;
-        try {
-          ready = viewer.scene.globe.tilesLoaded === true;
-        } catch (e) { ready = true; }
-        readyStreak = ready ? readyStreak + 1 : 0;
-        if (readyStreak >= 2 || performance.now() - start > budgetMs) {
-          if (loadingIndicator) loadingIndicator.classList.add("hidden");
-          diveToSpawn();
-        } else {
-          try { viewer.scene.requestRender(); } catch (e) { /* cosmetic */ }
-          setTimeout(poll, 150);
-        }
-      };
-      poll();
-    };
+    // Spawn flight: ref-flight's EXACT animation - one eased flight from
+    // the picker view straight onto the plane's flight position (the old
+    // two-phase perch-and-dive is replaced by their single flyTo).
     viewer.camera.flyTo({
-      destination: Cesium.Cartesian3.fromDegrees(
-        state.lon, state.lat, Math.max(startH, state.alt + 6000)
-      ),
-      duration: phase1dur,
+      destination: Cesium.Cartesian3.fromDegrees(state.lon, state.lat, state.alt),
+      orientation: {
+        heading: Cesium.Math.toRadians(state.heading),
+        pitch: Cesium.Math.toRadians(state.pitch),
+        roll: Cesium.Math.toRadians(state.roll),
+      },
+      duration: 2.0,
       easingFunction: Cesium.EasingFunction.QUADRATIC_IN_OUT,
       complete: () => {
-        if (currentState === States.TRANSITIONING) waitForTilesThenDive();
+        if (gen !== transitionGen) return;
+        // The airplane fades in as the flight begins so it appears mid-air.
+        if (threeContainer) threeContainer.classList.remove("hidden");
+        flightStartTime = Date.now();
+        if (uiContainer) uiContainer.classList.remove("hidden");
+        currentState = States.FLYING;
+        resetCameraSmoothing();
+        hud.resetTime();
+        hud.resetScore();
+        soundManager.play("jet-engine", 1.0);
+        soundManager.play("wind", 1.0);
+        if (state.spawnName) hud.showRegion(`SPAWN · ${state.spawnName}`);
+        // Multiplayer: flight phase begins - presence markers hand off
+        // to live remote planes, and the performance diet turns on.
+        mp?.onFlightStart();
+        try {
+          getMiniViewer()?.resize();
+        } catch (e) { /* minimap is cosmetic */ }
+        if (vignette) {
+          vignette.style.opacity = "0";
+          vignette.classList.remove("solid");
+        }
       },
     });
 
     // Safety net: a camera flight's complete callback can be skipped if the
-    // animation is interrupted. Silent backstop only — sized just past the
-    // scaled flight plus the tile hold above, so it never visibly cuts a
-    // healthy transition.
+    // animation is interrupted. Silent backstop only - sized just past the
+    // 2 s flight, so it never visibly cuts a healthy transition.
     setTimeout(() => {
       if (gen !== transitionGen) return;
       if (currentState !== States.TRANSITIONING) return;
@@ -1340,7 +1324,6 @@ function confirmSpawn() {
       resetCameraSmoothing();
       hud.resetTime();
       hud.resetScore();
-      // Multiplayer: same phase handoff as the healthy flight path.
       mp?.onFlightStart();
       try {
         getMiniViewer()?.resize();
@@ -1349,7 +1332,7 @@ function confirmSpawn() {
         vignette.style.opacity = "0";
         vignette.classList.remove("solid");
       }
-    }, Math.round((phase1dur + phase2dur + 2.0 + 6.0) * 1000));
+    }, 5000);
   }, 4000);
 }
 

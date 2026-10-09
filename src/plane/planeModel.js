@@ -57,6 +57,21 @@ export class PlaneModel {
           this.model.position.copy(BASE_PLANE_POS);
           this.model.scale.set(CONFIG.aircraft.modelScale, CONFIG.aircraft.modelScale, CONFIG.aircraft.modelScale);
 
+          // ref-flight plays the model's own animation clip once on load
+          // (their 'flight_mode'); our F-15 ships the equivalent gear
+          // animation as 'F15 ldg' - the wing/gear motion around the plane.
+          try {
+            this.mixer = new THREE.AnimationMixer(mesh);
+            const clip = THREE.AnimationClip.findByName(gltf.animations, "F15 ldg")
+              || (gltf.animations && gltf.animations[0]);
+            if (clip) {
+              const action = this.mixer.clipAction(clip);
+              action.setLoop(THREE.LoopOnce);
+              action.clampWhenFinished = true;
+              action.play();
+            }
+          } catch (e) { /* model without clips: fine */ }
+
           // Jet exhaust flames — same offsets as ref-flight so the flames sit
           // in the tailpipes (+Z is behind the jet when nose points -Z).
           const flameL = new JetFlame();
@@ -84,6 +99,12 @@ export class PlaneModel {
 
   update(state, input, dt, isBoosting) {
     if (!this.model) return;
+
+    // Drive the model's own animation (gear/wing clip) like ref-flight's
+    // mixer.update in the render loop.
+    if (this.mixer && dt > 0) {
+      try { this.mixer.update(dt); } catch (e) { /* cosmetic */ }
+    }
 
     // W/throttle must NOT shove the jet around on screen — only the boost
     // gets a forward punch (boostZOffset below). So no accel-inertia slide.

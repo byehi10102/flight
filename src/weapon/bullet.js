@@ -309,21 +309,27 @@ export class Bullets {
       const cam = this.viewer && this.viewer.camera;
       if (!model || !cam || !cam.positionWC) return this._wingMuzzle(player, side);
 
-      // Wing gun station in the F-15 model's local frame (model units). The
-      // glb's half-span is ~5.9 local units, so +/-5.2 sits on the outer
-      // wing where rounds visibly LEAVE the wingtip line, not the fuselage
-      // side (verified: head projects to ~22% of half-screen, matching the
-      // drawn jet's ~26% half-width).
-      const offset = new THREE.Vector3(5.2 * side, -0.4, -1.2);
-      offset.multiplyScalar(model.scale.x);
-      offset.applyQuaternion(model.quaternion);
-      offset.add(model.position);
+      // ref-flight's exact wing station (their missile offset): 15.0 * side,
+      // -15.0, 0.0 in model units, scaled + rotated with the drawn model.
+      const offset = new THREE.Vector3(15.0 * side, -15.0, 0.0);
+      const scaledOffset = offset.clone().multiplyScalar(model.scale.x);
+      scaledOffset.applyQuaternion(model.quaternion);
+      scaledOffset.add(model.position);
+
+      // ref-flight's exact fov conversion: drawn (75 deg overlay) units to
+      // world meters through the live Cesium fov.
+      const planeFov = 75;
+      const worldFov = Cesium.Math.toDegrees(cam.frustum.fovy);
+      const factor = Math.tan(Cesium.Math.toRadians(worldFov) * 0.5)
+        / Math.tan(Cesium.Math.toRadians(planeFov) * 0.5);
+      scaledOffset.x *= factor;
+      scaledOffset.y *= factor;
 
       const right = cam.right, up = cam.up, dir = cam.direction;
       const worldOffset = new Cesium.Cartesian3();
-      const xVec = Cesium.Cartesian3.multiplyByScalar(right, offset.x, new Cesium.Cartesian3());
-      const yVec = Cesium.Cartesian3.multiplyByScalar(up, offset.y, new Cesium.Cartesian3());
-      const zVec = Cesium.Cartesian3.multiplyByScalar(dir, -offset.z, new Cesium.Cartesian3());
+      const xVec = Cesium.Cartesian3.multiplyByScalar(right, scaledOffset.x, new Cesium.Cartesian3());
+      const yVec = Cesium.Cartesian3.multiplyByScalar(up, scaledOffset.y, new Cesium.Cartesian3());
+      const zVec = Cesium.Cartesian3.multiplyByScalar(dir, -scaledOffset.z, new Cesium.Cartesian3());
       Cesium.Cartesian3.add(xVec, yVec, worldOffset);
       Cesium.Cartesian3.add(worldOffset, zVec, worldOffset);
 

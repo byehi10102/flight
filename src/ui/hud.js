@@ -30,6 +30,9 @@ export class Hud {
     this.boostLabel = document.getElementById("boost-label");
     this.gunHeatFill = document.getElementById("gun-heat-fill");
     this.gunHeatLabel = document.getElementById("gun-heat-label");
+    this.weaponGunItem = document.getElementById("weapon-gun");
+    this.weaponGunProgress = this.weaponGunItem?.querySelector(".weapon-progress") || null;
+    this.weaponGunAmmo = this.weaponGunItem?.querySelector(".weapon-ammo") || null;
     this.uiContainer = document.getElementById("uiContainer");
     this.vignette = document.getElementById("transition-vignette");
 
@@ -95,7 +98,6 @@ export class Hud {
       line.innerText = String(i);
       pitchLines.appendChild(line);
     }
-
     // Attitude panel: fixed bottom-right corner box holding the sliding
     // ladder plus a static center reference line so pitch reads against it.
     const panel = document.createElement("div");
@@ -108,6 +110,30 @@ export class Hud {
     refLine.appendChild(refLabel);
     panel.appendChild(refLine);
     ui.appendChild(panel);
+
+    // ref-flight HUD: the pitch ladder ALSO lives in the center horizon
+    // (their exact placement) - the desktop HUD reads pitch there, while
+    // the corner panel above remains the mobile layout's readout.
+    const centerLadder = document.createElement("div");
+    centerLadder.id = "pitch-lines-center";
+    centerLadder.style.cssText = "position: absolute; width: 100%; height: 100%;";
+    for (let i = -90; i <= 90; i += 10) {
+      if (i === 0) continue;
+      const line = document.createElement("div");
+      line.style.cssText = [
+        "position: absolute",
+        "left: 30%",
+        "width: 40%",
+        "height: 1px",
+        "background: rgba(0, 255, 0, 0.5)",
+        `top: ${50 - i}%`,
+        "text-align: center",
+        "font-size: 10px",
+      ].join("; ");
+      line.innerText = i;
+      centerLadder.appendChild(line);
+    }
+    horizon.appendChild(centerLadder);
   }
 
   // â”€â”€ Compass tape: 5Â° steps, 4px/deg, N/E/S/W labels (ref-flight) â”€â”€
@@ -346,12 +372,34 @@ export class Hud {
     }
 
     // â”€â”€ Horizon follows smoothed attitude â”€â”€
-    // The pitch ladder lives in its own bottom-right panel (out of the
-    // center view); roll rotates the panel, pitch slides it vertically.
+    // Horizon follows smoothed attitude: the corner attitude panel (mobile
+    // layout) keeps its own ladder.
     const pitchLines = document.getElementById("pitch-lines");
     if (pitchLines) {
       pitchLines.style.transform =
         `rotate(${-this.smoothedRoll}deg) translateY(${this.smoothedPitch * 2}px)`;
+    }
+
+    // ref-flight HUD: the pitch ladder also rotates with roll around the
+    // CENTER crosshair and slides with pitch (their exact transform).
+    const horizon = document.getElementById("horizon-container");
+    const pitchLinesCenter = document.getElementById("pitch-lines-center");
+    if (horizon && pitchLinesCenter) {
+      horizon.style.transform = `translate(-50%, -50%) rotate(${-this.smoothedRoll}deg)`;
+      pitchLinesCenter.style.transform = `translateY(${this.smoothedPitch * 6}px)`;
+    }
+
+    // Weapons panel (ref-flight): the M61 item tracks heat/overheat.
+    if (this.weaponGunItem) {
+      const heat = Math.max(0, Math.min(1, state.gunHeat ?? 0));
+      if (this.weaponGunProgress) {
+        this.weaponGunProgress.style.width = `${Math.round(heat * 100)}%`;
+      }
+      this.weaponGunItem.classList.toggle("active", heat > 0);
+      this.weaponGunItem.classList.toggle("overheated", !!state.gunOverheated);
+      if (this.weaponGunAmmo) {
+        this.weaponGunAmmo.innerText = state.gunOverheated ? "OVERHEAT" : "INF";
+      }
     }
   }
 

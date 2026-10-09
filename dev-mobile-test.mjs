@@ -353,12 +353,12 @@ const browserDesk = await puppeteer.launch(LAUNCH);
   check("no joystick zones in the DOM on desktop", r.zones === 0, `${r.zones}`);
   check("rotate overlay hidden on desktop", r.overlayHidden);
   check("body has NO mobile classes on desktop", !r.bodyMobile && !r.bodyLand);
-  check("speed box still CENTRED (desktop HUD)", Math.abs(r.speedCX - r.vw / 2) < 40,
+  check("speed box on the LEFT third (ref-flight HUD)", r.speedCX < r.vw * 0.45,
     `centerX=${r.speedCX} of ${r.vw}`);
-  check("alt box still right-of-centre", r.altLeft > r.vw2 / 2, `left=${r.altLeft}`);
-  check("minimap still desktop-size (180px), bottom-right",
-    r.mmW === 180 && Math.abs(r.mmBottom - (r.vh - 226)) <= 6 && r.mmLeft > r.vw - 220,
-    `w=${r.mmW} bottom=${r.mmBottom} vh=${r.vh}`);
+  check("alt box still right-of-centre", r.altLeft > r.vw / 2, `left=${r.altLeft}`);
+  check("minimap ref-flight square radar, bottom-left (250px)",
+    r.mmW === 250 && Math.abs(r.mmBottom - (r.vh - 30)) <= 6 && r.mmLeft < 60,
+    `w=${r.mmW} bottom=${r.mmBottom} vh=${r.vh} left=${r.mmLeft}`);
   check("no console errors on desktop load", errors.length === 0, errors.join("; "));
   const { page: p1 } = { page };
   await p1.close();
