@@ -1460,7 +1460,7 @@ function update(dt) {
   );
 
   // Live rounds keep flying their frozen paths.
-  bullets.update(dt, state);
+  bullets.update(dt);
 
   // ── Gun trigger, ref-flight style ────────────────────────────────────────
   // Hold F/Enter (desktop) or the green FIRE stick (mobile) for a 20 Hz
@@ -1757,10 +1757,22 @@ function animate() {
       if (particles.list.length > 0) particles.update(dt);
     } catch (e) { /* cosmetic */ }
 
-    // Render the plane overlay. The Three.js camera stays at the origin with
-    // a fixed FOV; the Cesium camera does the world-space tracking.
+    // Render the plane overlay. The Three.js camera stays at the origin;
+    // the Cesium camera does the world-space tracking. FOV SYNC (ref-flight):
+    // the overlay camera must render at the Cesium camera's LIVE vertical FOV,
+    // or world-space objects placed through the view matrix (bullets) land at
+    // the wrong screen position/scale - this is what makes ref-flight's
+    // projectiles line up with the world.
     renderer.autoClear = false;
     renderer.clear();
+    try {
+      if (viewer && viewer.camera && viewer.camera.frustum.fovy) {
+        const targetFov = Cesium.Math.toDegrees(viewer.camera.frustum.fovy);
+        camera.fov = targetFov;
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+      }
+    } catch (e) { /* fov sync is cosmetic-critical but must never break the frame */ }
     camera.layers.set(1);
     renderer.render(scene, camera);
     renderer.clearDepth();

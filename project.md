@@ -1085,14 +1085,24 @@ anywhere for an aimed round; hold the trigger for the reference cannon stream.
   (heading/pitch/roll) so the muzzle follows the wings when you bank.
 - **HUD.** A thin GUN heat bar sits above the boost meter (bottom-centre,
   72px on mobile landscape); it turns red and reads GUN OVERHEAT when jammed.
-- **Visuals.** In-world Cesium tracers: PolylineCollection PolylineGlow tube
-  (direct per-frame position updates) + PointPrimitiveCollection hot tip and
-  impact flash. Correct perspective at any range; entity polylines were
-  rejected because generateArc throws on fast tracer updates, and the Three
-  overlay's fixed 75 deg FOV does not line up with the ~30 deg Cesium frustum.
-- **Impact.** Per-frame `globe.getHeight` check; on contact a cesium flash
-  point (any range) + camera-local `particles.spawnExplosion` when the hit is
-  within 400 m + a random explosion-1/2/3 sound. Max life 3 s covers misses.
+- **Visuals.** The Bullet class is ref-flight's src/weapon/bullet.js copied
+  as-is: the additive gradient laser streak (3 core planes + 3 glow planes +
+  white cone tip, 20 units long), placed RAW through the Cesium view matrix
+  into the overlay's camera space, on layer 1 like the jet. This lines up
+  with the world because main.js now SYNCs the overlay camera's FOV to the
+  Cesium camera's live fovy every frame - the same sync ref-flight's render
+  loop performs (previously the overlay's fixed 75 deg FOV vs the ~30 deg
+  Cesium frustum made view-matrix placement land off-position, which is what
+  the earlier k/S compensation and then the Cesium-collection tracers were
+  working around). Rounds spawn at their TRUE wing depth and shrink with
+  true perspective, so the streak keeps its shape while it visibly travels;
+  where the jet's opaque pixels sit in front of a round it is correctly
+  occluded, like ref-flight.
+- **Impact.** Per-frame `globe.getHeight` check; on contact the SAME
+  explosion the airplane crash uses (particles.spawnExplosion big, 72
+  fireballs, 16 smoke) placed at the impact's raw camera-space point -
+  distance gives the perspective - plus a random explosion-1/2/3 sound.
+  Max life 3 s covers misses.
 - **Input split.** Mobile: the GREEN FIRE STICK (a third, smaller trigger
   stick below-left of the right stick) owns firing - a quick tap fires one
   round, holding it streams. Each round takes the plane's CURRENT nose
