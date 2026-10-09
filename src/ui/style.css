@@ -859,15 +859,15 @@ html, body {
    right zone's lower-left corner; DOM order puts it on top so grabs there
    belong to the trigger. */
 .stick-zone-fire {
-  left: 55%;
+  left: 57%;
   bottom: 1%;
-  width: 19%;
-  height: 26%;
+  width: 15%;
+  height: 21%;
 }
 
 .stick-zone-fire .stick-base {
-  width: 92px;
-  height: 92px;
+  width: 64px;
+  height: 64px;
   border-color: rgba(90, 255, 120, 0.55);
   background: rgba(90, 255, 120, 0.07);
   opacity: 0.45;
@@ -880,8 +880,8 @@ html, body {
 }
 
 .stick-zone-fire .stick-knob {
-  width: 44px;
-  height: 44px;
+  width: 30px;
+  height: 30px;
   background: rgba(90, 255, 120, 0.20);
   border-color: rgba(140, 255, 170, 0.6);
 }

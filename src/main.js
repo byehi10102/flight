@@ -264,7 +264,7 @@ function initThree() {
 
   planeModel = new PlaneModel(scene);
   particles.init(scene);
-  bullets.attach(viewer);
+  bullets.attach(scene, viewer);
 
   // ── MULTIPLAYER WIRING ──────────────────────────────────────────────────
   // The whole feature lives in multiplayer/ (project root) and loads
@@ -1460,7 +1460,7 @@ function update(dt) {
   );
 
   // Live rounds keep flying their frozen paths.
-  bullets.update(dt);
+  bullets.update(dt, state);
 
   // ── Gun trigger, ref-flight style ────────────────────────────────────────
   // Hold F/Enter (desktop) or the green FIRE stick (mobile) for a 20 Hz

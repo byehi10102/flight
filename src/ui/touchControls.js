@@ -239,7 +239,7 @@ export class TouchControls {
     // isFiringHeld() every frame and streams rounds off the nose while held;
     // each round freezes its path at its own fire moment.
     this.fire = new VirtualStick(this.zoneFire, {
-      side: "fire", radius: 46, deadZone: 0.05,
+      side: "fire", radius: 32, deadZone: 0.05,
       onAxis: null, labels: STICK_LABELS.fire,
       onStart: () => {
         this.fireHeld = true;
