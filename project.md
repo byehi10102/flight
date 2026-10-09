@@ -1082,12 +1082,12 @@ anywhere for an aimed round; hold the trigger for the reference cannon stream.
 - **Aim.** Desktop quick-clicks aim at the clicked point
   (`camera.getPickRay(x, y)` -> ENU at the plane -> heading/pitch, computed
   once per shot); the stream and mobile rounds fly straight off the nose.
-  Rounds alternate between the two wing-root muzzles (F-15 gun position),
-  offset in the plane's live attitude (heading/pitch/roll) so the muzzle
-  follows the wings when you bank. MUZZLE_FORWARD = 24 m: the ref-flight
-  streak is 20 units long and trails BEHIND the round, so spawning at the
-  wing left the trail emerging from behind the airplane; at 24 m the trail
-  reaches back to the wing line and each shot visibly leaves the wing.
+  The muzzle is ref-flight's calculateWeaponPos adapted: rounds spawn at the
+  world point matching the DRAWN jet's wing station (alternating L/R), so
+  they visibly erupt from the on-screen wing. The reference's x/y FOV factor
+  is NOT applied - it compensates an unsynced 75 deg overlay, and ours is
+  synced (applying it pulled the muzzle to the fuselage). The old
+  attitude-based wing offset stays as the pre-load fallback.
 - **HUD.** A thin GUN heat bar sits above the boost meter (bottom-centre,
   72px on mobile landscape); it turns red and reads GUN OVERHEAT when jammed.
 - **Visuals.** The Bullet class is ref-flight's src/weapon/bullet.js copied
@@ -1103,13 +1103,9 @@ anywhere for an aimed round; hold the trigger for the reference cannon stream.
   true perspective, so the streak keeps its shape while it visibly travels;
   where the jet's opaque pixels sit in front of a round it is correctly
   occluded, like ref-flight.
-- **Impact.** Per-frame `globe.getHeight` check; on contact a LITTLE
-  crash-style explosion - the same particles.spawnExplosion system the
-  airplane crash uses (flash, detonation light, fireballs, smoke) at modest
-  counts (big:true, count 18, smokeCount 4) - placed at the impact's raw
-  camera-space point, so distance gives the perspective exactly like the
-  terrain does. Plus a random explosion-1/2/3 sound. Max life 3 s covers
-  misses.
+- **Impact.** Per-frame `globe.getHeight` check; a hit simply spends the
+  round (impact explosions removed by request - the crash explosion is
+  reserved for the airplane). Max life 3 s covers misses.
 - **Input split.** Mobile: the GREEN FIRE STICK (a third, smaller trigger
   stick below-left of the right stick) owns firing - a quick tap fires one
   round, holding it streams. Each round takes the plane's CURRENT nose

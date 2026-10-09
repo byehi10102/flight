@@ -606,6 +606,10 @@ const browserMob = await puppeteer.launch(LAUNCH);
       };
       const L = mk(".stick-zone-left"), R = mk(".stick-zone-right");
       const opts = (p, id) => ({ pointerId: id, pointerType: "touch", isPrimary: true, clientX: p.x, clientY: p.y, bubbles: true, cancelable: true, button: 0, buttons: 1 });
+      // The axes test above still holds both sticks - release its pointers
+      // (ids 9001/9002 from the pa helper) so the fresh grabs below engage.
+      window.dispatchEvent(new PointerEvent("pointerup", { pointerId: 9002, bubbles: true }));
+      window.dispatchEvent(new PointerEvent("pointerup", { pointerId: 9001, bubbles: true }));
       R.zone.dispatchEvent(new PointerEvent("pointerdown", opts(R, 9601)));
       L.zone.dispatchEvent(new PointerEvent("pointerdown", opts(L, 9602)));
       const tap = D.controller.boostTap;
@@ -749,7 +753,7 @@ const browserMob = await puppeteer.launch(LAUNCH);
       (before2) => window.SKY_DEV.bullets.list.length < before2,
       { timeout: 15000, polling: 150 }, before2
     ).then(() => true).catch(() => false);
-    check("downward bullet hit terrain and exploded (round consumed)", impacted);
+    check("downward round consumed by its terrain hit", impacted);
 
     // ── Ref-flight gun mechanics ───────────────────────────────────────────
     // Hold the GREEN STICK -> 20 Hz stream straight off the nose; release stops.

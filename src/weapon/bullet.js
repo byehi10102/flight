@@ -1,24 +1,27 @@
 import * as THREE from "three";
 import * as Cesium from "cesium";
 import { movePosition } from "../utils/geo.js";
-import { particles } from "../utils/particles.js";
-import { soundManager } from "../utils/soundManager.js";
 
 /**
  * Wing-gun tracer rounds. The Bullet class below is ref-flight's
  * src/weapon/bullet.js copied as-is (mesh, placement, physics), with only
- * three local adaptations:
+ * these local adaptations:
  *   - movePosition comes from utils/geo.js (same function, shared export),
  *   - the NPC hit logic is dropped (this game has none),
- *   - a terrain hit plays the airplane-CRASH explosion (the user-visible
- *     "explode on impact") instead of ref-flight's small spark.
+ *   - a terrain hit simply spends the round (impact explosions removed by
+ *     request; the crash explosion stays reserved for the airplane).
  *
  * Placement is RAW view-matrix: world lon/lat/alt -> Cesium viewMatrix ->
  * the Three overlay's camera space. That lines up with the world because
  * main.js syncs the overlay camera's FOV to the Cesium camera's live fovy
- * every frame - the same sync ref-flight's render loop does. The round spawns
- * at its true world depth (the wing muzzle) and shrinks with true
- * perspective, so it keeps its shape and reads as really travelling.
+ * every frame - the same sync ref-flight's render loop does.
+ *
+ * The muzzle (Bullets._gunMuzzle) is ref-flight's calculateWeaponPos
+ * adapted: the round spawns at the world point matching the DRAWN jet's
+ * wing station, so it visibly erupts from the on-screen wing. The
+ * reference's x/y FOV factor is intentionally NOT applied - it exists for
+ * an unsynced 75 deg overlay, and ours is synced, so the drawn offset maps
+ * 1:1 (applying it pulled the muzzle to the fuselage).
  *
  * Set path, never re-aimed: position + heading + pitch are captured at fire
  * time and stepped straight via movePosition() every frame - moving the
@@ -206,27 +209,13 @@ export class Bullet {
 	}
 
 	/**
-	 * Terrain hit: a crash-style explosion, WORLD-ANCHORED at the detonation
-	 * point (it stays put when the plane moves on) and distance-scaled so it
-	 * stays noticeable at any range. Distance still gives the perspective.
+	 * Terrain hit: the round is spent. (Impact explosions were removed by
+	 * request - the crash explosion stays reserved for the airplane.)
 	 */
 	checkTerrainCollision() {
 		const cartographic = Cesium.Cartographic.fromDegrees(this.lon, this.lat);
 		const terrainHeight = this.viewer.scene.globe.getHeight(cartographic);
 		if (terrainHeight !== undefined && this.alt <= terrainHeight + IMPACT_PAD_M) {
-			try {
-				const world = Cesium.Cartesian3.fromDegrees(this.lon, this.lat, this.alt, undefined, new Cesium.Cartesian3());
-				const view = Cesium.Matrix4.multiplyByPoint(this.viewer.camera.viewMatrix, world, new Cesium.Cartesian3());
-				const camDist = Cesium.Cartesian3.distance(this.viewer.camera.positionWC, world);
-				particles.spawnExplosion(new THREE.Vector3(view.x, view.y, view.z), {
-					big: true,
-					count: 48,
-					smokeCount: 10,
-					worldAnchor: { lon: this.lon, lat: this.lat, alt: this.alt },
-					scale: Math.max(1, camDist / 60),
-				});
-				soundManager.play(`explosion-${1 + Math.floor(Math.random() * 3)}`);
-			} catch (e) { /* cosmetic */ }
 			this.destroy();
 		}
 	}
@@ -298,14 +287,21 @@ export class Bullets {
   }
 
   /**
-   * ref-flight weaponSystem.calculateWeaponPos, copied: the muzzle is the
+   * ref-flight weaponSystem.calculateWeaponPos, adapted: the muzzle is the
    * DRAWN jet's wing station (the Three overlay model's live position and
-   * quaternion), converted from overlay-75deg units to world meters via the
-   * live FOV factor and expressed through the Cesium camera basis. This is
-   * why the reference's rounds visibly erupt from the on-screen jet: they
-   * spawn at the world point matching where the wing APPEARS, not at the
-   * true airframe 60 m out. Alternates L/R wing stations. Falls back to the
-   * attitude wing offset if the model is not loaded yet.
+   * quaternion), converted to a world point through the Cesium camera basis.
+   * This is why the reference's rounds visibly erupt from the on-screen jet:
+   * they spawn at the world point matching where the wing APPEARS.
+   *
+   * The reference scales x/y by tan(worldFov/2)/tan(75/2) because ITS overlay
+   * camera stays at 75 deg while the world runs ~30 deg. OUR overlay is FOV-
+   * SYNCED to the Cesium frustum, so the drawn offset maps 1:1 - applying the
+   * reference factor here double-compensated and pulled the muzzle from the
+   * drawn wing (~20% of half-screen) to near the fuselage (~7%), which read
+   * as "not firing from the wings". No factor here.
+   *
+   * Alternates L/R wing stations; falls back to the attitude wing offset
+   * until the model is loaded.
    */
   _gunMuzzle(player, side) {
     try {
@@ -315,18 +311,9 @@ export class Bullets {
 
       // Wing-root gun station in the F-15 model's local frame (model units).
       const offset = new THREE.Vector3(2.2 * side, -0.3, -1.5);
-      const scale = model.scale.x;
-      offset.multiplyScalar(scale);
+      offset.multiplyScalar(model.scale.x);
       offset.applyQuaternion(model.quaternion);
       offset.add(model.position);
-
-      // Overlay-75deg drawn units -> world meters through the live FOV.
-      const planeFov = 75;
-      const worldFov = Cesium.Math.toDegrees(cam.frustum.fovy);
-      const factor = Math.tan(Cesium.Math.toRadians(worldFov) * 0.5)
-        / Math.tan(Cesium.Math.toRadians(planeFov) * 0.5);
-      offset.x *= factor;
-      offset.y *= factor;
 
       const right = cam.right, up = cam.up, dir = cam.direction;
       const worldOffset = new Cesium.Cartesian3();

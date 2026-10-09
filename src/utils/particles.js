@@ -1,5 +1,4 @@
 import * as THREE from "three";
-import * as Cesium from "cesium";
 
 /**
  * Crash-detonation particles.
@@ -114,11 +113,6 @@ export const particles = {
     }
   },
 
-  /** Cesium viewer, for world-anchored explosions (see spawnExplosion). */
-  setViewer(viewer) {
-    this.viewer = viewer;
-  },
-
   clear() {
     for (const p of this.list) {
       this.scene?.remove(p);
@@ -142,52 +136,17 @@ export const particles = {
     const big = opts.big !== false;
     const origin = center?.clone?.() ?? new THREE.Vector3(0, -0.8, -2.75);
 
-    // Additive knobs for anchored (world-fixed) explosions:
-    //   scale       - multiplies every size/speed so a distant burst keeps a
-    //                 readable apparent size (constant-apparent, the game
-    //                 convention for range effects).
-    //   worldAnchor - { lon, lat, alt }: when set, every puff remembers the
-    //                 WORLD point it belongs to and is re-projected into the
-    //                 moving camera each update, so the explosion STAYS where
-    //                 it detonated instead of riding along with the view
-    //                 (camera-space placement glues effects to the screen).
-    const scale = Math.max(1, opts.scale ?? 1);
-    const anchor = opts.worldAnchor || null;
-    let anchorEcef = null, anchorEnu = null;
-    if (anchor) {
-      try {
-        anchorEcef = Cesium.Cartesian3.fromDegrees(anchor.lon, anchor.lat, anchor.alt, undefined, new Cesium.Cartesian3());
-        anchorEnu = Cesium.Transforms.eastNorthUpToFixedFrame(anchorEcef, undefined, new Cesium.Matrix4());
-      } catch (e) { anchorEcef = null; }
-    }
-    const armPuff = (p) => {
-      if (!anchorEcef || !anchorEnu) return;
-      p._anchorEcef = anchorEcef;
-      p._anchorEnu = anchorEnu;
-      p._local = new THREE.Vector3().subVectors(p.position, origin);
-    };
-    // World-anchored position: anchor + ENU(local), projected into the
-    // overlay camera space through the live Cesium view matrix.
-    const _w = new Cesium.Cartesian3();
-    const _v = new Cesium.Cartesian3();
-    this._projectAnchor = (p) => {
-      Cesium.Matrix4.multiplyByPointAsVector(p._anchorEnu, new Cesium.Cartesian3(p._local.x, p._local.y, p._local.z), _w);
-      Cesium.Cartesian3.add(p._anchorEcef, _w, _w);
-      Cesium.Matrix4.multiplyByPoint(this.viewer.camera.viewMatrix, _w, _v);
-      p.position.set(_v.x, _v.y, _v.z);
-    };
-
     // ── Detonation light: re-aim the persistent light and re-arm its fade ──
     if (this._flashLight) {
       this._flashLight.position.copy(origin);
-      this._lightBase = (big ? 4 : 2) * scale;
+      this._lightBase = big ? 4 : 2;
       this._flashLight.intensity = this._lightBase;
       this._lightMax = 0.22;
       this._lightLife = this._lightMax;
     }
 
     // ── White flash: bright additive puff, decays very fast ────────────────
-    const flash = makePuff((big ? 1.8 : 1.1) * scale);
+    const flash = makePuff(big ? 1.8 : 1.1);
     flash.material.color.setRGB(1, 1, 1);
     flash.material.opacity = 1.0;
     flash.position.copy(origin);
@@ -196,8 +155,7 @@ export const particles = {
     flash.life = 0.22;
     flash.maxLife = 0.22;
     flash._expand = true;
-    flash._expandAmount = (big ? 1.8 : 1.2) * scale;
-    armPuff(flash);
+    flash._expandAmount = big ? 1.8 : 1.2;
     this.scene.add(flash);
     this.list.push(flash);
 
@@ -218,9 +176,8 @@ export const particles = {
     ring.life = 0.45;
     ring.maxLife = 0.45;
     ring._expand = true;
-    ring._expandAmount = (big ? 8.0 : 4.5) * scale;
-    ring._baseScale = scale;
-    armPuff(ring);
+    ring._expandAmount = big ? 8.0 : 4.5;
+    ring._baseScale = 1;
     this.scene.add(ring);
     this.list.push(ring);
 
@@ -231,7 +188,7 @@ export const particles = {
     // screen and let the group read as a fireball.
     const fireCount = opts.count || (big ? 40 : 22);
     for (let i = 0; i < fireCount; i++) {
-      const size = ((big ? 0.28 : 0.18) + Math.random() * (big ? 0.7 : 0.4)) * scale;
+      const size = (big ? 0.28 : 0.18) + Math.random() * (big ? 0.7 : 0.4);
       const puff = makePuff(size);
       puff.position.copy(origin);
       // White-hot core fraction, otherwise yellow flame.
@@ -241,7 +198,7 @@ export const particles = {
       puff._colorTo = new THREE.Color().setHSL(0.02, 1.0, 0.12);
       puff.material.color.copy(puff._colorFrom);
       puff.material.opacity = 1.0;
-      puff._vel = radialVelocity(((big ? 1.5 : 1.0) + Math.random() * (big ? 5 : 3)) * scale);
+      puff._vel = radialVelocity((big ? 1.5 : 1.0) + Math.random() * (big ? 5 : 3));
       puff._gravity = -(0.8 + Math.random() * 1.2);
       puff._drag = 1.2;
       // Staged: the first ~40% detonate at t=0, the rest trail in behind.
@@ -250,8 +207,7 @@ export const particles = {
       puff.life = (big ? 0.75 : 0.5) + Math.random() * (big ? 0.8 : 0.5);
       puff.maxLife = puff.life;
       puff._expand = true;
-      puff._expandAmount = (big ? 1.6 : 1.2) * (0.7 + size * 0.6) * scale;
-      armPuff(puff);
+      puff._expandAmount = (big ? 1.6 : 1.2) * (0.7 + size * 0.6);
       this.scene.add(puff);
       this.list.push(puff);
     }
@@ -259,18 +215,17 @@ export const particles = {
     // ── Sparks: fast, strong gravity, drag, flicker, cooling colour ────────
     const sparkCount = big ? 22 : 12;
     for (let i = 0; i < sparkCount; i++) {
-      const puff = makePuff((0.05 + Math.random() * 0.08) * scale);
+      const puff = makePuff(0.05 + Math.random() * 0.08);
       puff.position.copy(origin);
       puff._colorFrom = new THREE.Color(0xffffcc);
       puff._colorTo = new THREE.Color(0xcc5500);
       puff.material.color.copy(puff._colorFrom);
-      puff._vel = radialVelocity(((big ? 12 : 6) + Math.random() * (big ? 40 : 20)) * scale);
+      puff._vel = radialVelocity((big ? 12 : 6) + Math.random() * (big ? 40 : 20));
       puff._gravity = 9.81;
       puff._drag = 0.6;
       puff._flicker = true;
       puff.life = 0.18 + Math.random() * 0.36;
       puff.maxLife = puff.life;
-      armPuff(puff);
       this.scene.add(puff);
       this.list.push(puff);
     }
@@ -278,7 +233,7 @@ export const particles = {
     // ── Smoke: buoyant, expanding, darkening, trailing the fireball ────────
     const smokeCount = opts.smokeCount ?? (big ? 8 : 4);
     for (let i = 0; i < smokeCount; i++) {
-      const size = ((big ? 0.5 : 0.3) + Math.random() * (big ? 0.7 : 0.35)) * scale;
+      const size = (big ? 0.5 : 0.3) + Math.random() * (big ? 0.7 : 0.35);
       const puff = makePuff(size, { additive: false });
       const gray = 0.3 + Math.random() * 0.2;
       puff._colorFrom = new THREE.Color(gray, gray, gray);
@@ -286,14 +241,14 @@ export const particles = {
       puff.material.color.copy(puff._colorFrom);
       puff.material.opacity = 0.75;
       puff.position.set(
-        origin.x + (Math.random() - 0.5) * 0.6 * scale,
-        origin.y + (Math.random() - 0.5) * 0.6 * scale,
-        origin.z + (Math.random() - 0.5) * 0.6 * scale
+        origin.x + (Math.random() - 0.5) * 0.6,
+        origin.y + (Math.random() - 0.5) * 0.6,
+        origin.z + (Math.random() - 0.5) * 0.6
       );
       puff._vel = new THREE.Vector3(
-        (Math.random() - 0.5) * 1.2 * scale,
-        (0.6 + Math.random() * 2.0) * scale,
-        (Math.random() - 0.5) * 1.2 * scale
+        (Math.random() - 0.5) * 1.2,
+        0.6 + Math.random() * 2.0,
+        (Math.random() - 0.5) * 1.2
       );
       puff._gravity = -0.8;
       puff._drag = 1.0;
@@ -303,8 +258,7 @@ export const particles = {
       puff.life = (big ? 1.4 : 0.9) + Math.random() * (big ? 1.2 : 0.7);
       puff.maxLife = puff.life;
       puff._expand = true;
-      puff._expandAmount = (big ? 2.0 : 1.4) * (0.7 + size * 0.5) * scale;
-      armPuff(puff);
+      puff._expandAmount = (big ? 2.0 : 1.4) * (0.7 + size * 0.5);
       this.scene.add(puff);
       this.list.push(puff);
     }
@@ -343,20 +297,7 @@ export const particles = {
       if (p._vel) {
         if (p._drag) p._vel.multiplyScalar(Math.max(0, 1 - p._drag * dt));
         p._vel.y -= (p._gravity ?? 9.81) * dt;
-        if (p._anchorEcef) {
-          // World-anchored: motion integrates in local meters around the
-          // detonation point; the position is re-projected below.
-          p._local.addScaledVector(p._vel, dt);
-        } else {
-          p.position.addScaledVector(p._vel, dt);
-        }
-      }
-
-      // World-anchored puffs: re-project anchor + local offset into the
-      // live camera space so the explosion STAYS at its world point while
-      // the camera (and the plane) move on.
-      if (p._anchorEcef && this._projectAnchor) {
-        try { this._projectAnchor(p); } catch (e) { /* viewer gone */ }
+        p.position.addScaledVector(p._vel, dt);
       }
 
       // Temperature ramp: t=1 at birth (colourFrom), t=0 at death (colourTo).

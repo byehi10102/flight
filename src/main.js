@@ -264,7 +264,6 @@ function initThree() {
 
   planeModel = new PlaneModel(scene);
   particles.init(scene);
-  particles.setViewer(viewer);
   bullets.attach(scene, viewer, planeModel);
 
   // ── MULTIPLAYER WIRING ──────────────────────────────────────────────────
