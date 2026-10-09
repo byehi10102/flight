@@ -11,10 +11,14 @@
 
   const controller = new PlaneController();
   window.__vibrateCalls = 0;
+  window.__boostCalls = 0;
   const origVibrate = navigator.vibrate?.bind(navigator);
   try { navigator.vibrate = () => { window.__vibrateCalls++; return true; }; } catch (e) {}
 
-  const touch = new TouchControls({ onAxis: (side, x, y) => controller.setStickInput(side, x, y) });
+  const touch = new TouchControls({
+    onAxis: (side, x, y) => controller.setStickInput(side, x, y),
+    onBoost: () => { window.__boostCalls++; controller.requestBoost(); },
+  });
   touch.show();
 
   window.MT = {

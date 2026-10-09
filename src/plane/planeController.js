@@ -79,7 +79,7 @@ export class PlaneController {
 
 	update() {
 		// Spacebar OR a touch double-tap pulse. Same edge the physics wants.
-		if (this.boostTap > 0) this.boostTap -= 0.016;
+		if (this.boostTap > 0) this.boostTap = Math.max(0, this.boostTap - 0.016);
 		this.input.boost = !!this.keys[' '] || this.boostTap > 0;
 		this.input.isDragging = this.mouseDragging;
 

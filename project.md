@@ -1079,10 +1079,15 @@ anywhere for an aimed round; hold the trigger for the reference cannon stream.
   20%/s). No ammo limit. The m61 sample loops while the trigger is held,
   like ref-flight. Round speed keeps the reference's constant over-the-jet
   ratio: (speed mph + 1500) with the game's own m/s conversion.
-- **Aim from the click.** `camera.getPickRay(x, y)` -> ENU at the plane ->
-  heading/pitch, computed once per shot. Origin alternates between the two
-  wing-root muzzles (F-15 gun position), offset in the plane's live attitude
-  (heading/pitch/roll) so the muzzle follows the wings when you bank.
+- **Aim.** Desktop quick-clicks aim at the clicked point
+  (`camera.getPickRay(x, y)` -> ENU at the plane -> heading/pitch, computed
+  once per shot); the stream and mobile rounds fly straight off the nose.
+  Rounds alternate between the two wing-root muzzles (F-15 gun position),
+  offset in the plane's live attitude (heading/pitch/roll) so the muzzle
+  follows the wings when you bank. MUZZLE_FORWARD = 24 m: the ref-flight
+  streak is 20 units long and trails BEHIND the round, so spawning at the
+  wing left the trail emerging from behind the airplane; at 24 m the trail
+  reaches back to the wing line and each shot visibly leaves the wing.
 - **HUD.** A thin GUN heat bar sits above the boost meter (bottom-centre,
   72px on mobile landscape); it turns red and reads GUN OVERHEAT when jammed.
 - **Visuals.** The Bullet class is ref-flight's src/weapon/bullet.js copied
@@ -1098,17 +1103,20 @@ anywhere for an aimed round; hold the trigger for the reference cannon stream.
   true perspective, so the streak keeps its shape while it visibly travels;
   where the jet's opaque pixels sit in front of a round it is correctly
   occluded, like ref-flight.
-- **Impact.** Per-frame `globe.getHeight` check; on contact the SAME
-  explosion the airplane crash uses (particles.spawnExplosion big, 72
-  fireballs, 16 smoke) placed at the impact's raw camera-space point -
-  distance gives the perspective - plus a random explosion-1/2/3 sound.
-  Max life 3 s covers misses.
+- **Impact.** Per-frame `globe.getHeight` check; on contact a LITTLE
+  crash-style explosion - the same particles.spawnExplosion system the
+  airplane crash uses (flash, detonation light, fireballs, smoke) at modest
+  counts (big:true, count 18, smokeCount 4) - placed at the impact's raw
+  camera-space point, so distance gives the perspective exactly like the
+  terrain does. Plus a random explosion-1/2/3 sound. Max life 3 s covers
+  misses.
 - **Input split.** Mobile: the GREEN FIRE STICK (a third, smaller trigger
   stick below-left of the right stick) owns firing - a quick tap fires one
   round, holding it streams. Each round takes the plane's CURRENT nose
   direction at its own fire moment and freezes it; moving the plane never
-  bends an in-flight round. Plain screen taps no longer fire (double-tap
-  anywhere outside the sticks still boosts). Desktop unchanged: quick click
+  bends an in-flight round. Plain screen taps no longer fire. Boost on
+  mobile: double-tap outside the sticks OR press-and-hold BOTH flight sticks
+  (rising edge, re-arms on release). Desktop unchanged: quick click
   (<350 ms, <6 px) fires an AIMED round at the clicked point; camera-drag
   never does; hold F/Enter for the stream.
 - Cleared on respawn / return to menu. Single-player only (no multiplayer

@@ -30,9 +30,12 @@ const SPEED_BONUS_MPH = 1500;     // fires this much faster than the jet (ref-fl
 const IMPACT_PAD_M = 2;           // meters above terrain that count as a hit
 
 // Wing muzzle offsets in the plane's local frame (meters). The F-15 carries
-// the M61 in the wing root; shots alternate L/R muzzles so stream fire
-// looks like both wing stations trading shots.
-const MUZZLE_FORWARD = 4.0;       // a bit ahead of the cockpit
+// the M61 in the wing root; shots alternate L/R muzzles. FORWARD clears the
+// plane: the ref-flight streak is 20 units long and trails BEHIND the round,
+// so spawning at the wing (4 m) left the trail emerging from behind the
+// airplane - at 24 m the trail reaches back to the wing line, and each shot
+// visibly leaves the wing.
+const MUZZLE_FORWARD = 24.0;
 const MUZZLE_LATERAL = 3.3;       // wing root offset, half of F-15 span-ish
 const MUZZLE_DROP = -0.5;         // slightly under the wing line
 
@@ -203,8 +206,10 @@ export class Bullet {
 	}
 
 	/**
-	 * Terrain hit: a SMALL explosion at the impact's raw camera-space point -
-	 * distance gives the perspective, exactly like the terrain does.
+	 * Terrain hit: a LITTLE crash-style explosion (the same system the
+	 * airplane crash uses - flash, detonation light, fireballs, smoke - at
+	 * modest counts) placed at the impact's raw camera-space point, so
+	 * distance gives the perspective exactly like the terrain does.
 	 */
 	checkTerrainCollision() {
 		const cartographic = Cesium.Cartographic.fromDegrees(this.lon, this.lat);
@@ -213,7 +218,7 @@ export class Bullet {
 			try {
 				const world = Cesium.Cartesian3.fromDegrees(this.lon, this.lat, this.alt, undefined, new Cesium.Cartesian3());
 				const view = Cesium.Matrix4.multiplyByPoint(this.viewer.camera.viewMatrix, world, new Cesium.Cartesian3());
-				particles.spawnExplosion(new THREE.Vector3(view.x, view.y, view.z), { big: false });
+				particles.spawnExplosion(new THREE.Vector3(view.x, view.y, view.z), { big: true, count: 18, smokeCount: 4 });
 				soundManager.play(`explosion-${1 + Math.floor(Math.random() * 3)}`);
 			} catch (e) { /* cosmetic */ }
 			this.destroy();

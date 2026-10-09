@@ -226,13 +226,31 @@ export class TouchControls {
     this.zoneFire = document.createElement("div");
     this.zoneFire.className = "stick-zone stick-zone-fire";
 
+    // Press-and-hold BOTH flight sticks = boost. Rising-edge only (one boost
+    // per both-held gesture); releases and re-grabs re-arm it. Double-tap
+    // boost elsewhere stays working.
+    this._bothSticks = false;
+    const checkBothSticks = () => {
+      const both = this.left && this.right
+        && this.left.pointerId !== null && this.right.pointerId !== null;
+      if (both && !this._bothSticks) {
+        if (this.onBoost) {
+          this.onBoost();
+          try { if (navigator.vibrate) navigator.vibrate(25); } catch (err) { /* unsupported */ }
+        }
+      }
+      this._bothSticks = both;
+    };
+
     this.left = new VirtualStick(this.zoneLeft, {
       side: "left", radius: this.radius, deadZone: this.deadZone,
       onAxis: this.onAxis, labels: STICK_LABELS.left,
+      onStart: checkBothSticks, onEnd: checkBothSticks,
     });
     this.right = new VirtualStick(this.zoneRight, {
       side: "right", radius: this.radius, deadZone: this.deadZone,
       onAxis: this.onAxis, labels: STICK_LABELS.right,
+      onStart: checkBothSticks, onEnd: checkBothSticks,
     });
     // Green trigger stick: smaller, below-left of the right stick. Pushing it
     // fires along the plane's CURRENT nose direction - main.js polls

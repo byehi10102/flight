@@ -249,6 +249,37 @@ async function phaseIsolated() {
   check("green fire stick grab/release tracks the trigger",
     fireStick.held && fireStick.released, JSON.stringify(fireStick));
 
+  // Press-and-hold BOTH flight sticks = boost: rising edge only, re-arms
+  // after a release, and the boost tap reaches the controller.
+  const bothSticks = await page.evaluate(() => {
+    const D = window.MT;
+    const zoneL = document.querySelector(".stick-zone-left");
+    const zoneR = document.querySelector(".stick-zone-right");
+    const mk = (zone, id) => {
+      const r = zone.getBoundingClientRect();
+      return { id, x: r.left + r.width / 2, y: r.top + r.height / 2, zone };
+    };
+    const L = mk(zoneL, 9501), R = mk(zoneR, 9502);
+    const opts = (p) => ({ pointerId: p.id, pointerType: "touch", isPrimary: true, clientX: p.x, clientY: p.y, bubbles: true, cancelable: true, button: 0, buttons: 1 });
+    const downs = window.__boostCalls;
+    L.zone.dispatchEvent(new PointerEvent("pointerdown", opts(L)));
+    const afterOne = window.__boostCalls;      // one stick: no boost
+    R.zone.dispatchEvent(new PointerEvent("pointerdown", opts(R)));
+    const afterBoth = window.__boostCalls;     // second stick: boost edge
+    window.dispatchEvent(new PointerEvent("pointerup", { pointerId: R.id, bubbles: true }));
+    R.zone.dispatchEvent(new PointerEvent("pointerdown", opts(R)));
+    const afterRegrab = window.__boostCalls;   // release + re-grab: re-armed
+    window.dispatchEvent(new PointerEvent("pointerup", { pointerId: L.id, bubbles: true }));
+    window.dispatchEvent(new PointerEvent("pointerup", { pointerId: R.id, bubbles: true }));
+    return { downs, afterOne, afterBoth, afterRegrab, boostTap: +D.controller.boostTap.toFixed(2) };
+  });
+  check("holding BOTH sticks boosts (rising edge, re-arms on release)",
+    bothSticks.afterOne === bothSticks.downs
+    && bothSticks.afterBoth === bothSticks.downs + 1
+    && bothSticks.afterRegrab === bothSticks.downs + 2
+    && bothSticks.boostTap > 0,
+    JSON.stringify(bothSticks));
+
   check("no page errors on the isolated page", errors.length === 0, errors.join("; "));
   await page.close();
 }
@@ -557,6 +588,20 @@ const browserMob = await puppeteer.launch(LAUNCH);
   check("ALL FOUR axes respond with both thumbs down (multi-touch)",
     allAxes && during.yaw > 0 && during.pitch > 0 && during.roll > 0 && during.throttle > before.throttle,
     JSON.stringify({ yaw: +during.yaw.toFixed(2), pitch: +during.pitch.toFixed(2), roll: +during.roll.toFixed(2), thr: +during.throttle.toFixed(2) }));
+
+  // Holding both flight sticks is also the both-hands boost gesture. The
+  // pulse can fully decay at crawling headless frame rates, so assert on the
+  // durable side effect: a boost always drains the charge below full.
+  {
+    const bothBoost = await page.evaluate(() => ({
+      boostTap: window.SKY_DEV.controller.boostTap,
+      isBoosting: window.SKY_DEV.physics.isBoosting,
+      charge: window.SKY_DEV.physics.boostCharge,
+    }));
+    check("holding BOTH flight sticks triggered the boost in the live game",
+      bothBoost.boostTap > 0 || bothBoost.isBoosting || bothBoost.charge < 0.999,
+      JSON.stringify(bothBoost));
+  }
 
   // Physics actually consumed the input: heading drifted right, jet descended,
   // speed past the 500-idle minimum.
