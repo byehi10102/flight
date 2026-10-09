@@ -203,9 +203,8 @@ export class Bullet {
 	}
 
 	/**
-	 * Local replacement for ref-flight's terrain spark: the airplane-CRASH
-	 * explosion, placed at the impact's raw camera-space point - distance
-	 * gives the perspective, exactly like the terrain does.
+	 * Terrain hit: a SMALL explosion at the impact's raw camera-space point -
+	 * distance gives the perspective, exactly like the terrain does.
 	 */
 	checkTerrainCollision() {
 		const cartographic = Cesium.Cartographic.fromDegrees(this.lon, this.lat);
@@ -214,7 +213,7 @@ export class Bullet {
 			try {
 				const world = Cesium.Cartesian3.fromDegrees(this.lon, this.lat, this.alt, undefined, new Cesium.Cartesian3());
 				const view = Cesium.Matrix4.multiplyByPoint(this.viewer.camera.viewMatrix, world, new Cesium.Cartesian3());
-				particles.spawnExplosion(new THREE.Vector3(view.x, view.y, view.z), { big: true, count: 72, smokeCount: 16 });
+				particles.spawnExplosion(new THREE.Vector3(view.x, view.y, view.z), { big: false });
 				soundManager.play(`explosion-${1 + Math.floor(Math.random() * 3)}`);
 			} catch (e) { /* cosmetic */ }
 			this.destroy();
