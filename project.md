@@ -1060,7 +1060,29 @@ for the probe.
 
 - Zoom/pinch on the map picker is unchanged - sticks only exist while flying.
 
-## 18. Wing-gun tracers (ref-flight gun mechanics)
+## 18. Boot loading page + spawn-region preload
+
+First open shows a full-screen loading page (SKYWARD title, progress bar,
+percent, status text) built on the same staged gating ref-flight uses
+(START stays disabled until every stage lands). Stages and bar slices:
+Cesium 15%, aircraft model 15%, audio 10%, globe surface 15%, terrain
+provider 20%, spawn region 25%.
+
+The region slice does real work: while the page is up, a hidden top-down
+camera pass at 160 km altitude warms imagery tiles for a ~300 km area
+around the default region, then sampleTerrainMostDetailed refines 3D
+terrain across a 7x5 grid of it (groundSampler.seed). The camera is
+restored exactly (initialCameraView is captured before this runs), so the
+menu backdrop is unchanged. Everything is bounded (tiles 12 s, whole pass
+25 s, plus the pre-existing 8 s globe fallback) so boot can never hang on a
+slow or offline provider.
+
+The same DOM element doubles as the compact "Loading Terrain..." chip over
+the spawn picker (`.loading-container.picker`: no title/bar, small centered
+box) - never the full-screen page - and stays pointer-events:none so map
+taps always pass through.
+
+## 19. Wing-gun tracers (ref-flight gun mechanics)
 
 Adapted from ref-flight's `src/weapon/bullet.js` + `src/systems/weaponSystem.js`,
 trimmed to this game's needs (no NPCs, missile lock or flares). Tap/click
@@ -1083,11 +1105,12 @@ anywhere for an aimed round; hold the trigger for the reference cannon stream.
   (`camera.getPickRay(x, y)` -> ENU at the plane -> heading/pitch, computed
   once per shot); the stream and mobile rounds fly straight off the nose.
   The muzzle is ref-flight's calculateWeaponPos adapted: rounds spawn at the
-  world point matching the DRAWN jet's wing station (alternating L/R), so
-  they visibly erupt from the on-screen wing. The reference's x/y FOV factor
-  is NOT applied - it compensates an unsynced 75 deg overlay, and ours is
-  synced (applying it pulled the muzzle to the fuselage). The old
-  attitude-based wing offset stays as the pre-load fallback.
+  world point matching the DRAWN jet's wing station - local offset
+  (+/-5.2, -0.4, -1.2) model units puts the streak head at ~84% of the drawn
+  half-span (verified: ndcX +/-0.22 vs the jet's +/-0.26), alternating L/R,
+  so rounds visibly leave the wings. The reference's x/y FOV factor is NOT
+  applied - it compensates an unsynced 75 deg overlay, and ours is synced.
+  The old attitude-based wing offset stays as the pre-load fallback.
 - **HUD.** A thin GUN heat bar sits above the boost meter (bottom-centre,
   72px on mobile landscape); it turns red and reads GUN OVERHEAT when jammed.
 - **Visuals.** The Bullet class is ref-flight's src/weapon/bullet.js copied

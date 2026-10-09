@@ -309,8 +309,12 @@ export class Bullets {
       const cam = this.viewer && this.viewer.camera;
       if (!model || !cam || !cam.positionWC) return this._wingMuzzle(player, side);
 
-      // Wing-root gun station in the F-15 model's local frame (model units).
-      const offset = new THREE.Vector3(2.2 * side, -0.3, -1.5);
+      // Wing gun station in the F-15 model's local frame (model units). The
+      // glb's half-span is ~5.9 local units, so +/-5.2 sits on the outer
+      // wing where rounds visibly LEAVE the wingtip line, not the fuselage
+      // side (verified: head projects to ~22% of half-screen, matching the
+      // drawn jet's ~26% half-width).
+      const offset = new THREE.Vector3(5.2 * side, -0.4, -1.2);
       offset.multiplyScalar(model.scale.x);
       offset.applyQuaternion(model.quaternion);
       offset.add(model.position);

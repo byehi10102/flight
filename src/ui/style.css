@@ -145,15 +145,53 @@ html, body {
 /* â”€â”€ Loading indicator â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .loading-container {
   position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
+  inset: 0;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 12px;
+  justify-content: center;
+  gap: 14px;
+  background: rgba(3, 6, 16, 0.92);
   z-index: 200;
   pointer-events: none; /* info-only: tapping the map underneath must always work */
+}
+
+.loading-title {
+  font-family: "Consolas", monospace;
+  font-size: 34px;
+  letter-spacing: 12px;
+  color: #0f0;
+  text-shadow: 0 0 18px rgba(0, 255, 0, 0.55);
+  margin-bottom: 10px;
+}
+
+.loading-bar-track {
+  width: min(420px, 72vw);
+  height: 10px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(0, 255, 0, 0.35);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+#loading-bar-fill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, #00aa00, #0f0);
+  box-shadow: 0 0 12px rgba(0, 255, 0, 0.7);
+  transition: width 0.35s ease-out;
+}
+
+.loading-percent {
+  font-family: "Consolas", monospace;
+  font-size: 12px;
+  letter-spacing: 3px;
+  color: #0f0;
+  text-shadow: 0 0 6px rgba(0, 255, 0, 0.5);
 }
 
 .spinner {
@@ -573,6 +611,29 @@ html, body {
 #gun-heat-fill.hot {
   background: linear-gradient(90deg, #a00, #f33);
   box-shadow: 0 0 10px rgba(255, 60, 60, 0.9);
+}
+
+/* Compact chip: the loading element doubles as the small "Loading Terrain..."
+   hint over the spawn picker - never the full-screen boot page. */
+.loading-container.picker {
+  inset: auto;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  right: auto;
+  bottom: auto;
+  transform: translate(-50%, -50%);
+  background: rgba(0, 0, 0, 0.6);
+  padding: 16px 26px;
+  border: 1px solid rgba(0, 255, 0, 0.3);
+  border-radius: 8px;
+  gap: 10px;
+}
+
+.loading-container.picker .loading-title,
+.loading-container.picker .loading-bar-track,
+.loading-container.picker .loading-percent {
+  display: none;
 }
 
 /* Minimap (above the corner attitude panel) */

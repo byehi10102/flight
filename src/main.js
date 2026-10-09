@@ -140,12 +140,18 @@ const confirmSpawnBtn = document.getElementById("confirmSpawnBtn");
 const startBtn = document.getElementById("startBtn");
 const loadingIndicator = document.getElementById("loadingIndicator");
 const loadingText = document.getElementById("loadingText");
+const loadingBarFill = document.getElementById("loading-bar-fill");
+const loadingPercent = document.getElementById("loadingPercent");
 const vignette = document.getElementById("transition-vignette");
 const locationSearch = document.getElementById("locationSearch");
 const searchResults = document.getElementById("search-results");
 const instructionText = document.getElementById("instruction-text");
 
-const loadingStatus = { model: false, cesium: false, globe: false, terrain: false, audio: false, failed: false };
+const loadingStatus = { model: false, cesium: false, globe: false, terrain: false, audio: false, area: false, failed: false };
+
+// Boot loading page: each stage carries a slice of the bar (ref-flight's
+// staged gating, plus a real area/terrain preload for the spawn picker).
+const LOAD_WEIGHTS = { cesium: 15, model: 15, audio: 10, globe: 15, terrain: 20, area: 25 };
 
 function updateLoadingUI() {
   if (!loadingIndicator || !loadingText || !startBtn) return;
@@ -153,7 +159,7 @@ function updateLoadingUI() {
     loadingIndicator.classList.add("hidden");
     return;
   }
-  const isAllLoaded = loadingStatus.model && loadingStatus.audio && loadingStatus.cesium && loadingStatus.globe && loadingStatus.terrain;
+  const isAllLoaded = loadingStatus.model && loadingStatus.audio && loadingStatus.cesium && loadingStatus.globe && loadingStatus.terrain && loadingStatus.area;
   if (loadingStatus.failed) {
     loadingText.textContent = "Loading Failed. Please Refresh.";
   } else if (!isAllLoaded) {
@@ -162,6 +168,7 @@ function updateLoadingUI() {
     else if (!loadingStatus.cesium) loadingText.textContent = "Loading Satellite Imagery...";
     else if (!loadingStatus.globe) loadingText.textContent = "Loading Globe Surface...";
     else if (!loadingStatus.terrain) loadingText.textContent = "Loading Terrain Data...";
+    else if (!loadingStatus.area) loadingText.textContent = "Preloading Spawn Region...";
   }
   if (!isAllLoaded || loadingStatus.failed) {
     loadingText.textContent = loadingText.textContent || "Loading...";
@@ -170,9 +177,22 @@ function updateLoadingUI() {
     loadingIndicator.classList.remove("hidden");
   } else {
     loadingIndicator.classList.add("hidden");
+    loadingIndicator.classList.remove("picker");
     startBtn.disabled = false;
     startBtn.style.pointerEvents = "auto";
   }
+  // Progress bar: the done flags each release their slice of the bar.
+  if (loadingBarFill) {
+    let pct = 0;
+    for (const key of Object.keys(LOAD_WEIGHTS)) {
+      if (loadingStatus[key]) pct += LOAD_WEIGHTS[key];
+    }
+    loadingBarFill.style.width = `${pct}%`;
+    if (loadingPercent) loadingPercent.textContent = `${pct}%`;
+  }
+  // During spawn picking the same element is reused as the small
+  // "Loading Terrain..." chip - never as the full-screen page.
+  loadingIndicator.classList.toggle("picker", currentState === States.PICK_SPAWN);
 }
 
 // ── Initialisation ───────────────────────────────────────────────────────────
@@ -201,6 +221,8 @@ viewer.scene.globe.tileLoadProgressEvent.addEventListener((queueLength) => {
   if (loadingIndicator && loadingText && currentState === States.PICK_SPAWN && !spawnPending) {
     if (queueLength > 0) {
       loadingText.textContent = "Loading Terrain...";
+      // Compact chip over the map, never the full-screen boot page.
+      loadingIndicator.classList.add("picker");
       loadingIndicator.classList.remove("hidden");
     } else {
       loadingIndicator.classList.add("hidden");
@@ -221,17 +243,69 @@ setTimeout(() => {
 
 // ── Preload terrain ─────────────────────────────────────────────────────────
 async function preloadTerrain() {
+  // Terrain provider first, then the spawn-picker preload: a hidden wide
+  // camera pass warms imagery tiles for a ~300 km area around the default
+  // region while the loading page is up, and sampleTerrainMostDetailed
+  // refines 3D terrain across a grid of it - so the picker opens with real
+  // elevation instead of streaming mid-choice. Bounded, so boot can never
+  // hang on a slow or offline provider.
   try {
     const provider = await attachTerrain(viewer);
-    if (provider) {
-      terrainReady = true;
-      loadingStatus.terrain = true;
-      updateLoadingUI();
-      await groundSampler.seed([[state.lat, state.lon]]);
-    }
+    if (provider) terrainReady = true;
   } catch (error) {
     console.warn("[terrain] Preload failed, will retry on spawn:", error);
+  } finally {
+    loadingStatus.terrain = true;
+    updateLoadingUI();
   }
+  try {
+    await withTimeout(preloadSpawnRegion(), 25000);
+  } catch (e) { /* bounded above */ }
+  loadingStatus.area = true;
+  updateLoadingUI();
+}
+
+async function preloadSpawnRegion() {
+  const saved = {
+    destination: viewer.camera.position.clone(),
+    orientation: {
+      heading: viewer.camera.heading,
+      pitch: viewer.camera.pitch,
+      roll: viewer.camera.roll,
+    },
+  };
+  viewer.camera.setView({
+    destination: Cesium.Cartesian3.fromDegrees(state.lon, state.lat, 160000),
+    orientation: { heading: 0, pitch: Cesium.Math.toRadians(-90), roll: 0 },
+  });
+  await waitForGlobeTiles(12000);
+  // 3D terrain across the region: ~ +/-1.2 deg lon x +/-0.8 deg lat grid.
+  const pts = [];
+  for (let i = 0; i < 7; i++) {
+    for (let j = 0; j < 5; j++) {
+      pts.push([
+        state.lat + (j / 4 - 0.5) * 1.6,
+        state.lon + (i / 6 - 0.5) * 2.4,
+      ]);
+    }
+  }
+  try { await groundSampler.seed(pts); } catch (e) { /* best effort */ }
+  viewer.camera.setView(saved);
+}
+
+function waitForGlobeTiles(timeoutMs) {
+  return new Promise((resolve) => {
+    const started = performance.now();
+    const check = () => {
+      if (viewer.scene.globe.tilesLoaded || performance.now() - started > timeoutMs) { resolve(); return; }
+      setTimeout(check, 250);
+    };
+    check();
+  });
+}
+
+function withTimeout(promise, ms) {
+  return Promise.race([promise, new Promise((r) => setTimeout(r, ms))]);
 }
 
 // ── Three.js setup ───────────────────────────────────────────────────────────
