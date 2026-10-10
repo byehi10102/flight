@@ -1037,14 +1037,17 @@ overlay covers it.
 
 ### Spawn picking on touch
 
+Search UI: the magnifier pill EXPANDS into the search box (fluid width +
+opacity transition, results drop below, outside click collapses; the
+instruction text stays put). Backend: Nominatim primary (ref-flight's,
+keyless) with Photon/Open-Meteo silent fallbacks.
+
 The "Loading Terrain..." indicator (`.loading-container`) is
 `pointer-events: none` - it appears/reappears with tile streaming while
 picking, and without this it swallowed taps through the middle of the map.
 The picker is PAN-ONLY: on-screen +/- buttons gone, wheel/pinch/double-
 click/keyboard zoom all disabled while picking (pan, tap-to-place, or
-search). Search geocoders run Photon first, then Open-Meteo, Nominatim
-last - Nominatim rate-limits browsers hardest, so it is the final fallback,
-not the default.
+search).
 
 ### Verification (`dev-mobile-test.mjs`)
 
@@ -1062,11 +1065,18 @@ for the probe.
 
 ## 18. Boot loading page + spawn-region preload
 
-First open shows a full-screen loading page (SKYWARD title, progress bar,
-percent, status text) built on the same staged gating ref-flight uses
-(START stays disabled until every stage lands). Stages and bar slices:
+First open shows an OPAQUE full-screen loading page: a 3D airplane scene
+RENDERED IN BLENDER (public/loading-scene.png - low-poly jet with delta
+wings, twin canted fins and green afterburner discs, key/rim/fill area
+lights, hero three-quarter camera; built and rendered via the Blender MCP)
+as a slowly drifting backdrop, with the SKYWARD title, progress bar,
+percent and status text on a dim gradient card. START stays disabled until
+every stage lands (ref-flight's staged gating). Stages and bar slices:
 Cesium 15%, aircraft model 15%, audio 10%, globe surface 15%, terrain
 provider 20%, spawn region 25%.
+
+At 100% the page FADES OUT (0.7 s) revealing the menu - single player /
+multiplayer - instead of cutting.
 
 The region slice does real work: while the page is up, a hidden top-down
 camera pass at 160 km altitude warms imagery tiles for a ~300 km area
@@ -1074,13 +1084,13 @@ around the default region, then sampleTerrainMostDetailed refines 3D
 terrain across a 7x5 grid of it (groundSampler.seed). The camera is
 restored exactly (initialCameraView is captured before this runs), so the
 menu backdrop is unchanged. Everything is bounded (tiles 12 s, whole pass
-25 s, plus the pre-existing 8 s globe fallback) so boot can never hang on a
-slow or offline provider.
+25 s, plus the pre-existing 8 s globe fallback) so boot can never hang on
+a slow or offline provider.
 
 The same DOM element doubles as the compact "Loading Terrain..." chip over
-the spawn picker (`.loading-container.picker`: no title/bar, small centered
-box) - never the full-screen page - and stays pointer-events:none so map
-taps always pass through.
+the spawn picker (`.loading-container.picker`: no backdrop/bar, small
+centered box) - never the full-screen page - and stays pointer-events:none
+so map taps always pass through.
 
 ## 19. Wing-gun tracers (ref-flight gun mechanics)
 

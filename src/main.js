@@ -153,6 +153,18 @@ const loadingStatus = { model: false, cesium: false, globe: false, terrain: fals
 // staged gating, plus a real area/terrain preload for the spawn picker).
 const LOAD_WEIGHTS = { cesium: 15, model: 15, audio: 10, globe: 15, terrain: 20, area: 25 };
 
+// Boot loading page: fade to the menu instead of cutting. Idempotent.
+let loadingPageHidden = false;
+function hideLoadingPage() {
+  if (!loadingIndicator || loadingPageHidden) return;
+  loadingPageHidden = true;
+  loadingIndicator.classList.add("fading");
+  setTimeout(() => {
+    loadingIndicator.classList.add("hidden");
+    loadingIndicator.classList.remove("fading", "picker");
+  }, 750);
+}
+
 function updateLoadingUI() {
   if (!loadingIndicator || !loadingText || !startBtn) return;
   if (currentState === States.FLYING || currentState === States.TRANSITIONING) {
@@ -176,8 +188,9 @@ function updateLoadingUI() {
     startBtn.style.pointerEvents = "none";
     loadingIndicator.classList.remove("hidden");
   } else {
-    loadingIndicator.classList.add("hidden");
-    loadingIndicator.classList.remove("picker");
+    // Boot done: fade the loading page out (0.7 s) so the menu - single
+    // player / multiplayer - takes over smoothly, then hide it for real.
+    hideLoadingPage();
     startBtn.disabled = false;
     startBtn.style.pointerEvents = "auto";
   }
@@ -541,14 +554,11 @@ function enterSpawnPicking(useVignette = true) {
     }
     pendingSpawnName = null;
 
-    // ref-flow: the picker opens with the instruction visible and the
-    // search input tucked away behind the magnifier toggle.
-    if (locationSearch) {
-      locationSearch.value = "";
-      locationSearch.style.display = "none";
-    }
-    if (instructionText) instructionText.style.display = "block";
+    // The picker opens with the search pill collapsed and clear.
+    if (locationSearch) locationSearch.value = "";
+    try { window.__collapseSearchPill?.(); } catch (e) { /* cosmetic */ }
     if (searchResults) searchResults.style.display = "none";
+    if (instructionText) instructionText.style.display = "block";
 
     viewer.camera.flyTo({
       destination: Cesium.Cartesian3.fromDegrees(state.lon, state.lat, 15000),
@@ -606,23 +616,28 @@ let searchDebounce = null;
 function setupSearch() {
   if (!locationSearch) return;
 
-  // ref-flight's search toggle: the magnifier button reveals/hides the
-  // input; the instruction text swaps out while typing; the icon becomes a
-  // spinner while a query is in flight (set in performSearch).
+  // Search pill: clicking the magnifier EXPANDS it into a search box with
+  // a fluid width/opacity transition; results drop below. Clicking outside
+  // collapses it. The instruction text stays put the whole time.
+  const searchPill = document.getElementById("search-pill");
   const searchToggleBtn = document.getElementById("search-toggle-btn");
   const originalSearchIcon = searchToggleBtn ? searchToggleBtn.innerHTML : "";
-  if (searchToggleBtn) {
+  const collapsePill = () => {
+    if (!searchPill) return;
+    searchPill.classList.remove("expanded");
+    try { window.__setSearchBusy?.(false); } catch (e) { /* cosmetic */ }
+  };
+  window.__collapseSearchPill = collapsePill;
+  if (searchPill && searchToggleBtn) {
     searchToggleBtn.addEventListener("click", (e) => {
       e.stopPropagation();
-      const isSearching = locationSearch.style.display === "block";
-      if (isSearching) {
-        locationSearch.style.display = "none";
-        if (instructionText) instructionText.style.display = "block";
-        searchResults.style.display = "none";
+      if (searchPill.classList.contains("expanded")) {
+        collapsePill();
       } else {
-        locationSearch.style.display = "block";
-        if (instructionText) instructionText.style.display = "none";
-        locationSearch.focus();
+        searchPill.classList.add("expanded");
+        // Wait for the width transition before focusing, so the caret
+        // lands inside the grown pill (feels much more fluid).
+        setTimeout(() => locationSearch.focus(), 260);
       }
     });
   }
@@ -632,6 +647,9 @@ function setupSearch() {
       ? '<div class="loader-spinner"></div>'
       : originalSearchIcon;
   };
+  document.addEventListener("click", (e) => {
+    if (searchPill && !searchPill.contains(e.target)) collapsePill();
+  });
 
   locationSearch.addEventListener("input", () => {
     clearTimeout(searchDebounce);

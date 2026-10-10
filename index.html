@@ -54,13 +54,16 @@
 
     <!-- Loading -->
     <div id="loadingIndicator" class="loading-container">
-      <div class="loading-title">SKYWARD</div>
-      <div class="loading-bar-track">
-        <div id="loading-bar-fill"></div>
+      <div class="loading-bg"></div>
+      <div class="loading-content">
+        <div class="loading-title">SKYWARD</div>
+        <div class="loading-bar-track">
+          <div id="loading-bar-fill"></div>
+        </div>
+        <div class="loading-percent" id="loadingPercent">0%</div>
+        <div class="spinner"></div>
+        <div id="loadingText" class="loading-text">Loading...</div>
       </div>
-      <div class="loading-percent" id="loadingPercent">0%</div>
-      <div class="spinner"></div>
-      <div id="loadingText" class="loading-text">Loading...</div>
     </div>
 
     <!-- Spawn Picker -->
@@ -68,14 +71,16 @@
       <div id="spawn-top-ui" class="spawn-hud-top">
         <div id="spawn-instruction">
           <span id="instruction-text">CLICK ANYWHERE ON THE MAP OR SEARCH FOR A LOCATION</span>
-          <input type="text" id="locationSearch" placeholder="ENTER LOCATION NAME..." style="display:none" />
           <div id="search-results"></div>
         </div>
-        <div id="search-toggle-btn" title="Toggle Search">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="11" cy="11" r="8"></circle>
-            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-          </svg>
+        <div id="search-pill">
+          <div id="search-toggle-btn" title="Search for a location">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="11" cy="11" r="8"></circle>
+              <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+            </svg>
+          </div>
+          <input type="text" id="locationSearch" placeholder="ENTER LOCATION NAME..." />
         </div>
       </div>
       <button id="confirmSpawnBtn" class="menu-btn hidden spawn-confirm-btn">SPAWN HERE</button>

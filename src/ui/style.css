@@ -143,6 +143,8 @@ html, body {
 }
 
 /* â”€â”€ Loading indicator â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* Loading page: OPAQUE 3D-render backdrop (Blender scene) with a slow
+   drift, the readouts on a dim gradient so they read over the jet. */
 .loading-container {
   position: absolute;
   inset: 0;
@@ -151,13 +153,41 @@ html, body {
   right: 0;
   bottom: 0;
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 14px;
-  background: rgba(3, 6, 16, 0.92);
+  background: #03060f;
   z-index: 200;
   pointer-events: none; /* info-only: tapping the map underneath must always work */
+  transition: opacity 0.7s ease;
+  opacity: 1;
+}
+
+.loading-container.fading {
+  opacity: 0;
+}
+
+.loading-bg {
+  position: absolute;
+  inset: 0;
+  background: url("/loading-scene.png") center / cover no-repeat;
+  animation: loadingDrift 16s ease-in-out infinite alternate;
+}
+
+@keyframes loadingDrift {
+  from { transform: scale(1.02); }
+  to { transform: scale(1.12) translateY(-1.2%); }
+}
+
+.loading-content {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 34px 42px;
+  background: radial-gradient(ellipse at center, rgba(2, 5, 14, 0.78) 0%, rgba(2, 5, 14, 0.42) 62%, rgba(2, 5, 14, 0.12) 100%);
+  border: 1px solid rgba(0, 255, 0, 0.18);
+  border-radius: 10px;
 }
 
 .loading-title {
@@ -751,10 +781,18 @@ html, body {
   gap: 10px;
 }
 
+.loading-container.picker .loading-bg,
 .loading-container.picker .loading-title,
 .loading-container.picker .loading-bar-track,
 .loading-container.picker .loading-percent {
   display: none;
+}
+
+.loading-container.picker .loading-content {
+  background: rgba(0, 0, 0, 0.6);
+  border: 1px solid rgba(0, 255, 0, 0.3);
+  padding: 12px 18px;
+  gap: 8px;
 }
 
 /* Minimap (above the corner attitude panel) */
@@ -917,34 +955,82 @@ html, body {
   text-align: center;
 }
 
-/* ── Search toggle (ref-flight picker) ───────────────────────────────────── */
-#search-toggle-btn {
+/* ── Search pill (ref-flight picker): the magnifier button EXPANDS into a
+   search box with a fluid width/opacity transition; results drop below. */
+#search-pill {
   pointer-events: auto;
-  cursor: pointer;
+  display: flex;
+  align-items: center;
   width: 44px;
   height: 44px;
+  overflow: hidden;
+  border: 2px solid rgba(0, 255, 0, 0.6);
+  background: rgba(0, 40, 0, 0.5);
+  box-shadow: 0 0 10px rgba(0, 255, 0, 0.3);
+  border-radius: 22px;
+  cursor: pointer;
+  transition: width 0.45s cubic-bezier(0.2, 0.9, 0.25, 1),
+    background 0.45s ease, box-shadow 0.45s ease;
+}
+
+#search-pill.expanded {
+  width: min(320px, 70vw);
+  background: rgba(0, 60, 0, 0.75);
+  box-shadow: 0 0 16px rgba(0, 255, 0, 0.45);
+  cursor: default;
+}
+
+#search-pill #locationSearch {
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: #0f0;
+  font-family: "Consolas", monospace;
+  font-size: 13px;
+  letter-spacing: 1px;
+  padding: 0 12px 0 2px;
+  opacity: 0;
+  transform: translateX(8px);
+  transition: opacity 0.3s ease 0.12s, transform 0.3s ease 0.12s;
+  text-shadow: 0 0 4px rgba(0, 255, 0, 0.5);
+  box-shadow: none;
+}
+
+#search-pill.expanded #locationSearch {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+#search-pill #locationSearch::placeholder {
+  color: rgba(0, 255, 0, 0.45);
+  text-shadow: none;
+}
+
+#search-toggle-btn {
+  flex: 0 0 44px;
+  height: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 2px solid rgba(0, 255, 0, 0.6);
-  background: rgba(0, 40, 0, 0.5);
   color: #0f0;
-  box-shadow: 0 0 10px rgba(0, 255, 0, 0.3);
-  transition: all 0.2s ease;
+  pointer-events: auto;
 }
 
-#search-toggle-btn:hover {
-  background: rgba(0, 80, 0, 0.7);
-  box-shadow: 0 0 15px rgba(0, 255, 0, 0.5);
-}
-
-#search-toggle-btn .loader-spinner {
-  width: 20px;
-  height: 20px;
+#search-pill .loader-spinner {
+  width: 18px;
+  height: 18px;
   border: 3px solid rgba(0, 255, 0, 0.2);
   border-top-color: #0f0;
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
+}
+
+/* Old standalone search styling is superseded by the pill. */
+#locationSearch {
+  max-width: none;
 }
 
 /* ── HUD element deltas ──────────────────────────────────────────────────── */
