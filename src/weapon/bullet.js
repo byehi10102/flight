@@ -102,6 +102,8 @@ export class Bullet {
 				`,
 				transparent: true,
 				depthWrite: false,
+				depthTest: false, // tracers read over the jet silhouette (the raw ref
+				                 // copy let the opaque plane occlude rounds at spawn)
 				blending: THREE.AdditiveBlending,
 				side: THREE.DoubleSide
 			});
@@ -132,7 +134,7 @@ export class Bullet {
 
 		const tipGeom = new THREE.ConeGeometry(0.12, 0.8, 12);
 		tipGeom.translate(0, -0.4, 0);
-		const tipMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 1.0, blending: THREE.AdditiveBlending, depthWrite: false });
+		const tipMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 1.0, blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false });
 		const tip = new THREE.Mesh(tipGeom, tipMat);
 		this.mesh.add(tip);
 
@@ -309,9 +311,14 @@ export class Bullets {
       const cam = this.viewer && this.viewer.camera;
       if (!model || !cam || !cam.positionWC) return this._wingMuzzle(player, side);
 
-      // ref-flight's exact wing station (their missile offset): 15.0 * side,
-      // -15.0, 0.0 in model units, scaled + rotated with the drawn model.
-      const offset = new THREE.Vector3(15.0 * side, -15.0, 0.0);
+      // Wing gun station in the F-15 model's local frame (model units): the
+      // glb's half-span is ~5.9 local units, so +/-5.2 lands ON the drawn
+      // wing (pixel-verified: heads project to ~22% of half-screen, matching
+      // the jet's ~26% half-width), slightly below the wing line, a touch
+      // ahead. The ref-flight MISSILE station (15, -15, 0) hangs from the
+      // under-wing pylons - below the plane - which read as "not from the
+      // wings".
+      const offset = new THREE.Vector3(5.2 * side, -0.4, -1.2);
       const scaledOffset = offset.clone().multiplyScalar(model.scale.x);
       scaledOffset.applyQuaternion(model.quaternion);
       scaledOffset.add(model.position);

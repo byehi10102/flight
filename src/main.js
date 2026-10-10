@@ -155,8 +155,23 @@ const LOAD_WEIGHTS = { cesium: 15, model: 15, audio: 10, globe: 15, terrain: 20,
 
 // Boot loading page: fade to the menu instead of cutting. Idempotent.
 let loadingPageHidden = false;
-function hideLoadingPage() {
-  if (!loadingIndicator || loadingPageHidden) return;
+// Mobile browsers (iOS Safari especially) honor the muted attribute
+// inconsistently and silently refuse autoplay; force the properties and
+// retry play() so the 3D fly-through actually shows on phones.
+(() => {
+  const v = document.querySelector(".loading-bg-video");
+  if (!v) return;
+  v.muted = true;
+  v.setAttribute("muted", "");
+  v.setAttribute("playsinline", "");
+  v.setAttribute("webkit-playsinline", "");
+  const kick = () => { try { v.play().catch(() => {}); } catch (e) { /* pending */ } };
+  v.addEventListener("canplay", kick);
+  v.addEventListener("loadeddata", kick);
+  kick();
+})();
+
+function hideLoadingPage() {  if (!loadingIndicator || loadingPageHidden) return;
   loadingPageHidden = true;
   loadingIndicator.classList.add("fading");
   setTimeout(() => {

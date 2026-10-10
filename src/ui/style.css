@@ -1428,15 +1428,16 @@ body.mobile-landscape #attitude-panel { display: block; }
 }
 
 /* ── Mobile landscape HUD: the RIGHT edge holds the instruments ──────────
-   Stacked top-down: minimap (small), attitude/pitch panel (small), speed,
-   altitude, boost bar. The left half stays clear for the left stick, the
-   bottom corners for both sticks. Readouts are pointer-events:none so they
-   can never swallow a joystick touch where the zones overlap them. */
-body.mobile-landscape #compass-container { width: min(300px, 36vw); top: 6px; }
-body.mobile-landscape #heading-display { top: 36px; font-size: 12px; }
+   Stacked top-down: weapons chip, minimap (small), attitude/pitch panel,
+   speed, altitude. Bars sit bottom-centre. Sized to fit even 320px-tall
+   phones. The left half stays clear for the left stick, the bottom corners
+   for both sticks. Readouts are pointer-events:none so they can never
+   swallow a joystick touch where the zones overlap them. */
+body.mobile-landscape #compass-container { width: min(240px, 34vw); top: 4px; }
+body.mobile-landscape #heading-display { top: 28px; font-size: 10px; }
 
-body.mobile-landscape #hud-top-left { top: 8px; left: 12px; font-size: 11px; line-height: 1.4; }
-body.mobile-landscape #hud-top-right { top: 8px; right: 12px; font-size: 11px; line-height: 1.4; }
+body.mobile-landscape #hud-top-left { top: 6px; left: 10px; font-size: 9px; line-height: 1.35; }
+body.mobile-landscape #hud-top-right { top: 6px; right: 10px; font-size: 9px; line-height: 1.35; }
 
 body.mobile-landscape #hud-top-left,
 body.mobile-landscape #hud-top-right,
@@ -1449,59 +1450,109 @@ body.mobile-landscape #minimap-container { pointer-events: none; }
 
 /* Minimap: shrunk to a corner peep. */
 body.mobile-landscape #minimap-container {
-  left: auto; right: 10px; bottom: auto; top: 46px;
-  width: 78px; height: 78px;
+  left: auto; right: 10px; bottom: auto; top: 56px;
+  width: 60px; height: 60px;
 }
 
 /* Attitude / pitch panel: shrunk, same right column, below the minimap. */
 body.mobile-landscape #attitude-panel {
-  right: 10px; bottom: auto; top: 130px;
-  width: 78px; height: 78px; border-radius: 6px;
+  right: 10px; bottom: auto; top: 122px;
+  width: 60px; height: 60px; border-radius: 6px;
 }
 body.mobile-landscape #pitch-lines .pitch-line { font-size: 7px; }
 body.mobile-landscape #pitch-ref span { font-size: 8px; top: -11px; }
 body.mobile-landscape #pitch-ref { left: 4px; right: 4px; }
 
-/* Speed, altitude, boost bar: right column under the instruments. */
+/* Speed, altitude: right column under the instruments. */
 body.mobile-landscape #hud-speed-box {
-  left: auto; right: 10px; bottom: auto; top: 214px;
-  transform: none; padding: 4px 8px;
+  left: auto; right: 10px; bottom: auto; top: 188px;
+  transform: none; padding: 2px 6px;
 }
 body.mobile-landscape #hud-alt-box {
-  left: auto; right: 10px; bottom: auto; top: 256px;
-  transform: none; padding: 4px 8px;
+  left: auto; right: 10px; bottom: auto; top: 234px;
+  transform: none; padding: 2px 6px;
 }
 body.mobile-landscape #hud-speed-box .value-box span,
-body.mobile-landscape #hud-alt-box .value-box span { font-size: 18px; }
+body.mobile-landscape #hud-alt-box .value-box span { font-size: 15px; min-height: 28px; }
+body.mobile-landscape #hud-speed-box .label,
+body.mobile-landscape #hud-alt-box .label { font-size: 8px; }
+body.mobile-landscape .value-box { min-width: 78px; }
 
 body.mobile-landscape #boost-container {
-  left: 50%; right: auto; bottom: 26px; top: auto;
-  transform: translateX(-50%); width: min(96px, 18vw);
+  left: 50%; right: auto; bottom: 22px; top: auto;
+  transform: translateX(-50%); width: min(84px, 16vw);
 }
-body.mobile-landscape #boost-container .boost-track { height: 8px; }
-body.mobile-landscape #boost-label { font-size: 8px; margin-bottom: 2px; }
+body.mobile-landscape #boost-container .boost-track { height: 6px; }
+body.mobile-landscape #boost-label { font-size: 7px; margin-bottom: 2px; }
 
 /* Coordinates tuck under the left info block, clear of the left stick. */
 body.mobile-landscape #coords {
-  left: 12px; bottom: auto; top: 52px; font-size: 10px;
+  left: 10px; bottom: auto; top: 36px; font-size: 9px;
 }
 
 body.mobile-landscape #gun-heat-container {
-  left: 50%; right: auto; bottom: 58px; top: auto;
-  transform: translateX(-50%); width: 72px;
+  left: 50%; right: auto; bottom: 46px; top: auto;
+  transform: translateX(-50%); width: 64px;
 }
-body.mobile-landscape #gun-heat-label { font-size: 7px; }
+body.mobile-landscape #gun-heat-label { font-size: 6px; }
+body.mobile-landscape .gun-heat-track { height: 3px; }
 
-body.mobile-landscape #hud-status { bottom: 8px; font-size: 10px; }
+body.mobile-landscape #hud-status { bottom: 4px; font-size: 9px; }
+
+/* ── Mobile picker: the instruction + search stack shrinks to fit a short
+   landscape screen instead of crowding the map. ─────────────────────────── */
+body.mobile-landscape .spawn-hud-top {
+  top: 8px;
+  width: 96vw;
+  max-width: 96vw;
+}
+
+body.mobile-landscape #spawn-instruction { gap: 6px; }
+
+body.mobile-landscape #instruction-text {
+  font-size: 10px;
+  letter-spacing: 1px;
+  padding: 5px 10px;
+  border-radius: 3px;
+}
+
+body.mobile-landscape #search-pill {
+  height: 32px;
+  width: min(280px, 60vw);
+  padding: 0 12px;
+  gap: 8px;
+  border-width: 1.5px;
+  border-radius: 16px;
+}
+
+body.mobile-landscape #search-pill #locationSearch {
+  font-size: 11px;
+  letter-spacing: 1px;
+}
+
+body.mobile-landscape #search-pill-icon svg { width: 13px; height: 13px; }
+
+body.mobile-landscape #search-results {
+  width: min(280px, 60vw);
+  max-height: 120px;
+  margin-top: 5px;
+}
+
+body.mobile-landscape #search-results .search-result-item {
+  padding: 7px 12px;
+  font-size: 11px;
+}
 
 body.mobile-landscape #region-notification { top: 44px; padding: 4px 12px; }
 body.mobile-landscape #pull-up-warning { font-size: 26px; }
 
 body.mobile-landscape #pitch-lines-center { display: none; }
 
-/* Weapons panel: compact, under the top-right info block on phones. */
+/* Weapons panel: compact chip under the top-right info block on phones;
+   the F-15 plate is dropped to keep it one slim row. */
 body.mobile-landscape #weapons-hud {
-  right: 10px; bottom: auto; top: 78px;
-  transform: scale(0.62);
+  right: 10px; bottom: auto; top: 34px;
+  transform: scale(0.5);
   transform-origin: top right;
 }
+body.mobile-landscape #aircraft-icon { display: none; }
