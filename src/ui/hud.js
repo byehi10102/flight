@@ -243,15 +243,22 @@ export class Hud {
     const yawDiff = (state.yaw || 0) - this.smoothedYaw;
     const throttleDiff = (state.throttle || 0) - this.smoothedThrottle;
     if (this.uiContainer) {
-      const maxTilt = 15;
+      // Clamp the 3D cockpit-tilt so HUD elements never leave the screen:
+      // the tilt/shift stay small, the throttle "kick" is a CONTRACTION
+      // (scale never exceeds 1.0 - scaling up pushed corner elements like
+      // the minimap and weapons panel off-screen during maneuvers), and the
+      // shift budget shrinks on narrow viewports where margins are tight.
+      const maxTilt = 7;
       const tiltX = Math.max(-maxTilt, Math.min(maxTilt, pitchDiff * 0.8));
       const tiltY = Math.max(-maxTilt, Math.min(maxTilt, -rollDiff * 0.3 + yawDiff * 5.0));
-      const maxShift = 50;
+      const vw = (this.uiContainer.clientWidth || window.innerWidth) || 1280;
+      const maxShift = vw < 900 ? 6 : 12;
       const shiftX = Math.max(-maxShift, Math.min(maxShift, -rollDiff * 1.5 - yawDiff * 20.0));
       const shiftY = Math.max(-maxShift, Math.min(maxShift, pitchDiff * 3.0 + throttleDiff * 15.0));
-      const targetBoostScale = isBoosting ? 1.02 : 1.0;
+      const targetBoostScale = isBoosting ? 1.0 : 1.0;
       this.smoothedBoostScale += (targetBoostScale - this.smoothedBoostScale) * 0.1;
-      const scale = (1 + throttleDiff * 0.25) * this.smoothedBoostScale;
+      const rawScale = (1 + throttleDiff * 0.25) * this.smoothedBoostScale;
+      const scale = Math.max(0.96, Math.min(1.0, rawScale));
       if (isBoosting) {
         const time = Date.now() * 0.05;
         this.currentShakeX = Math.sin(time * 1.5) * 2 + Math.cos(time * 2.1) * 1.5;
