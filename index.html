@@ -55,6 +55,9 @@
     <!-- Loading -->
     <div id="loadingIndicator" class="loading-container">
       <div class="loading-bg"></div>
+      <video class="loading-bg-video" autoplay muted loop playsinline poster="/loading-scene.png">
+        <source src="/loading-scene.mp4" type="video/mp4" />
+      </video>
       <div class="loading-content">
         <div class="loading-title">SKYWARD</div>
         <div class="loading-bar-track">
@@ -71,16 +74,16 @@
       <div id="spawn-top-ui" class="spawn-hud-top">
         <div id="spawn-instruction">
           <span id="instruction-text">CLICK ANYWHERE ON THE MAP OR SEARCH FOR A LOCATION</span>
-          <div id="search-results"></div>
-        </div>
-        <div id="search-pill">
-          <div id="search-toggle-btn" title="Search for a location">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
-              <circle cx="11" cy="11" r="8"></circle>
-              <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-            </svg>
+          <div id="search-pill">
+            <span id="search-pill-icon">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="11" cy="11" r="8"></circle>
+                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+              </svg>
+            </span>
+            <input type="text" id="locationSearch" placeholder="SEARCH FOR A LOCATION..." />
           </div>
-          <input type="text" id="locationSearch" placeholder="ENTER LOCATION NAME..." />
+          <div id="search-results"></div>
         </div>
       </div>
       <button id="confirmSpawnBtn" class="menu-btn hidden spawn-confirm-btn">SPAWN HERE</button>

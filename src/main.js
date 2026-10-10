@@ -554,9 +554,8 @@ function enterSpawnPicking(useVignette = true) {
     }
     pendingSpawnName = null;
 
-    // The picker opens with the search pill collapsed and clear.
+    // The picker opens with a clear, focused search field.
     if (locationSearch) locationSearch.value = "";
-    try { window.__collapseSearchPill?.(); } catch (e) { /* cosmetic */ }
     if (searchResults) searchResults.style.display = "none";
     if (instructionText) instructionText.style.display = "block";
 
@@ -616,40 +615,17 @@ let searchDebounce = null;
 function setupSearch() {
   if (!locationSearch) return;
 
-  // Search pill: clicking the magnifier EXPANDS it into a search box with
-  // a fluid width/opacity transition; results drop below. Clicking outside
-  // collapses it. The instruction text stays put the whole time.
-  const searchPill = document.getElementById("search-pill");
-  const searchToggleBtn = document.getElementById("search-toggle-btn");
-  const originalSearchIcon = searchToggleBtn ? searchToggleBtn.innerHTML : "";
-  const collapsePill = () => {
-    if (!searchPill) return;
-    searchPill.classList.remove("expanded");
-    try { window.__setSearchBusy?.(false); } catch (e) { /* cosmetic */ }
-  };
-  window.__collapseSearchPill = collapsePill;
-  if (searchPill && searchToggleBtn) {
-    searchToggleBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      if (searchPill.classList.contains("expanded")) {
-        collapsePill();
-      } else {
-        searchPill.classList.add("expanded");
-        // Wait for the width transition before focusing, so the caret
-        // lands inside the grown pill (feels much more fluid).
-        setTimeout(() => locationSearch.focus(), 260);
-      }
-    });
-  }
+  // Search pill: an always-open round search field with the magnifier icon
+  // inside, centered under the instruction text. The icon swaps to a spinner
+  // while a query is in flight (set in performSearch).
+  const searchPillIcon = document.getElementById("search-pill-icon");
+  const originalSearchIcon = searchPillIcon ? searchPillIcon.innerHTML : "";
   window.__setSearchBusy = (busy) => {
-    if (!searchToggleBtn) return;
-    searchToggleBtn.innerHTML = busy
+    if (!searchPillIcon) return;
+    searchPillIcon.innerHTML = busy
       ? '<div class="loader-spinner"></div>'
       : originalSearchIcon;
   };
-  document.addEventListener("click", (e) => {
-    if (searchPill && !searchPill.contains(e.target)) collapsePill();
-  });
 
   locationSearch.addEventListener("input", () => {
     clearTimeout(searchDebounce);

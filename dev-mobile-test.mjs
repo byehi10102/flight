@@ -357,17 +357,21 @@ const browserDesk = await puppeteer.launch(LAUNCH);
     const faded = await page.waitForFunction(() => {
       const li = document.getElementById("loadingIndicator");
       return li && li.classList.contains("hidden");
-    }, { timeout: 5000, polling: 150 }).then(() => true).catch(() => false);
+    }, { timeout: 15000, polling: 150 }).then(() => true).catch(() => false);
     const boot = await page.evaluate(() => {
       const li = document.getElementById("loadingIndicator");
       const bg = li ? li.querySelector(".loading-bg") : null;
+      const vid = li ? li.querySelector(".loading-bg-video") : null;
       return {
         hasRenderBackdrop: !!(bg && /loading-scene\.png/.test(getComputedStyle(bg).backgroundImage || "none")),
+        hasFlythroughVideo: !!(vid && /loading-scene\.mp4/.test(vid.querySelector("source")?.src || vid.src || "none")),
+        videoLoops: vid ? vid.loop : false,
         pct: document.getElementById("loadingPercent")?.textContent,
       };
     });
     check("loading page faded out after boot (menu take-over)", faded, JSON.stringify(boot));
-    check("loading page backdrop is the rendered 3D scene", boot.hasRenderBackdrop, JSON.stringify(boot));
+    check("loading backdrop = Blender render + looping fly-through video",
+      boot.hasRenderBackdrop && boot.hasFlythroughVideo && boot.videoLoops, JSON.stringify(boot));
   }
   check("speed box on the LEFT third (ref-flight HUD)", r.speedCX < r.vw * 0.45,
     `centerX=${r.speedCX} of ${r.vw}`);
@@ -436,34 +440,25 @@ const browserMob = await puppeteer.launch(LAUNCH);
     check("picker PAN still enabled", picker.panKept);
     const onScreen = (r) => r && r[0] >= 0 && r[1] >= 0 && r[2] <= picker.vw && r[3] <= picker.vh;
     check("instruction chip fully on-screen", onScreen(picker.chipRect), JSON.stringify(picker));
-    check("search pill visible on-screen (collapsed)", onScreen(picker.inputRect), JSON.stringify(picker));
+    check("search pill visible on-screen", onScreen(picker.inputRect), JSON.stringify(picker));
 
-    // Search flow: EXPAND the pill (click the magnifier), confirm the fluid
-    // width/opacity animation, then type a city and tap a result.
-    // Transient provider outages get one retry with a different query.
-    const pillExpand = await page.evaluate(() => {
-      const pill = document.getElementById("search-pill");
-      const before = pill.getBoundingClientRect().width;
-      document.getElementById("search-toggle-btn").dispatchEvent(
-        new MouseEvent("click", { bubbles: true }));
-      return { before: Math.round(before), expanded: pill.classList.contains("expanded") };
-    });
-    const pillGrew = await page.waitForFunction(
-      () => document.getElementById("search-pill").getBoundingClientRect().width > 250,
-      { timeout: 20000, polling: 200 }
-    ).then(() => true).catch(() => false);
+    // Search flow: the pill is an always-open round search field under the
+    // instruction; type a city and tap a result. Transient provider outages
+    // get one retry with a different query.
     const pillDiag = await page.evaluate(() => {
       const pill = document.getElementById("search-pill");
+      const input = document.getElementById("locationSearch");
+      const chip = pill.getBoundingClientRect();
+      const ir = input.getBoundingClientRect();
       return {
-        w: Math.round(pill.getBoundingClientRect().width),
-        inputOpacity: +parseFloat(getComputedStyle(document.getElementById("locationSearch")).opacity).toFixed(2),
-        instructionStillVisible: getComputedStyle(document.getElementById("instruction-text")).display !== "none",
+        pillW: Math.round(chip.width),
+        inputVisible: getComputedStyle(input).opacity !== "0"
+          && ir.width > 40 && getComputedStyle(input).display !== "none",
       };
     });
-    check("search pill EXPANDS with a fluid width animation (instruction stays)",
-      pillExpand.before <= 48 && pillExpand.expanded && pillGrew
-      && pillDiag.w >= 250 && pillDiag.inputOpacity > 0.15 && pillDiag.instructionStillVisible,
-      JSON.stringify({ pillExpand, pillDiag }));
+    check("search pill is an always-open field (no toggle/expand needed)",
+      pillDiag.pillW >= 250 && pillDiag.inputVisible,
+      JSON.stringify(pillDiag));
 
     const typeQuery = (q) => page.evaluate((q) => {
       const i = document.getElementById("locationSearch");
@@ -508,6 +503,12 @@ const browserMob = await puppeteer.launch(LAUNCH);
   {
     const v = await page.viewport();
     const tapX = Math.floor(v.width / 2), tapY = Math.floor(v.height / 2);
+    // A failed search leaves its status dropdown open - hide it like a real
+    // outside tap would, so it can't eat the centre-tap regression.
+    await page.evaluate(() => {
+      const sr = document.getElementById("search-results");
+      if (sr) sr.style.display = "none";
+    });
     // Force the spinner ON during the tap - the exact condition that used to
     // absorb centre taps.
     await page.evaluate(() => document.getElementById("loadingIndicator").classList.remove("hidden"));

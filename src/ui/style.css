@@ -170,12 +170,17 @@ html, body {
   position: absolute;
   inset: 0;
   background: url("/loading-scene.png") center / cover no-repeat;
-  animation: loadingDrift 16s ease-in-out infinite alternate;
 }
 
-@keyframes loadingDrift {
-  from { transform: scale(1.02); }
-  to { transform: scale(1.12) translateY(-1.2%); }
+/* The Blender-rendered fly-through: clouds streaming past the jet in a
+   seamless 2s loop. The still above is the poster while it decodes. */
+.loading-bg-video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  pointer-events: none;
 }
 
 .loading-content {
@@ -282,24 +287,8 @@ html, body {
   display: inline-block;
 }
 
-#locationSearch {
-  width: 100%;
-  max-width: 400px;
-  padding: 12px 16px;
-  background: rgba(0, 0, 0, 0.85);
-  border: 2px solid rgba(255, 255, 255, 0.5);
-  border-radius: 4px;
-  color: #fff;
-  font-size: 14px;
-  outline: none;
-  pointer-events: auto;
-  position: relative;
-  z-index: 70;
-}
-
 #locationSearch:focus {
-  border-color: rgba(100, 180, 255, 0.8);
-  box-shadow: 0 0 0 3px rgba(100, 180, 255, 0.3);
+  border-color: rgba(0, 255, 0, 0.55);
 }
 
 #locationSearch::placeholder {
@@ -311,9 +300,12 @@ html, body {
   max-width: 400px;
   max-height: 200px;
   overflow-y: auto;
-  background: rgba(0, 0, 0, 0.9);
-  border: 1px solid rgba(255, 255, 255, 0.3);
-  border-radius: 4px;
+  background: rgba(0, 30, 8, 0.82);
+  border: 1px solid rgba(0, 255, 0, 0.35);
+  border-radius: 16px;
+  box-shadow: 0 0 18px rgba(0, 255, 0, 0.15);
+  margin-top: 8px;
+  padding: 4px;
   display: none;
   pointer-events: auto;
   position: relative;
@@ -323,10 +315,18 @@ html, body {
 #search-results .search-result-item {
   padding: 10px 16px;
   cursor: pointer;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
   font-size: 13px;
   text-align: left;
-  transition: background 0.15s;
+  color: #cff;
+  font-family: "Consolas", monospace;
+  letter-spacing: 0.5px;
+  border-radius: 12px;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+#search-results .search-result-item:hover {
+  background: rgba(0, 255, 0, 0.12);
+  color: #0f0;
 }
 
 #search-results .search-result-item:hover {
@@ -764,8 +764,9 @@ html, body {
   box-shadow: 0 0 10px rgba(255, 60, 60, 0.9);
 }
 
-/* Compact chip: the loading element doubles as the small "Loading Terrain..."
-   hint over the spawn picker - never the full-screen boot page. */
+/* Compact chip: the loading element doubles as the "Loading Terrain..."
+   hint over the spawn picker - one sleek rounded pill (spinner + label),
+   never the full-screen page, never stacked boxes. */
 .loading-container.picker {
   inset: auto;
   position: absolute;
@@ -774,14 +775,14 @@ html, body {
   right: auto;
   bottom: auto;
   transform: translate(-50%, -50%);
-  background: rgba(0, 0, 0, 0.6);
-  padding: 16px 26px;
-  border: 1px solid rgba(0, 255, 0, 0.3);
-  border-radius: 8px;
-  gap: 10px;
+  background: none;
+  padding: 0;
+  border: none;
+  box-shadow: none;
 }
 
 .loading-container.picker .loading-bg,
+.loading-container.picker .loading-bg-video,
 .loading-container.picker .loading-title,
 .loading-container.picker .loading-bar-track,
 .loading-container.picker .loading-percent {
@@ -789,10 +790,27 @@ html, body {
 }
 
 .loading-container.picker .loading-content {
-  background: rgba(0, 0, 0, 0.6);
-  border: 1px solid rgba(0, 255, 0, 0.3);
-  padding: 12px 18px;
-  gap: 8px;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  background: rgba(0, 12, 4, 0.55);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  border: 1px solid rgba(0, 255, 0, 0.35);
+  border-radius: 999px;
+  padding: 8px 18px;
+  box-shadow: 0 0 14px rgba(0, 0, 0, 0.45);
+}
+
+.loading-container.picker .spinner {
+  width: 14px;
+  height: 14px;
+  border-width: 2px;
+}
+
+.loading-container.picker .loading-text {
+  font-size: 12px;
+  letter-spacing: 2px;
 }
 
 /* Minimap (above the corner attitude panel) */
@@ -955,82 +973,118 @@ html, body {
   text-align: center;
 }
 
-/* ── Search pill (ref-flight picker): the magnifier button EXPANDS into a
-   search box with a fluid width/opacity transition; results drop below. */
+/* ── Search pill: always-open round search field, centered under the
+   instruction; results drop below in the same visual language. ───────── */
 #search-pill {
   pointer-events: auto;
   display: flex;
   align-items: center;
-  width: 44px;
-  height: 44px;
-  overflow: hidden;
-  border: 2px solid rgba(0, 255, 0, 0.6);
-  background: rgba(0, 40, 0, 0.5);
-  box-shadow: 0 0 10px rgba(0, 255, 0, 0.3);
-  border-radius: 22px;
-  cursor: pointer;
-  transition: width 0.45s cubic-bezier(0.2, 0.9, 0.25, 1),
-    background 0.45s ease, box-shadow 0.45s ease;
+  gap: 10px;
+  width: min(420px, 82vw);
+  height: 46px;
+  padding: 0 18px;
+  border: 2px solid rgba(0, 255, 0, 0.55);
+  background: rgba(0, 30, 8, 0.72);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border-radius: 999px;
+  box-shadow: 0 0 18px rgba(0, 255, 0, 0.22), inset 0 0 14px rgba(0, 255, 0, 0.08);
+  transition: border-color 0.25s ease, box-shadow 0.25s ease;
 }
 
-#search-pill.expanded {
-  width: min(320px, 70vw);
-  background: rgba(0, 60, 0, 0.75);
-  box-shadow: 0 0 16px rgba(0, 255, 0, 0.45);
-  cursor: default;
+#search-pill:focus-within {
+  border-color: rgba(0, 255, 0, 0.95);
+  box-shadow: 0 0 26px rgba(0, 255, 0, 0.45), inset 0 0 18px rgba(0, 255, 0, 0.12);
+}
+
+#search-pill-icon {
+  display: flex;
+  align-items: center;
+  color: #0f0;
+  text-shadow: 0 0 6px rgba(0, 255, 0, 0.6);
+  flex: 0 0 auto;
 }
 
 #search-pill #locationSearch {
   flex: 1;
   min-width: 0;
-  width: 100%;
   border: none;
   outline: none;
   background: transparent;
   color: #0f0;
   font-family: "Consolas", monospace;
-  font-size: 13px;
-  letter-spacing: 1px;
-  padding: 0 12px 0 2px;
-  opacity: 0;
-  transform: translateX(8px);
-  transition: opacity 0.3s ease 0.12s, transform 0.3s ease 0.12s;
+  font-size: 14px;
+  letter-spacing: 1.5px;
   text-shadow: 0 0 4px rgba(0, 255, 0, 0.5);
   box-shadow: none;
-}
-
-#search-pill.expanded #locationSearch {
-  opacity: 1;
-  transform: translateX(0);
+  padding: 0;
 }
 
 #search-pill #locationSearch::placeholder {
-  color: rgba(0, 255, 0, 0.45);
+  color: rgba(0, 255, 0, 0.4);
   text-shadow: none;
-}
-
-#search-toggle-btn {
-  flex: 0 0 44px;
-  height: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #0f0;
-  pointer-events: auto;
+  letter-spacing: 2px;
 }
 
 #search-pill .loader-spinner {
-  width: 18px;
-  height: 18px;
-  border: 3px solid rgba(0, 255, 0, 0.2);
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(0, 255, 0, 0.2);
   border-top-color: #0f0;
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
+  flex: 0 0 auto;
 }
 
-/* Old standalone search styling is superseded by the pill. */
-#locationSearch {
-  max-width: none;
+/* Results dropdown: same pill language, squared at the top corners. */
+#search-results {
+  width: min(420px, 82vw);
+  max-height: 200px;
+  overflow-y: auto;
+  background: rgba(0, 30, 8, 0.82);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(0, 255, 0, 0.35);
+  border-radius: 16px;
+  box-shadow: 0 0 18px rgba(0, 255, 0, 0.15);
+  margin-top: 8px;
+  padding: 4px;
+}
+
+#search-results .search-result-item {
+  padding: 10px 16px;
+  cursor: pointer;
+  border-bottom: 1px solid rgba(0, 255, 0, 0.08);
+  font-size: 13px;
+  text-align: left;
+  color: #cff;
+  font-family: "Consolas", monospace;
+  letter-spacing: 0.5px;
+  border-radius: 12px;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+#search-results .search-result-item:last-child {
+  border-bottom: none;
+}
+
+#search-results .search-result-item:hover {
+  background: rgba(0, 255, 0, 0.12);
+  color: #0f0;
+}
+
+#search-results .search-status {
+  color: rgba(0, 255, 0, 0.65);
+  cursor: default;
+}
+
+#search-results::-webkit-scrollbar {
+  width: 6px;
+}
+
+#search-results::-webkit-scrollbar-thumb {
+  background: rgba(0, 255, 0, 0.3);
+  border-radius: 3px;
 }
 
 /* ── HUD element deltas ──────────────────────────────────────────────────── */

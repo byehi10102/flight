@@ -1037,17 +1037,19 @@ overlay covers it.
 
 ### Spawn picking on touch
 
-Search UI: the magnifier pill EXPANDS into the search box (fluid width +
-opacity transition, results drop below, outside click collapses; the
-instruction text stays put). Backend: Nominatim primary (ref-flight's,
-keyless) with Photon/Open-Meteo silent fallbacks.
+Search UI: an always-open round search pill centered UNDER the instruction
+text - magnifier icon inside, green glass (blurred translucent) styling,
+brightens on focus; results drop below in the same visual language
+(rounded translucent panel, matching rows, styled scrollbar). The icon
+swaps to a spinner while a query is in flight. Backend: Nominatim primary
+(ref-flight's, keyless) with Photon/Open-Meteo silent fallbacks.
 
-The "Loading Terrain..." indicator (`.loading-container`) is
-`pointer-events: none` - it appears/reappears with tile streaming while
-picking, and without this it swallowed taps through the middle of the map.
-The picker is PAN-ONLY: on-screen +/- buttons gone, wheel/pinch/double-
-click/keyboard zoom all disabled while picking (pan, tap-to-place, or
-search).
+The mid-picking "Loading Terrain..." hint renders as ONE sleek rounded
+pill (spinner + label, blurred backdrop) - never stacked boxes. It is
+`pointer-events: none`, and without that it swallowed taps through the
+middle of the map. The picker is PAN-ONLY: on-screen +/- buttons gone,
+wheel/pinch/double-click/keyboard zoom all disabled while picking (pan,
+tap-to-place, or search).
 
 ### Verification (`dev-mobile-test.mjs`)
 
@@ -1065,15 +1067,17 @@ for the probe.
 
 ## 18. Boot loading page + spawn-region preload
 
-First open shows an OPAQUE full-screen loading page: a 3D airplane scene
-RENDERED IN BLENDER (public/loading-scene.png - low-poly jet with delta
-wings, twin canted fins and green afterburner discs, key/rim/fill area
-lights, hero three-quarter camera; built and rendered via the Blender MCP)
-as a slowly drifting backdrop, with the SKYWARD title, progress bar,
-percent and status text on a dim gradient card. START stays disabled until
-every stage lands (ref-flight's staged gating). Stages and bar slices:
-Cesium 15%, aircraft model 15%, audio 10%, globe surface 15%, terrain
-provider 20%, spawn region 25%.
+First open shows an OPAQUE full-screen loading page: the 3D airplane scene
+RENDERED IN BLENDER (public/loading-scene.png) with a LOOPING FLY-THROUGH
+VIDEO rendered from the same scene (public/loading-scene.mp4 - the jet
+holds its banked pose while elongated cloud streaks stream past it one
+spacing-period per 2s loop, seamless wrap + motion blur; keyframed cloud
+group, 60 frames @ 30fps, ffmpeg-encoded H.264). The still is the video
+poster/fallback. Readouts (title, progress bar, percent, status) sit on a
+dim gradient card. START stays disabled until every stage lands
+(ref-flight's staged gating). Stages and bar slices: Cesium 15%, aircraft
+model 15%, audio 10%, globe surface 15%, terrain provider 20%, spawn
+region 25%.
 
 At 100% the page FADES OUT (0.7 s) revealing the menu - single player /
 multiplayer - instead of cutting.
