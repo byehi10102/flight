@@ -7,8 +7,9 @@
  * live Cesium top-down view (like ref-flight) with the canvas overlay.
  *
  * Public API kept compatible with src/main.js:
- *   update(state, now), showRegion(name), setPullUpWarning(bool),
+ *   update(state, now), setPullUpWarning(bool),
  *   updateMinimap(state), resetScore(), resetTime(), resizeMinimap()
+ * (showRegion() was removed together with the region banner.)
  */
 import { getViewer } from "../core/viewer.js";
 export class Hud {
@@ -19,8 +20,6 @@ export class Hud {
     this.locationEl = document.getElementById("hud-location");
     this.coordsEl = document.getElementById("coords");
     this.compassTape = document.getElementById("compass-tape");
-    this.regionNotification = document.getElementById("region-notification");
-    this.regionName = document.getElementById("region-name");
     this.pullUpWarning = document.getElementById("pull-up-warning");
     this.timeEl = document.getElementById("time");
     this.fpsEl = document.getElementById("fps");
@@ -45,7 +44,6 @@ export class Hud {
     this._fpsFrames = 0;
     this._fpsLast = performance.now();
     this._score = 0;
-    this.regionTimeout = null;
 
     // Smoothed attitude (ref-flight): HUD eases toward true state so the
     // ladder/compass visibly track the controls instead of snapping.
@@ -180,20 +178,9 @@ export class Hud {
     if (this.scoreEl) this.scoreEl.textContent = "000000";
   }
 
-  showRegion(name) {
-    if (!this.regionNotification || !this.regionName) return;
-    if (this.regionTimeout) clearTimeout(this.regionTimeout);
-    this.regionName.innerText = name;
-    this.regionNotification.classList.remove("hidden");
-    this.regionNotification.classList.remove("region-exit");
-    this.regionTimeout = setTimeout(() => {
-      this.regionNotification.classList.add("region-exit");
-      this.regionTimeout = setTimeout(() => {
-        this.regionNotification.classList.add("hidden");
-        this.regionTimeout = null;
-      }, 1000);
-    }, 4000);
-  }
+  // showRegion(name) was removed with the #region-notification banner: the
+  // persistent #hud-location line under the compass chip is the single
+  // place readout, updated every frame from state.region/state.spawnName.
 
   setPullUpWarning(show) {
     if (this.pullUpWarning) {

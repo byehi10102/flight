@@ -1282,6 +1282,14 @@ function confirmSpawn() {
         `${Math.abs(state.lon).toFixed(2)}°${state.lon >= 0 ? "E" : "W"}`;
     state.spawnLon = state.lon;
     state.spawnLat = state.lat;
+    // Location chip truth: a respawn must never show the previous flight's
+    // region. Clear the stale reverse-geocode name so the chip reads the
+    // new spawn label immediately, and arm the geocode tracker so the first
+    // update() re-resolves the real region at the new spot.
+    state.region = null;
+    currentRegionName = null;
+    geocodeTimer = 0;
+    lastGeocodePos = { lon: state.lon, lat: state.lat };
     try {
       const carto = Cesium.Cartographic.fromDegrees(state.lon, state.lat);
       const groundH = viewer.scene.globe.getHeight(carto);
@@ -1407,7 +1415,6 @@ function confirmSpawn() {
         hud.resetScore();
         soundManager.play("jet-engine", 1.0);
         soundManager.play("wind", 1.0);
-        if (state.spawnName) hud.showRegion(`SPAWN · ${state.spawnName}`);
         // Multiplayer: flight phase begins - presence markers hand off
         // to live remote planes, and the performance diet turns on.
         mp?.onFlightStart();
@@ -1672,7 +1679,6 @@ function update(dt) {
       if (name && name !== currentRegionName) {
         currentRegionName = name;
         state.region = name;
-        hud.showRegion(name);
       }
     });
   }

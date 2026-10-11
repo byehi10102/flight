@@ -622,46 +622,8 @@ html, body {
   box-shadow: 0 0 15px rgba(0, 255, 0, 0.25);
 }
 
-/* Region notification (ref-flight blur-in banner) */
-#region-notification {
-  position: absolute;
-  top: 15%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  text-align: center;
-  z-index: 100;
-  animation: region-in 1s ease-out forwards;
-  background: none;
-  padding: 0;
-  border-radius: 0;
-}
-
-#region-notification .region-label {
-  font-size: 14px;
-  color: rgba(0, 255, 0, 0.7);
-  text-shadow: 0 0 8px rgba(0, 255, 0, 0.6);
-  margin-bottom: 5px;
-}
-
-#region-notification #region-name {
-  font-size: 32px;
-  color: #0f0;
-  text-shadow: 0 0 8px rgba(0, 255, 0, 0.6);
-  margin-top: 0;
-}
-
-@keyframes region-in {
-  0% {
-    opacity: 0;
-    transform: translate(-50%, -60%) scale(0.9);
-    filter: blur(10px);
-  }
-  100% {
-    opacity: 1;
-    transform: translate(-50%, -50%) scale(1);
-    filter: blur(0);
-  }
-}
+/* Region notification banner: REMOVED — the persistent #hud-location line in
+   the top cluster is the single place readout. */
 
 /* Pull up warning (ref-flight boxed blinker) */
 #pull-up-warning {
@@ -1261,10 +1223,7 @@ body.mobile-landscape #attitude-panel { display: block; }
   font-size: 11px;
 }
 
-#region-notification.region-exit {
-  opacity: 0;
-  transition: opacity 1s ease;
-}
+/* (#region-notification.region-exit removed with the banner) */
 
 /* â”€â”€ Transition vignette â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 #transition-vignette {
@@ -1634,7 +1593,7 @@ body.mobile-landscape #search-results .search-result-item {
   #search-results { max-height: 34vh; }
 }
 
-body.mobile-landscape #region-notification { top: 44px; padding: 4px 12px; }
+/* (#region-notification mobile override removed with the banner) */
 body.mobile-landscape #pull-up-warning { font-size: 26px; }
 
 body.mobile-landscape #pitch-lines-center { display: none; }
