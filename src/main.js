@@ -2,6 +2,7 @@ import * as THREE from "three";
 import * as Cesium from "cesium";
 import "cesium/Build/Cesium/Widgets/widgets.css";
 import { CONFIG } from "./core/config.js";
+import { computeBootProgress } from "./core/bootProgress.js";
 import { createViewer, attachTerrain, setSunForTime, initMiniViewer, getMiniViewer, setMinimapCamera, setStreetsVisible } from "./core/viewer.js";
 import { GroundSampler } from "./core/ground.js";
 import { PlanePhysics } from "./plane/planePhysics.js";
@@ -148,9 +149,13 @@ const instructionText = document.getElementById("instruction-text");
 
 const loadingStatus = { model: false, cesium: false, globe: false, terrain: false, audio: false, area: false, failed: false };
 
-// Boot loading page: each stage carries a slice of the bar (ref-flight's
-// staged gating, plus a real area/terrain preload for the spawn picker).
-const LOAD_WEIGHTS = { cesium: 15, model: 15, audio: 10, globe: 15, terrain: 20, area: 25 };
+// Real sub-progress (0..1) for stages that can report it: model bytes from
+// the GLTFLoader, globe/area tiles from Cesium's tile-queue decay. The bar
+// reads these through computeBootProgress — never a timer.
+const loadingSub = { model: 0, globe: 0, area: 0 };
+let maxGlobeQueue = 0; // largest tile queue seen during the globe stage
+let maxAreaQueue = 0;  // largest tile queue seen during the area preload
+let areaPreloadActive = false;
 
 // Boot loading page: fade to the menu instead of cutting. Idempotent.
 let loadingPageHidden = false;
@@ -172,8 +177,10 @@ let loadingPageHidden = false;
 
 // Boot loading page: minimum total time (s). The page stays up AT LEAST this
 // long even if everything finishes early - the region preload keeps
-// streaming imagery + terrain through the whole window.
-const MIN_BOOT_SECONDS = 7;
+// streaming imagery + terrain through the whole window. Hard cap below: boot
+// must never trap the player on a slow network.
+const MIN_BOOT_SECONDS = 8;
+const MAX_BOOT_SECONDS = 14;
 const bootStart = performance.now();
 
 function hideLoadingPage() {
@@ -222,12 +229,13 @@ function updateLoadingUI() {
     startBtn.disabled = false;
     startBtn.style.pointerEvents = "auto";
   }
-  // Progress bar: the done flags each release their slice of the bar.
+  // Progress bar: REAL progress — done flags release their slice, partial
+  // sub-progress (model bytes, tile-queue decay) releases proportional
+  // slices. Nothing here increments on a timer.
   if (loadingBarFill) {
-    let pct = 0;
-    for (const key of Object.keys(LOAD_WEIGHTS)) {
-      if (loadingStatus[key]) pct += LOAD_WEIGHTS[key];
-    }
+    const pct = loadingStatus.failed
+      ? 0
+      : Math.round(computeBootProgress(loadingStatus, loadingSub));
     loadingBarFill.style.width = `${pct}%`;
     if (loadingPercent) loadingPercent.textContent = `${pct}%`;
   }
@@ -259,6 +267,19 @@ const unregisterGlobeTracker = viewer.scene.postRender.addEventListener(() => {
 });
 
 viewer.scene.globe.tileLoadProgressEvent.addEventListener((queueLength) => {
+  // Boot phase: the queue draining IS the real progress for the globe and
+  // area stages. Track the peak queue so remaining/peak maps to 0..1.
+  if (!loadingPageHidden && !loadingStatus.failed) {
+    if (!loadingStatus.globe) {
+      if (queueLength > maxGlobeQueue) maxGlobeQueue = queueLength;
+      loadingSub.globe = maxGlobeQueue > 0 ? 1 - queueLength / maxGlobeQueue : 0;
+    }
+    if (areaPreloadActive && !loadingStatus.area) {
+      if (queueLength > maxAreaQueue) maxAreaQueue = queueLength;
+      loadingSub.area = maxAreaQueue > 0 ? 1 - queueLength / maxAreaQueue : 0;
+    }
+    if (currentState === States.MENU) updateLoadingUI();
+  }
   if (loadingIndicator && loadingText && currentState === States.PICK_SPAWN && !spawnPending) {
     if (queueLength > 0) {
       loadingText.textContent = "Loading Terrain...";
@@ -282,6 +303,16 @@ setTimeout(() => {
   }
 }, 7000);
 
+// Hard cap (MAX_BOOT_SECONDS): whatever is still unfinished gets force-done so
+// the loading page always ends — a stalled provider can never trap the player.
+setTimeout(() => {
+  let changed = false;
+  for (const key of ["cesium", "model", "audio", "globe", "terrain", "area"]) {
+    if (!loadingStatus[key]) { loadingStatus[key] = true; changed = true; }
+  }
+  if (changed) updateLoadingUI();
+}, MAX_BOOT_SECONDS * 1000);
+
 // ── Preload terrain ─────────────────────────────────────────────────────────
 async function preloadTerrain() {
   // Terrain provider first, then the spawn-picker preload: a hidden wide
@@ -300,8 +331,11 @@ async function preloadTerrain() {
     updateLoadingUI();
   }
   try {
-    await withTimeout(preloadSpawnRegion(), 6500);
-  } catch (e) { /* bounded above */ }
+    areaPreloadActive = true;
+    await withTimeout(preloadSpawnRegion(), 9000);
+  } catch (e) { /* bounded above */ } finally {
+    areaPreloadActive = false;
+  }
   loadingStatus.area = true;
   updateLoadingUI();
 }
@@ -330,14 +364,22 @@ async function preloadSpawnRegion() {
       orientation: { heading: 0, pitch: Cesium.Math.toRadians(-90), roll: 0 },
     });
     await waitForGlobeTiles(3000);
+    // Pass 3: low 8 km pass - street-level imagery around the default spawn
+    // point, so the picker's opening view is already sharp.
+    viewer.camera.setView({
+      destination: Cesium.Cartesian3.fromDegrees(state.lon, state.lat, 8000),
+      orientation: { heading: 0, pitch: Cesium.Math.toRadians(-90), roll: 0 },
+    });
+    await waitForGlobeTiles(2500);
   } catch (e) { /* best effort */ }
-  // 3D terrain across the region: ~ +/-1.2 deg lon x +/-0.8 deg lat grid.
+  // 3D terrain across the region: ~ +/-1.5 deg lon x +/-1.0 deg lat grid
+  // (denser than before - as much California warm as the boot window allows).
   const pts = [];
-  for (let i = 0; i < 7; i++) {
-    for (let j = 0; j < 5; j++) {
+  for (let i = 0; i < 9; i++) {
+    for (let j = 0; j < 7; j++) {
       pts.push([
-        state.lat + (j / 4 - 0.5) * 1.6,
-        state.lon + (i / 6 - 0.5) * 2.4,
+        state.lat + (j / 6 - 0.5) * 2.0,
+        state.lon + (i / 8 - 0.5) * 3.0,
       ]);
     }
   }
@@ -359,6 +401,32 @@ function waitForGlobeTiles(timeoutMs) {
 function withTimeout(promise, ms) {
   return Promise.race([promise, new Promise((r) => setTimeout(r, ms))]);
 }
+
+// ── Spawn-picker terrain warm-up ────────────────────────────────────────────
+// While browsing the spawn map, every finished pan/tilt samples 3D terrain in
+// a small grid around wherever the map is looking, so the chosen point's
+// elevation is already refined before SPAWN HERE. The imagery tiles warm
+// themselves just by being on screen; this covers the terrain half.
+let pickerWarmTimer = 0;
+viewer.camera.moveEnd.addEventListener(() => {
+  if (currentState !== States.PICK_SPAWN) return;
+  const now = performance.now();
+  if (now - pickerWarmTimer < 1000) return;
+  pickerWarmTimer = now;
+  try {
+    const carto = viewer.camera.positionCartographic;
+    if (!carto) return;
+    const lat = Cesium.Math.toDegrees(carto.latitude);
+    const lon = Cesium.Math.toDegrees(carto.longitude);
+    const pts = [];
+    for (let i = -1; i <= 1; i++) {
+      for (let j = -1; j <= 1; j++) {
+        pts.push([lat + i * 0.12, lon + j * 0.15]);
+      }
+    }
+    groundSampler.seed(pts).catch(() => {});
+  } catch (e) { /* warm-up is best-effort */ }
+});
 
 // ── Three.js setup ───────────────────────────────────────────────────────────
 // The Three.js camera stays at the origin. The plane model is placed at a
@@ -434,7 +502,16 @@ function initThree() {
     })
     .catch((e) => { console.error("[mp] module load failed:", e); mp = null; });
   initSounds().catch((err) => console.error("Failed to init sounds:", err));
-  planeModel.load().then(() => {
+  planeModel.load((progress) => {
+    // Real model progress: the GLTFLoader reports bytes when the server
+    // sends a length; without one the stage stays at 0 until done.
+    try {
+      if (progress && progress.lengthComputable && progress.total > 0) {
+        loadingSub.model = progress.loaded / progress.total;
+        updateLoadingUI();
+      }
+    } catch (e) { /* cosmetic */ }
+  }).then(() => {
     loadingStatus.model = true;
     updateLoadingUI();
   }).catch((err) => {

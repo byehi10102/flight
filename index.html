@@ -55,7 +55,10 @@
     <!-- Loading -->
     <div id="loadingIndicator" class="loading-container">
       <div class="loading-bg"></div>
-      <video class="loading-bg-video" autoplay muted loop playsinline poster="/loading-scene.png">
+      <!-- No poster: a static still of the jet paints first and the fly-through
+           looks like it "starts late". preload + fetchpriority make the video
+           itself the first thing on the wire, so frame 0 plays right away. -->
+      <video class="loading-bg-video" autoplay muted loop playsinline preload="auto" fetchpriority="high">
         <source src="/loading-scene.mp4" type="video/mp4" />
       </video>
       <div class="loading-content">

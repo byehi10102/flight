@@ -30,7 +30,7 @@ export class PlaneModel {
     this.prevSpeed = 0;
   }
 
-  async load() {
+  async load(onProgress) {
     const loader = new GLTFLoader();
     return new Promise((resolve, reject) => {
       loader.load(
@@ -88,7 +88,7 @@ export class PlaneModel {
           this.ready = true;
           resolve(this.model);
         },
-        undefined,
+        onProgress,
         (error) => {
           console.error("Model load error:", error);
           reject(error);
