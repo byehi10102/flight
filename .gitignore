@@ -13,3 +13,6 @@ shots/
 shot-*.png
 verify-*.png
 diag*.png
+
+render-preparing/
+preview/

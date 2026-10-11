@@ -1169,3 +1169,51 @@ Search runs Photon -> Open-Meteo -> Nominatim; reverse geocoding (region
 names) runs BigDataCloud -> Nominatim. Nominatim hard-denies many browser
 origins (HTML "Access denied" that surfaces as a CORS console error even
 when a fallback succeeds), so it is last everywhere.
+
+## 17. Recent changes (loading bars, preparing-flight film, mobile HUD)
+
+### Loading bars never retreat
+
+Both progress bars (boot and "Preparing flight") were driven by tile-queue
+drain ratios — `1 - queue/peak`. Cesium's queue is not monotonic: LOD
+refinement and the three camera flyovers re-request tiles, the queue spikes,
+and the raw ratio drops, so the bar visibly went **backwards** (worst on the
+preparing screen: a drained queue showed 95%, then a background re-request
+knocked it back to 50%). `MonotonicPercent` (src/core/bootProgress.js) is a
+display-side high-water mark: the underlying ratios still track real work,
+only the shown percent is clamped to never decrease. It resets per
+preparing-flight phase and is bypassed on load failure (a deliberate
+reset to 0).
+
+### Preparing-flight film, re-rendered
+
+The old loop was 5 s at 319 kb/s — mush. The new one is rebuilt from scratch
+in background Blender by `build_preparing_flight.py` (committed): the game's
+own `public/models/f-15.glb`, imported, auto-oriented (long axis -> Y,
+vertical stabilizers -> tail, i.e. nose = -Y, up = +Z) and scaled to the real
+19.43 m. Camera behind and below; jet banks/pitches/bobs on integer sine
+cycles; afterburner cones flicker on integer cycles; the cloud deck is five
+lanes of identical noise-displaced puff clusters that each drift exactly one
+lane span per loop with modulo wrap (the treadmill: an infinite field that is
+periodic AND gapless). Result: 1920x1080, 24 fps, 6.00 s seamless loop,
+H.264 CRF 19 (~1.4 MB, ~1.87 Mb/s). The seam is verified numerically, not by
+eye: PSNR(frame144, frame1) = 33.35 dB, statistically identical to a normal
+one-frame transition (33.39-33.53 dB).
+
+### Mobile landscape HUD re-anchored
+
+The mobile HUD was the desktop HUD uniformly scaled toward the screen centre
+(--hud-scale composed into #uiContainer's transform) — corner elements slid
+into the middle and shrank: "everything cramped together in the middle".
+hud.js no longer scales the container; `body.mobile-landscape` CSS lays out
+each element at phone size **in the desktop arrangement**: minimap
+bottom-left with real edge margins (imagery credit line below it), F-15
+plate bottom-right, speed/AGL arrow plates mirrored above the jet, boost +
+gun bars bottom-centre under the airplane, top cluster (heading -> compass ->
+location) tight to the top edge, sticks flanking the middle — the left stick
+moved right of the minimap, the right stick sits left of the plate, fire and
+boost triggers smaller and lower. --hud-scale keeps scaling only the menus
+and the spawn picker. dev-mobile-test.mjs phase C re-encodes the whole
+arrangement as geometry assertions (mirror symmetry, corner pinning, stick
+clearances, no-scale regression guard): 82/82.
+
