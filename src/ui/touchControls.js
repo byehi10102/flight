@@ -30,6 +30,7 @@ export const STICK_LABELS = {
   left:  { horizontal: "YAW",     vertical: "THROTTLE", up: "FULL", down: "SLOW" },
   right: { horizontal: "ROLL",    vertical: "PITCH",    up: "UP",   down: "DOWN" },
   fire:  { horizontal: "FIRE",    vertical: "HOLD",     up: "",     down: "" },
+  boost: { horizontal: "BOOST",   vertical: "HOLD",     up: "",     down: "" },
 };
 
 const FULL_DEFLECTION = 0.92; // normalized value that fires the haptic tick
@@ -178,42 +179,18 @@ class VirtualStick {
 
 export class TouchControls {
   /**
-   * @param opts { onAxis(side,-1..1), onBoost(), radius, knobRadius, deadZone }
+   * @param opts { onAxis(side,-1..1), radius, knobRadius, deadZone }
    */
   constructor(opts = {}) {
     this.onAxis = opts.onAxis || null;
-    this.onBoost = opts.onBoost || null;
     this._visible = false;
-    this._lastTap = null; // { t, x, y }
-    this.fireHeld = false; // the green fire stick's trigger state
-
-    // Double-tap anywhere outside the sticks = boost (the mobile replacement
-    // for the spacebar). Firing is NOT tap-anywhere anymore - it lives on the
-    // green fire stick. Taps on a stick zone stay stick gestures. Only while
-    // the sticks are shown (i.e. actually flying), so menu taps are inert.
-    const TAP_WINDOW_MS = 300;
-    const TAP_TRAVEL = 30; // px between the two taps before it stops being a double-tap
-    window.addEventListener("pointerdown", (e) => {
-      if (!this._visible || e.pointerType !== "touch") return;
-      if (e.target && e.target.closest && e.target.closest(".stick-zone")) return;
-      const now = performance.now();
-      const last = this._lastTap;
-      if (last && now - last.t <= TAP_WINDOW_MS
-          && Math.hypot(e.clientX - last.x, e.clientY - last.y) <= TAP_TRAVEL) {
-        this._lastTap = null;
-        if (this.onBoost) {
-          this.onBoost();
-          try { if (navigator.vibrate) navigator.vibrate(25); } catch (err) { /* unsupported */ }
-        }
-      } else {
-        this._lastTap = { t: now, x: e.clientX, y: e.clientY };
-      }
-    }, { passive: true });
+    this.fireHeld = false;  // the green fire stick's trigger state
+    this.boostHeld = false; // the blue boost stick's trigger state
     this.radius = opts.radius ?? 56;
     this.deadZone = opts.deadZone ?? 0.10;
 
     // Root overlay covering the whole screen but NEVER intercepting input
-    // except on its three zones — the game behind keeps pointer events for
+    // except on its zones — the game behind keeps pointer events for
     // minimap/HUD taps.
     this.root = document.createElement("div");
     this.root.id = "touchControls";
@@ -225,32 +202,16 @@ export class TouchControls {
     this.zoneRight.className = "stick-zone stick-zone-right";
     this.zoneFire = document.createElement("div");
     this.zoneFire.className = "stick-zone stick-zone-fire";
-
-    // Press-and-hold BOTH flight sticks = boost. Rising-edge only (one boost
-    // per both-held gesture); releases and re-grabs re-arm it. Double-tap
-    // boost elsewhere stays working.
-    this._bothSticks = false;
-    const checkBothSticks = () => {
-      const both = this.left && this.right
-        && this.left.pointerId !== null && this.right.pointerId !== null;
-      if (both && !this._bothSticks) {
-        if (this.onBoost) {
-          this.onBoost();
-          try { if (navigator.vibrate) navigator.vibrate(25); } catch (err) { /* unsupported */ }
-        }
-      }
-      this._bothSticks = both;
-    };
+    this.zoneBoost = document.createElement("div");
+    this.zoneBoost.className = "stick-zone stick-zone-boost";
 
     this.left = new VirtualStick(this.zoneLeft, {
       side: "left", radius: this.radius, deadZone: this.deadZone,
       onAxis: this.onAxis, labels: STICK_LABELS.left,
-      onStart: checkBothSticks, onEnd: checkBothSticks,
     });
     this.right = new VirtualStick(this.zoneRight, {
       side: "right", radius: this.radius, deadZone: this.deadZone,
       onAxis: this.onAxis, labels: STICK_LABELS.right,
-      onStart: checkBothSticks, onEnd: checkBothSticks,
     });
     // Green trigger stick: smaller, below-left of the right stick. Pushing it
     // fires along the plane's CURRENT nose direction - main.js polls
@@ -266,11 +227,27 @@ export class TouchControls {
       onEnd: () => { this.fireHeld = false; },
     });
 
+    // BLUE trigger stick: mirrored below-right of the LEFT stick (the green
+    // fire stick's mirror twin below-left of the right stick). Holding it
+    // boosts: main.js polls isBoostHeld() every frame and requests the boost
+    // each frame - the physics re-fires whenever the charge refills, exactly
+    // like holding the spacebar on desktop.
+    this.boost = new VirtualStick(this.zoneBoost, {
+      side: "boost", radius: 32, deadZone: 0.05,
+      onAxis: null, labels: STICK_LABELS.boost,
+      onStart: () => {
+        this.boostHeld = true;
+        try { if (navigator.vibrate) navigator.vibrate(10); } catch (err) { /* unsupported */ }
+      },
+      onEnd: () => { this.boostHeld = false; },
+    });
+
     this.root.appendChild(this.zoneLeft);
     this.root.appendChild(this.zoneRight);
-    // The fire zone overlaps the right zone's lower-left corner; being LAST
-    // in the DOM keeps it on top so those grabs belong to the trigger.
+    // The trigger zones overlap the flight zones' inner corners; being LAST
+    // in the DOM keeps them on top so those grabs belong to the triggers.
     this.root.appendChild(this.zoneFire);
+    this.root.appendChild(this.zoneBoost);
 
     document.body.appendChild(this.root);
   }
@@ -285,6 +262,11 @@ export class TouchControls {
     return this._visible && this.fireHeld;
   }
 
+  /** True while the blue boost stick is held (the spacebar's mobile twin). */
+  isBoostHeld() {
+    return this._visible && this.boostHeld;
+  }
+
   /** Show the zones (flying on mobile). Does not synthesize input. */
   show() {
     this._visible = true;
@@ -294,12 +276,13 @@ export class TouchControls {
   /** Hide the zones and release any thumbs so stale axes can't linger. */
   hide() {
     this._visible = false;
-    this._lastTap = null;
     this.fireHeld = false;
+    this.boostHeld = false;
     this.root.classList.add("hidden");
     this.left.cancel();
     this.right.cancel();
     this.fire.cancel();
+    this.boost.cancel();
   }
 
   /** Frame-rate idempotent show/hide — safe to call every frame. */

@@ -91,12 +91,11 @@
 
     <!-- HUD -->
     <div id="uiContainer" class="hidden">
-      <!-- Compass -->
-      <div id="compass-container">
-        <div id="compass-center-marker"></div>
-        <div id="compass-tape"></div>
+      <!-- Compact top cluster: little compass chip + location beneath -->
+      <div id="hud-top-cluster">
+        <div id="hud-compass-chip"><span id="hud-heading">000 N</span></div>
+        <div id="hud-location">UNKNOWN REGION</div>
       </div>
-      <div id="heading-display">000</div>
 
       <!-- Top-left: Time + Score -->
       <div id="hud-top-left">
@@ -125,9 +124,6 @@
           <span id="altitude">0</span>
         </div>
       </div>
-
-      <!-- Coordinates -->
-      <div id="coords">0.0000, 0.0000</div>
 
       <!-- Status -->
       <div id="hud-status">AIRBORNE</div>

@@ -365,21 +365,47 @@ html, body {
   text-shadow: 0 0 8px rgba(0, 255, 0, 0.6);
 }
 
-/* Compass (ref-flight) */
-#compass-container {
+/* Compact top cluster: little compass chip + bright location line. Replaces
+   the wide compass tape + heading + coords box (all cut off / hard to read). */
+#hud-top-cluster {
   position: absolute;
-  top: 20px;
+  top: 10px;
   left: 50%;
   transform: translateX(-50%);
-  width: 320px;
-  height: 40px;
-  border-bottom: 2px solid rgba(0, 255, 0, 0.8);
-  box-shadow: 0 5px 15px -5px rgba(0, 255, 0, 0.4);
-  overflow: hidden;
-  pointer-events: none;
   display: flex;
-  mask-image: linear-gradient(to right, transparent, black 25%, black 75%, transparent);
-  -webkit-mask-image: linear-gradient(to right, transparent, black 25%, black 75%, transparent);
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  z-index: 5;
+  pointer-events: none;
+}
+
+#hud-compass-chip {
+  background: rgba(0, 30, 10, 0.65);
+  border: 1px solid rgba(0, 255, 0, 0.55);
+  border-radius: 999px;
+  padding: 3px 14px;
+  box-shadow: 0 0 12px rgba(0, 255, 0, 0.25);
+}
+
+#hud-heading {
+  font-family: "Consolas", monospace;
+  font-size: 14px;
+  letter-spacing: 2px;
+  color: #fff;
+  text-shadow: 0 0 4px rgba(0, 255, 0, 0.8);
+}
+
+#hud-location {
+  font-family: "Consolas", monospace;
+  font-size: 12px;
+  letter-spacing: 1.5px;
+  color: #fff;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9), 0 0 6px rgba(0, 0, 0, 0.8);
+  max-width: min(56vw, 460px);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 #compass-tape {
@@ -814,13 +840,14 @@ html, body {
 }
 
 /* Minimap (above the corner attitude panel) */
-/* Minimap (ref-flight: square radar, bottom-left under the coords box) */
+/* Minimap (square radar, bottom-left) - sized and lifted so it never covers
+   the Cesium/imagery credit line below it. */
 #minimap-container {
   position: absolute;
-  bottom: 30px;
-  left: 30px;
-  width: 250px;
-  height: 250px;
+  bottom: 52px;
+  left: 24px;
+  width: 200px;
+  height: 200px;
   border: 1px solid #0f0;
   background: rgba(0, 40, 0, 0.3);
   overflow: hidden;
@@ -1346,6 +1373,15 @@ body.mobile-landscape #attitude-panel { display: block; }
   height: 21%;
 }
 
+/* Blue boost trigger stick: the green fire stick's mirror twin - below-RIGHT
+   of the LEFT flight stick (fire is below-left of the right stick). */
+.stick-zone-boost {
+  left: 28%;
+  bottom: 1%;
+  width: 15%;
+  height: 21%;
+}
+
 .stick-zone-fire .stick-base {
   width: 64px;
   height: 64px;
@@ -1369,6 +1405,34 @@ body.mobile-landscape #attitude-panel { display: block; }
 
 .stick-zone-fire .stick-hint {
   color: rgba(140, 255, 170, 0.55);
+  font-size: 9px;
+  bottom: 2px;
+}
+
+/* Blue boost trigger stick theme (mirror of the green fire stick). */
+.stick-zone-boost .stick-base {
+  width: 64px;
+  height: 64px;
+  border-color: rgba(90, 160, 255, 0.55);
+  background: rgba(90, 160, 255, 0.07);
+  opacity: 0.45;
+}
+
+.stick-zone-boost .stick-base.active {
+  opacity: 0.95;
+  background: rgba(90, 160, 255, 0.14);
+  border-color: rgba(120, 180, 255, 0.85);
+}
+
+.stick-zone-boost .stick-knob {
+  width: 30px;
+  height: 30px;
+  background: rgba(90, 160, 255, 0.20);
+  border-color: rgba(140, 190, 255, 0.6);
+}
+
+.stick-zone-boost .stick-hint {
+  color: rgba(140, 190, 255, 0.55);
   font-size: 9px;
   bottom: 2px;
 }
@@ -1436,6 +1500,12 @@ body.mobile-landscape #attitude-panel { display: block; }
 body.mobile-landscape #compass-container { width: min(240px, 34vw); top: 4px; }
 body.mobile-landscape #heading-display { top: 28px; font-size: 10px; }
 
+/* Compact top cluster on phones: heading chip + location under it. */
+body.mobile-landscape #hud-top-cluster { top: 6px; transform: translateX(-50%) scale(0.85); }
+body.mobile-landscape #hud-compass-chip { padding: 2px 10px; }
+body.mobile-landscape #hud-heading { font-size: 12px; }
+body.mobile-landscape #hud-location { font-size: 10px; max-width: 44vw; }
+
 body.mobile-landscape #hud-top-left { top: 6px; left: 10px; font-size: 9px; line-height: 1.35; }
 body.mobile-landscape #hud-top-right { top: 6px; right: 10px; font-size: 9px; line-height: 1.35; }
 
@@ -1451,7 +1521,7 @@ body.mobile-landscape #minimap-container { pointer-events: none; }
 /* Minimap: shrunk to a corner peep. */
 body.mobile-landscape #minimap-container {
   left: auto; right: 10px; bottom: auto; top: 56px;
-  width: 60px; height: 60px;
+  width: 54px; height: 54px;
 }
 
 /* Attitude / pitch panel: shrunk, same right column, below the minimap. */
@@ -1463,20 +1533,21 @@ body.mobile-landscape #pitch-lines .pitch-line { font-size: 7px; }
 body.mobile-landscape #pitch-ref span { font-size: 8px; top: -11px; }
 body.mobile-landscape #pitch-ref { left: 4px; right: 4px; }
 
-/* Speed, altitude: right column under the instruments. */
+/* Speed, altitude: SMALL plates to the LEFT and RIGHT of the plane
+   (mirroring the web layout, scaled down for phones). */
 body.mobile-landscape #hud-speed-box {
-  left: auto; right: 10px; bottom: auto; top: 188px;
-  transform: none; padding: 2px 6px;
+  left: 9%; right: auto; top: 46%;
+  transform: translateY(-50%); padding: 1px 4px;
 }
 body.mobile-landscape #hud-alt-box {
-  left: auto; right: 10px; bottom: auto; top: 234px;
-  transform: none; padding: 2px 6px;
+  left: auto; right: 9%; top: 46%;
+  transform: translateY(-50%); padding: 1px 4px;
 }
 body.mobile-landscape #hud-speed-box .value-box span,
-body.mobile-landscape #hud-alt-box .value-box span { font-size: 15px; min-height: 28px; }
+body.mobile-landscape #hud-alt-box .value-box span { font-size: 12px; min-height: 20px; padding: 2px 6px; }
 body.mobile-landscape #hud-speed-box .label,
-body.mobile-landscape #hud-alt-box .label { font-size: 8px; }
-body.mobile-landscape .value-box { min-width: 78px; }
+body.mobile-landscape #hud-alt-box .label { font-size: 7px; }
+body.mobile-landscape .value-box { min-width: 52px; margin-top: 2px; }
 
 body.mobile-landscape #boost-container {
   left: 50%; right: auto; bottom: 22px; top: auto;
@@ -1489,6 +1560,12 @@ body.mobile-landscape #boost-label { font-size: 7px; margin-bottom: 2px; }
 body.mobile-landscape #coords {
   left: 10px; bottom: auto; top: 36px; font-size: 9px;
 }
+
+/* Compact top cluster on phones: heading chip + location under it. */
+body.mobile-landscape #hud-top-cluster { top: 6px; transform: translateX(-50%) scale(0.85); }
+body.mobile-landscape #hud-compass-chip { padding: 2px 10px; }
+body.mobile-landscape #hud-heading { font-size: 12px; }
+body.mobile-landscape #hud-location { font-size: 10px; max-width: 44vw; }
 
 body.mobile-landscape #gun-heat-container {
   left: 50%; right: auto; bottom: 46px; top: auto;
@@ -1541,6 +1618,14 @@ body.mobile-landscape #search-results {
 body.mobile-landscape #search-results .search-result-item {
   padding: 7px 12px;
   font-size: 11px;
+}
+
+/* Short screens (web + tall-tablet): scale the picker header down so it
+   never clips off the top, and cap the results list height. The scale must
+   compose WITH the centering translate, not replace it. */
+@media (max-height: 560px) {
+  .spawn-hud-top { transform: translateX(-50%) scale(0.85); transform-origin: top center; }
+  #search-results { max-height: 34vh; }
 }
 
 body.mobile-landscape #region-notification { top: 44px; padding: 4px 12px; }

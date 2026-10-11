@@ -76,7 +76,6 @@ const mobileMode = new MobileMode();
 const touchControls = mobileMode.enabled
   ? new TouchControls({
       onAxis: (side, x, y) => controller.setStickInput(side, x, y),
-      onBoost: () => controller.requestBoost(),
     })
   : null;
 if (mobileMode.enabled) {
@@ -1540,6 +1539,11 @@ function update(dt) {
   if (triggerHeld) {
     bullets.fire(state, state.heading, state.pitch, MPH_TO_MPS * WORLD_SPEED_SCALE);
   }
+  // Blue boost stick: while held, request the boost every frame - the physics
+  // re-fires whenever the charge refills, exactly like holding space.
+  if (currentState === States.FLYING && touchControls && touchControls.isBoostHeld && touchControls.isBoostHeld()) {
+    controller.requestBoost();
+  }
   // M61 loop while the trigger is down (stopped by overheat), like ref-flight.
   try {
     if (triggerHeld && !bullets.isGunOverheated) {
@@ -1565,6 +1569,7 @@ function update(dt) {
     reverseGeocode(state.lon, state.lat).then((name) => {
       if (name && name !== currentRegionName) {
         currentRegionName = name;
+        state.region = name;
         hud.showRegion(name);
       }
     });

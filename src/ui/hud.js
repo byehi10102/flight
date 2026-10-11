@@ -15,7 +15,8 @@ export class Hud {
   constructor() {
     this.speedEl = document.getElementById("speed");
     this.altEl = document.getElementById("altitude");
-    this.headingEl = document.getElementById("heading-display");
+    this.headingEl = document.getElementById("hud-heading");
+    this.locationEl = document.getElementById("hud-location");
     this.coordsEl = document.getElementById("coords");
     this.compassTape = document.getElementById("compass-tape");
     this.regionNotification = document.getElementById("region-notification");
@@ -295,11 +296,10 @@ export class Hud {
       else if (displayHeading >= 292.5 && displayHeading < 337.5) cardinal = "NW";
       this.headingEl.innerText = `${displayHeading.toString().padStart(3, "0")} ${cardinal}`;
     }
-    if (this.compassTape) {
-      const pixelsPerDegree = 4;
-      const centerOffset = 160;
-      const targetPosOnTape = (compassHeading + 360) * pixelsPerDegree;
-      this.compassTape.style.transform = `translateX(${centerOffset - targetPosOnTape}px)`;
+    // Compact top cluster: location line under the heading chip.
+    if (this.locationEl) {
+      const loc = state.region || state.spawnName || "UNKNOWN REGION";
+      if (this.locationEl.innerText !== loc) this.locationEl.innerText = loc;
     }
 
     // â”€â”€ Score / mission time / local datetime / coords â”€â”€

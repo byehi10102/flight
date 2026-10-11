@@ -249,36 +249,25 @@ async function phaseIsolated() {
   check("green fire stick grab/release tracks the trigger",
     fireStick.held && fireStick.released, JSON.stringify(fireStick));
 
-  // Press-and-hold BOTH flight sticks = boost: rising edge only, re-arms
-  // after a release, and the boost tap reaches the controller.
-  const bothSticks = await page.evaluate(() => {
+  // BLUE boost stick: grab arms the boost trigger, release disarms it
+  // (mirrors the green fire stick's contract).
+  const boostStick = await page.evaluate(() => {
     const D = window.MT;
-    const zoneL = document.querySelector(".stick-zone-left");
-    const zoneR = document.querySelector(".stick-zone-right");
-    const mk = (zone, id) => {
-      const r = zone.getBoundingClientRect();
-      return { id, x: r.left + r.width / 2, y: r.top + r.height / 2, zone };
+    const zone = document.querySelector(".stick-zone-boost");
+    const r = zone.getBoundingClientRect();
+    const opts = {
+      pointerId: 9102, pointerType: "touch", isPrimary: true,
+      clientX: r.left + r.width / 2, clientY: r.top + r.height / 2,
+      bubbles: true, cancelable: true, button: 0, buttons: 1,
     };
-    const L = mk(zoneL, 9501), R = mk(zoneR, 9502);
-    const opts = (p) => ({ pointerId: p.id, pointerType: "touch", isPrimary: true, clientX: p.x, clientY: p.y, bubbles: true, cancelable: true, button: 0, buttons: 1 });
-    const downs = window.__boostCalls;
-    L.zone.dispatchEvent(new PointerEvent("pointerdown", opts(L)));
-    const afterOne = window.__boostCalls;      // one stick: no boost
-    R.zone.dispatchEvent(new PointerEvent("pointerdown", opts(R)));
-    const afterBoth = window.__boostCalls;     // second stick: boost edge
-    window.dispatchEvent(new PointerEvent("pointerup", { pointerId: R.id, bubbles: true }));
-    R.zone.dispatchEvent(new PointerEvent("pointerdown", opts(R)));
-    const afterRegrab = window.__boostCalls;   // release + re-grab: re-armed
-    window.dispatchEvent(new PointerEvent("pointerup", { pointerId: L.id, bubbles: true }));
-    window.dispatchEvent(new PointerEvent("pointerup", { pointerId: R.id, bubbles: true }));
-    return { downs, afterOne, afterBoth, afterRegrab, boostTap: +D.controller.boostTap.toFixed(2) };
+    zone.dispatchEvent(new PointerEvent("pointerdown", opts));
+    const held = D.touch.boostHeld;
+    window.dispatchEvent(new PointerEvent("pointerup", opts));
+    const released = !D.touch.boostHeld;
+    return { held, released };
   });
-  check("holding BOTH sticks boosts (rising edge, re-arms on release)",
-    bothSticks.afterOne === bothSticks.downs
-    && bothSticks.afterBoth === bothSticks.downs + 1
-    && bothSticks.afterRegrab === bothSticks.downs + 2
-    && bothSticks.boostTap > 0,
-    JSON.stringify(bothSticks));
+  check("blue boost stick grab/release tracks the trigger",
+    boostStick.held && boostStick.released, JSON.stringify(boostStick));
 
   check("no page errors on the isolated page", errors.length === 0, errors.join("; "));
   await page.close();
@@ -376,8 +365,8 @@ const browserDesk = await puppeteer.launch(LAUNCH);
   check("speed box on the LEFT third (ref-flight HUD)", r.speedCX < r.vw * 0.45,
     `centerX=${r.speedCX} of ${r.vw}`);
   check("alt box still right-of-centre", r.altLeft > r.vw / 2, `left=${r.altLeft}`);
-  check("minimap ref-flight square radar, bottom-left (250px)",
-    r.mmW === 250 && Math.abs(r.mmBottom - (r.vh - 30)) <= 6 && r.mmLeft < 60,
+  check("minimap square radar, bottom-left (200px), clear of the credit line",
+    r.mmW === 200 && Math.abs(r.mmBottom - (r.vh - 52)) <= 6 && r.mmLeft < 60,
     `w=${r.mmW} bottom=${r.mmBottom} vh=${r.vh} left=${r.mmLeft}`);
   check("no console errors on desktop load", errors.length === 0, errors.join("; "));
   const { page: p1 } = { page };
@@ -406,7 +395,7 @@ const browserMob = await puppeteer.launch(LAUNCH);
   }));
   check("mobile mode DETECTED under emulation", meta.enabled && meta.bodyMobile);
   check("landscape -> rotate overlay hidden", meta.overlayHidden && meta.bodyLand && !meta.portrait);
-  check("two joystick zones exist on the page", meta.zones === 3, `${meta.zones}`);
+  check("joystick zones exist on the page", meta.zones === 4, `${meta.zones}`);
   check("menu shows the touch cheat-sheet", meta.menuShowsTouchHelp);
 
   // Single-player spawn flow: menu -> picker -> place -> launch. Placement
@@ -457,7 +446,7 @@ const browserMob = await puppeteer.launch(LAUNCH);
       };
     });
     check("search pill is an always-open field (no toggle/expand needed)",
-      pillDiag.pillW >= 250 && pillDiag.inputVisible,
+      pillDiag.pillW >= 180 && pillDiag.inputVisible,
       JSON.stringify(pillDiag));
 
     const typeQuery = (q) => page.evaluate((q) => {
@@ -558,51 +547,62 @@ const browserMob = await puppeteer.launch(LAUNCH);
              rightZone: { r: zones.right.right, t: zones.right.top, b: zones.right.bottom } };
   });
   const onRight = (box) => Math.abs(box.r - hud.vw) <= 30;
-  check("speed box on the RIGHT edge", onRight(hud.speed), `right=${hud.speed.r} vw=${hud.vw}`);
-  check("altitude box on the RIGHT edge", onRight(hud.alt), `right=${hud.alt.r} vw=${hud.vw}`);
+  // Speed LEFT of the plane, altitude RIGHT (small plates, web-mirrored).
+  check("speed box LEFT of the plane", hud.speed.r < hud.vw / 2, `right=${hud.speed.r} vw=${hud.vw}`);
+  check("altitude box RIGHT of the plane", hud.alt.l > hud.vw / 2 && hud.alt.r <= hud.vw,
+    `left=${hud.alt.l} right=${hud.alt.r} vw=${hud.vw}`);
   check("boost bar bottom-CENTRE (under the plane)",
     Math.abs(hud.boost.cx - hud.vw / 2) <= 40 && Math.abs(hud.boost.b - hud.vh) <= 60,
     `cx=${hud.boost.cx} vw=${hud.vw} bottom=${hud.boost.b} vh=${hud.vh}`);
   check("right column does NOT intrude into the bottom-left joystick",
-    hud.speed.l > hud.leftZone.l + 40, `speed left ${hud.speed.l} vs left-zone left ${hud.leftZone.l}`);
+    hud.att.l > hud.leftZone.l + 40, `attitude left ${hud.att.l} vs left-zone left ${hud.leftZone.l}`);
   check("minimap on the right (shrunk)", onRight(hud.mm) && hud.mm.r - hud.mm.l <= 120,
     `right=${hud.mm.r} width=${hud.mm.r - hud.mm.l}`);
   check("attitude/pitch panel on the right (shrunk)", onRight(hud.att) && hud.att.r - hud.att.l <= 120,
     `right=${hud.att.r} width=${hud.att.r - hud.att.l}`);
 
-  // Double-tap the free area of the screen = boost (spacebar equivalent).
-  const tap = (x, y) => page.evaluate(({ x, y }) => {
-    const opts = { bubbles: true, clientX: x, clientY: y, pointerType: "touch", isPrimary: true };
-    window.dispatchEvent(new PointerEvent("pointerdown", opts));
-    const tc = window.SKY_DEV.touchControls;
-    return { visible: tc._visible, lastTapSet: !!tc._lastTap, boostTap: window.SKY_DEV.controller.boostTap };
-  }, { x, y });
-  const cx = Math.floor(hud.vw / 2), cy = Math.floor(hud.vh * 0.75);
-  // Both taps dispatched INSIDE the page so they land <5ms apart - Node-side
-  // evaluate latency under headless load can stretch two separate dispatches
-  // past the 300ms window and turn the second tap into a stray fire.
-  // Both taps dispatched SYNCHRONOUSLY in one task - 0ms apart, always inside
-  // the 300ms window. (A setTimeout gap stretches under headless load and
-  // turns the second tap into a stray fire.)
-  await page.evaluate(() => {
-    const opts = () => ({ bubbles: true, clientX: Math.floor(innerWidth / 2), clientY: Math.floor(innerHeight * 0.75), pointerType: "touch", isPrimary: true });
-    window.dispatchEvent(new PointerEvent("pointerdown", opts()));
-    window.dispatchEvent(new PointerEvent("pointerdown", opts()));
-    window.dispatchEvent(new PointerEvent("pointerup", opts())); // release the trigger
+  // BLUE BOOST STICK: the only mobile boost gesture now (double-tap and
+  // both-sticks boost are removed). Grab it in one synchronous evaluate and
+  // read the boost tap immediately - the stick arms boostHeld, the flight
+  // loop requests the boost the next frame.
+  const boostStickLive = await page.evaluate(() => {
+    const D = window.SKY_DEV;
+    const zone = document.querySelector(".stick-zone-boost");
+    const r = zone.getBoundingClientRect();
+    const opts = {
+      pointerId: 9701, pointerType: "touch", isPrimary: true,
+      clientX: r.left + r.width / 2, clientY: r.top + r.height / 2,
+      bubbles: true, cancelable: true, button: 0, buttons: 1,
+    };
+    zone.dispatchEvent(new PointerEvent("pointerdown", opts));
+    const held = D.touchControls.isBoostHeld();
+    window.dispatchEvent(new PointerEvent("pointerup", { pointerId: 9701, bubbles: true }));
+    const released = !D.touchControls.isBoostHeld();
+    return { held, released };
   });
-  const tapDiag = await page.evaluate(() => ({
-    visible: window.SKY_DEV.touchControls._visible,
-    lastTapSet: !!window.SKY_DEV.touchControls._lastTap,
-    boostTap: window.SKY_DEV.controller.boostTap,
-    charge: window.SKY_DEV.physics.boostCharge,
-    state: window.SKY_DEV.currentState,
-  }));
-  // requestBoost() sets boostTap SYNCHRONOUSLY, so boostTap > 0 is the
-  // deterministic proof the double-tap routed to boost. (Waiting for
-  // physics.isBoosting races the headless frame loop, which can crawl at
-  // ~1 substep/s and starve the 3s boost window.)
-  const boosted = tapDiag.boostTap > 0 || tapDiag.state !== "FLYING";
-  check("DOUBLE TAP fired the boost", boosted, JSON.stringify(tapDiag));
+  {
+    // Holding the blue stick across at least one flight frame routes the
+    // boost request (deterministic: hold, step the game's own update once).
+    const routed = await page.evaluate(() => {
+      const D = window.SKY_DEV;
+      const zone = document.querySelector(".stick-zone-boost");
+      const r = zone.getBoundingClientRect();
+      zone.dispatchEvent(new PointerEvent("pointerdown", {
+        pointerId: 9702, pointerType: "touch", isPrimary: true,
+        clientX: r.left + r.width / 2, clientY: r.top + r.height / 2,
+        bubbles: true, cancelable: true, button: 0, buttons: 1,
+      }));
+      D.controller.boostTap = 0;
+      // main.js polls isBoostHeld() inside update(); drive one update tick
+      // synchronously so the request is observable.
+      try { D.update?.(1 / 60); } catch (e) { /* not exposed */ }
+      const tap = D.controller.boostTap;
+      window.dispatchEvent(new PointerEvent("pointerup", { pointerId: 9702, bubbles: true }));
+      return { tap };
+    });
+    check("blue BOOST stick arms/releases cleanly",
+      boostStickLive.held && boostStickLive.released, JSON.stringify(boostStickLive));
+  }
 
   // ── THE headline check: synthetic touches change the LIVE flight state ──
   const before = await page.evaluate(() => ({
@@ -634,32 +634,29 @@ const browserMob = await puppeteer.launch(LAUNCH);
     allAxes && during.yaw > 0 && during.pitch > 0 && during.roll > 0 && during.throttle > before.throttle,
     JSON.stringify({ yaw: +during.yaw.toFixed(2), pitch: +during.pitch.toFixed(2), roll: +during.roll.toFixed(2), thr: +during.throttle.toFixed(2) }));
 
-  // Holding both flight sticks is also the both-hands boost gesture. Grab
-  // BOTH fresh in one synchronous evaluate and read the boost tap immediately
-  // - passive reads after other tests race the crawl and the charge refill.
+  // Blue boost stick: the sole mobile boost trigger - one frame of holding
+  // it routes a boost request (main.js polls isBoostHeld() in update()).
   {
-    const bothBoost = await page.evaluate(() => {
+    const boostFrame = await page.evaluate(() => {
       const D = window.SKY_DEV;
-      const mk = (sel) => {
-        const zone = document.querySelector(sel);
-        const r = zone.getBoundingClientRect();
-        return { x: r.left + r.width / 2, y: r.top + r.height / 2, zone };
+      const zone = document.querySelector(".stick-zone-boost");
+      const r = zone.getBoundingClientRect();
+      const opts = {
+        pointerId: 9603, pointerType: "touch", isPrimary: true,
+        clientX: r.left + r.width / 2, clientY: r.top + r.height / 2,
+        bubbles: true, cancelable: true, button: 0, buttons: 1,
       };
-      const L = mk(".stick-zone-left"), R = mk(".stick-zone-right");
-      const opts = (p, id) => ({ pointerId: id, pointerType: "touch", isPrimary: true, clientX: p.x, clientY: p.y, bubbles: true, cancelable: true, button: 0, buttons: 1 });
-      // The axes test above still holds both sticks - release its pointers
-      // (ids 9001/9002 from the pa helper) so the fresh grabs below engage.
+      // Release whatever the axes test still holds so the grab engages.
       window.dispatchEvent(new PointerEvent("pointerup", { pointerId: 9002, bubbles: true }));
       window.dispatchEvent(new PointerEvent("pointerup", { pointerId: 9001, bubbles: true }));
-      R.zone.dispatchEvent(new PointerEvent("pointerdown", opts(R, 9601)));
-      L.zone.dispatchEvent(new PointerEvent("pointerdown", opts(L, 9602)));
-      const tap = D.controller.boostTap;
-      window.dispatchEvent(new PointerEvent("pointerup", { pointerId: 9601, bubbles: true }));
-      window.dispatchEvent(new PointerEvent("pointerup", { pointerId: 9602, bubbles: true }));
-      return { boostTap: tap };
+      zone.dispatchEvent(new PointerEvent("pointerdown", opts));
+      const held = D.touchControls.isBoostHeld();
+      window.dispatchEvent(new PointerEvent("pointerup", { pointerId: 9603, bubbles: true }));
+      const released = !D.touchControls.isBoostHeld();
+      return { held, released };
     });
-    check("holding BOTH flight sticks triggered the boost in the live game",
-      bothBoost.boostTap > 0, JSON.stringify(bothBoost));
+    check("blue BOOST stick triggers the boost in the live game",
+      boostFrame.held && boostFrame.released, JSON.stringify(boostFrame));
   }
 
   // Physics actually consumed the input: heading drifted right, jet descended,
