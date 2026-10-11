@@ -85,6 +85,9 @@ export function createViewer(container) {
     RequestScheduler.requestsByServer[imageryHost] = 28;
     const terrainHost = new URL(CONFIG.terrain.url).host + ":443";
     RequestScheduler.requestsByServer[terrainHost] = 28;
+    // Global concurrent cap (default 50) would choke the widened pipes when
+    // imagery + terrain + reference layers all burst at once.
+    RequestScheduler.maximumRequests = 64;
   } catch (e) { /* defaults still work */ }
 
   applyBaseWorld(viewer);
