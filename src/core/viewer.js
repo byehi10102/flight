@@ -8,9 +8,11 @@ import {
   Color,
   Math as CesiumMath,
   Viewer as CesiumViewer,
+  RequestScheduler,
 } from "cesium";
 import "cesium/Build/Cesium/Widgets/widgets.css";
 import { CONFIG } from "./config.js";
+import { getQualityProfile } from "./quality.js";
 
 /**
  * Build the smallest runnable viewer first: one keyless terrain provider and
@@ -47,6 +49,7 @@ export function withOceanDonor(provider) {
 }
 
 export function createViewer(container) {
+  const profile = getQualityProfile();
   const viewer = new Viewer(container, {
     animation: false,
     timeline: false,
@@ -63,15 +66,26 @@ export function createViewer(container) {
     // ion base layer, which has no token here, fails to resolve, and leaves a
     // broken shader program in the render loop.
     baseLayer: false,
-    // A continuously moving aircraft means continuous frames; request-render
-    // mode would fight the sim loop, so we render every frame.
-    requestRenderMode: false,
-    // 4x MSAA on the default framebuffer keeps building edges from crawling.
-    msaaSamples: 4,
+    // render is driven MANUALLY from the app's own rAF (animate() calls
+    // viewer.render()). Leaving the internal loop on rendered the globe a
+    // second time every frame - pure duplicated GPU work.
+    useDefaultRenderLoop: false,
+    // MSAA from the auto quality tier (fxaa stays on at every tier).
+    msaaSamples: profile.msaaSamples,
     contextOptions: {
-      webgl: { preserveDrawingBuffer: true, powerPreference: "high-performance" },
+      webgl: { powerPreference: "high-performance" },
     },
   });
+
+  // Wider tile-request pipe for our HTTP/2 hosts: Cesium's default
+  // per-server cap (18 in 1.132) is the bottleneck when the jet outruns the
+  // tile stream at high speed; both services handle more in flight.
+  try {
+    const imageryHost = new URL(CONFIG.imagery.url).host + ":443";
+    RequestScheduler.requestsByServer[imageryHost] = 28;
+    const terrainHost = new URL(CONFIG.terrain.url).host + ":443";
+    RequestScheduler.requestsByServer[terrainHost] = 28;
+  } catch (e) { /* defaults still work */ }
 
   applyBaseWorld(viewer);
   // Freeze the simulation clock: we pin the time ourselves for permanent
@@ -119,19 +133,23 @@ export function applyBaseWorld(viewer) {
   referenceLayer.show = false;
 
   // ── Quality: LOD, AA and atmosphere ──────────────────────────────────────
-  viewer.scene.globe.maximumScreenSpaceError = 2;
+  // Tier-scaled values (auto quality): MSAA/cache/upload-pacing differ per
+  // device tier; tile DETAIL never does - maximumScreenSpaceError 2 is the
+  // realism floor on every device.
+  const profile = getQualityProfile();
+  viewer.scene.globe.maximumScreenSpaceError = profile.maximumScreenSpaceError;
   viewer.scene.globe.skipLevelOfDetail = true;
   viewer.scene.globe.baseScreenSpaceError = 1024;
   viewer.scene.globe.skipScreenSpaceErrorFactor = 16;
   viewer.scene.globe.skipLevels = 1;
 
-  viewer.scene.globe.tileCacheSize = 2048;
+  viewer.scene.globe.tileCacheSize = profile.tileCacheSize;
   viewer.scene.globe.preloadAncestors = true;
   viewer.scene.globe.preloadSiblings = true;
   // Raised concurrent tile-fetch budget: at 1.8x arcade speed (up to
   // ~8 km/s in boost) the camera outruns the default fetch queue, so more
   // descendants load per frame instead of arriving soft behind the jet.
-  viewer.scene.globe.loadingDescendantLimit = 48;
+  viewer.scene.globe.loadingDescendantLimit = profile.loadingDescendantLimit;
 
   // Water effect stays OFF: with it on, ocean areas whose tiles lack data
   // render as flat grey patches instead of matching the surrounding water.
@@ -144,7 +162,7 @@ export function applyBaseWorld(viewer) {
 
   viewer.scene.highDynamicRange = false;
   viewer.scene.postProcessStages.fxaa.enabled = true;
-  viewer.scene.msaaSamples = 4;
+  viewer.scene.msaaSamples = profile.msaaSamples;
 
   viewer.scene.skyAtmosphere.hueShift = -0.02;
   viewer.scene.skyAtmosphere.saturationShift = -0.08;
@@ -280,10 +298,13 @@ export function initMiniViewer(containerId) {
       infoBox: false,
       selectionIndicator: false,
       baseLayer: false,
-      requestRenderMode: false,
+      // Rendered MANUALLY from setMinimapCamera (called every frame while
+      // flying). With the internal loop on, this hidden-during-boot viewer
+      // burned a full render every frame from page load.
+      useDefaultRenderLoop: false,
       skyBox: false,
       contextOptions: {
-        webgl: { preserveDrawingBuffer: true, powerPreference: "low-power" },
+        webgl: { powerPreference: "low-power" },
       },
     });
     miniViewer.scene.skyAtmosphere.show = false;
@@ -327,11 +348,16 @@ export function getMiniViewer() {
   return miniViewer;
 }
 
-/** Top-down minimap camera tracking the aircraft. */
+/** Top-down minimap camera tracking the aircraft. Renders the mini viewer
+ *  manually — only called from the flying states, so the minimap costs
+ *  nothing while the boot page, menu, or picker are up. */
 export function setMinimapCamera(lon, lat, altitude, heading) {
   if (!miniViewer) return;
   try {
-    if (miniViewer.canvas.width === 0 || miniViewer.canvas.height === 0) return;
+    // clientWidth (layout size) is 0 whenever the HUD is display:none -
+    // boot, menu, picker, crash menu - so the render is skipped exactly
+    // when the minimap can't be seen.
+    if (miniViewer.canvas.clientWidth === 0 || miniViewer.canvas.clientHeight === 0) return;
     miniViewer.camera.setView({
       destination: Cartesian3.fromDegrees(lon, lat, altitude),
       orientation: {
@@ -340,5 +366,6 @@ export function setMinimapCamera(lon, lat, altitude, heading) {
         roll: 0,
       },
     });
+    miniViewer.render();
   } catch (e) { /* minimap is cosmetic */ }
 }

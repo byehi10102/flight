@@ -3,6 +3,7 @@ import * as Cesium from "cesium";
 import "cesium/Build/Cesium/Widgets/widgets.css";
 import { CONFIG } from "./core/config.js";
 import { computeBootProgress } from "./core/bootProgress.js";
+import { getQualityProfile } from "./core/quality.js";
 import { createViewer, attachTerrain, setSunForTime, initMiniViewer, getMiniViewer, setMinimapCamera, setStreetsVisible } from "./core/viewer.js";
 import { GroundSampler } from "./core/ground.js";
 import { PlanePhysics } from "./plane/planePhysics.js";
@@ -159,6 +160,7 @@ let areaPreloadActive = false;
 
 // Boot loading page: fade to the menu instead of cutting. Idempotent.
 let loadingPageHidden = false;
+let lastThrottledRender = 0;
 // Mobile browsers (iOS Safari especially) honor the muted attribute
 // inconsistently and silently refuse autoplay; force the properties and
 // retry play() so the 3D fly-through actually shows on phones.
@@ -441,7 +443,10 @@ function initThree() {
 
   renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true, premultipliedAlpha: false });
   renderer.setSize(window.innerWidth, window.innerHeight);
-  renderer.setPixelRatio(window.devicePixelRatio);
+  // Tier cap (HiDPI only): a 3x-DPI phone renders 9x the pixels for an
+  // overlay that is mostly the small jet sprite; 1.75x is visually
+  // indistinguishable in motion and keeps weak GPUs alive.
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, getQualityProfile().pixelRatioCap));
   renderer.setClearColor(0x000000, 0);
   renderer.autoClear = false;
   threeContainer = document.getElementById("threeContainer");
@@ -1362,6 +1367,15 @@ function confirmSpawn() {
 
     currentState = States.TRANSITIONING;
 
+    // Minimap viewer is built lazily HERE - inside the hidden spawn beat -
+    // instead of at page load: until the first flight the app runs on one
+    // Cesium context (a second one burned VRAM + a render loop all through
+    // boot and the menus for nothing). Null-safe everywhere else, so a
+    // failed init degrades to the canvas-less HUD gracefully.
+    if (!getMiniViewer()) {
+      try { initMiniViewer("minimapCesium"); } catch (e) { /* cosmetic */ }
+    }
+
     // Tile warm-up: at 1.8x arcade speed the jet outruns fresh tiles, so
     // prime the terrain cache in a ~12 km box around the spawn plus the
     // flight-path ahead while the pull-up plays. High-detail imagery then
@@ -1967,10 +1981,16 @@ function animate() {
     renderer.clearDepth();
   }
 
-  // Cesium's own loop can stall under a throttled/batched frame scheduler
-  // (headless CI, backgrounded tabs). Driving it explicitly guarantees the
-  // globe always composites under the Three.js overlay.
-  viewer.render();
+  // Cesium render is driven from HERE (its internal loop is disabled - it
+  // duplicated every frame). While the boot page is up the globe is hidden
+  // behind the video, so throttle to ~10 renders/s: tile streaming happens
+  // inside render() and needs only a few passes a second, while the video
+  // and the progress bar are pure DOM and stay smooth. Full-rate rendering
+  // resumes with the menu.
+  if (loadingPageHidden || now - lastThrottledRender > 100) {
+    if (!loadingPageHidden) lastThrottledRender = now;
+    try { viewer.render(); } catch (e) { /* one bad frame never kills the loop */ }
+  }
 }
 
 // ── UI events ────────────────────────────────────────────────────────────────
@@ -2097,7 +2117,8 @@ initialCameraView = {
 initThree();
 setupSpawnPicker();
 setupSearch();
-initMiniViewer("minimapCesium");
+// (Minimap viewer init moved to the spawn beat - see the confirmSpawn
+// callback. One Cesium context at boot instead of two.)
 preloadTerrain();
 setSunForTime(viewer, 12, state.lat, state.lon);
 
