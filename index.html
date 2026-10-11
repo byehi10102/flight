@@ -52,14 +52,15 @@
       </div>
     </div>
 
-    <!-- Preparing flight: the real-progress moment between SPAWN HERE and the
-         camera dive. Lazy video (preload="none" — never touches boot),
-         Blender-rendered looping graphic; the bar tracks the destination tile
-         queue draining, holds at 95% through a ~3s minimum, caps at ~12s. -->
+    <!-- Preparing flight: the moment between SPAWN HERE and the camera dive.
+         Lazy video (preload="none" — never touches boot): the ORIGINAL
+         diagonal cloud fly-through (Blender loop); the bar tracks the
+         destination tile queue draining, holds through a ~3s minimum, caps
+         at ~12s. A resident destination (queue never grew) still climbs. -->
     <div id="preparingFlight" class="loading-container hidden">
       <div class="loading-bg"></div>
       <video id="preparingFlightVideo" class="loading-bg-video" muted loop playsinline preload="none">
-        <source src="/preparing-flight.mp4" type="video/mp4" />
+        <source src="/spawn-dive.mp4" type="video/mp4" />
       </video>
       <div class="loading-content">
         <div class="loading-title">PREPARING FLIGHT</div>
@@ -72,14 +73,17 @@
       </div>
     </div>
 
-    <!-- Loading -->
+    <!-- Boot loading page: the F-15-over-clouds film (Blender, seamless loop)
+         plays while the default region (Anaheim) streams in: imagery passes,
+         DEM grid, aircraft, audio. The bar tracks that real work and, at
+         100%, the menu takes over. -->
     <div id="loadingIndicator" class="loading-container">
       <div class="loading-bg"></div>
       <!-- No poster: a static still of the jet paints first and the fly-through
            looks like it "starts late". preload + fetchpriority make the video
            itself the first thing on the wire, so frame 0 plays right away. -->
       <video class="loading-bg-video" autoplay muted loop playsinline preload="auto" fetchpriority="high">
-        <source src="/loading-scene.mp4" type="video/mp4" />
+        <source src="/boot-flight.mp4" type="video/mp4" />
       </video>
       <div class="loading-content">
         <div class="loading-title">SKYWARD</div>

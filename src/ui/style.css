@@ -169,7 +169,12 @@ html, body {
 .loading-bg {
   position: absolute;
   inset: 0;
-  background: url("/loading-scene.png") center / cover no-repeat;
+  background: url("/boot-flight.png") center / cover no-repeat;
+}
+
+/* The preparing-flight screen's poster is the spawn-dive film's still. */
+#preparingFlight .loading-bg {
+  background-image: url("/spawn-dive.png");
 }
 
 /* The Blender-rendered fly-through: clouds streaming past the jet in a

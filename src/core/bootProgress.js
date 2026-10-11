@@ -72,21 +72,47 @@ export class MonotonicPercent {
 }
 
 /**
+ * Boot display floor — the anti-"dead bar" companion to computeBootProgress.
+ *
+ * Real sub-progress can legitimately sit still: a tile queue that hasn't
+ * grown yet reports 0, a finished-fast stage flips its flag in one jump, and
+ * on a stalled network nothing moves at all. The floor creeps the DISPLAY
+ * up slowly (reaching `cap` after `reachMs`) so the bar always looks alive;
+ * it can never reach 100 on its own — `cap` stops short, and completion
+ * still only comes from real stage flags.
+ */
+export function bootDisplayFloor(elapsedMs, reachMs = 18000, cap = 0.9) {
+  const t = Number.isFinite(elapsedMs) ? Math.max(0, elapsedMs) : 0;
+  const reach = reachMs > 0 ? reachMs : 1;
+  const c = Math.max(0, Math.min(1, cap));
+  return Math.min(c, (c * t) / reach);
+}
+
+/**
  * "Preparing flight" progress envelope — the progress bar between tapping
  * SPAWN HERE and the camera dive.
  *
  * The REAL work signal is the destination tile queue draining
- * (queueRatio, 0..1). The envelope guarantees three things the raw ratio
+ * (queueRatio, 0..1). The envelope guarantees four things the raw ratio
  * can't on its own:
- *   - a finished load before MIN window ends holds at 95% (the phase plays
- *     at least ~3 s so the moment never flashes by),
- *   - it reaches 100% the moment the min window ends,
- *   - a stalled network can never trap the player (hard cap → 100%).
+ *   - a destination whose tiles are ALREADY resident (the picker camera has
+ *     been staring at it; the queue never grows, ratio pinned at 0) still
+ *     shows the bar climbing honestly through the minimum window instead of
+ *     sitting dead at 0% and then jumping — 100% still arrives exactly when
+ *     the minimum window ends,
+ *   - an active queue drives the bar directly (its floor is capped below
+ *     90%, so a stalled stream can't fake completion),
+ *   - the phase always ends: hard cap at maxMs -> 100%,
+ *   - and the moment never flashes by: nothing reaches 100 before minMs.
  */
-export function preparingFlightProgress(queueRatio, elapsedMs, minMs = 3000, maxMs = 12000) {
+export function preparingFlightProgress(queueRatio, elapsedMs, minMs = 3000, maxMs = 12000, queueEmpty = false) {
   const raw = Math.max(0, Math.min(1, Number(queueRatio) || 0));
   const t = Number.isFinite(elapsedMs) ? elapsedMs : 0;
   if (t >= maxMs) return 1;
-  if (raw >= 1) return t >= minMs ? 1 : 0.95;
-  return raw;
+  const windowFloor = minMs > 0 ? Math.min(0.9 * (t / minMs), 0.9) : 0;
+  if (raw >= 1 || queueEmpty) {
+    if (t >= minMs) return 1;
+    return windowFloor;
+  }
+  return Math.max(raw, windowFloor);
 }

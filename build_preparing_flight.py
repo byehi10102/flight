@@ -19,7 +19,7 @@ import sys
 _args = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
 REPO = _args[0] if _args else "."
 GLB = os.path.join(REPO, "public", "models", "f-15.glb")
-OUT = os.path.join(REPO, "render-preparing")
+OUT = os.path.join(REPO, "render-boot")
 FRAMES = 144
 FPS = 24
 RES_X, RES_Y = 1920, 1080
@@ -154,7 +154,8 @@ for li, (z, S, N, radius, xoff, sq) in enumerate(lanes):
     proto = make_puff_object(f"Puff{li}", 100 + li, 9, radius, sq)
     proto.data.materials.append(cloud_mat)
     span = N * S
-    vpf = span / FRAMES  # full lane round-trip per loop
+    vpf = 2 * span / FRAMES  # 2 lane round-trips per loop: periodic (2*N*S
+    #  is a whole number of spacings) AND fast enough to read as real flight
     for i in range(N):
         ob = proto if i == 0 else proto.copy()
         ob.name = f"Cloud_{li}_{i}"
@@ -235,8 +236,9 @@ def cyc(freq, phase, amp):
     return f"{amp!r}*sin(2*pi*{freq!r}*(frame-1)/{FRAMES}+{phase!r})"
 
 rig.rotation_mode = "XYZ"
-for idx, freq, phase, amp in ((2, 1, 0.0, math.radians(11)),
-                              (0, 2, 1.3, math.radians(2.5))):
+# Gentle life only — no rocking: tiny bank/pitch/bob, one slow cycle each.
+for idx, freq, phase, amp in ((2, 1, 0.0, math.radians(2.5)),
+                              (0, 1, 1.3, math.radians(1.0))):
     base = rig.rotation_euler[idx]
     drv = rig.driver_add("rotation_euler", idx)
     d = drv.driver
@@ -245,7 +247,7 @@ for idx, freq, phase, amp in ((2, 1, 0.0, math.radians(11)),
 zdrv = rig.driver_add("location", 2)
 dz = zdrv.driver
 dz.type = "SCRIPTED"
-dz.expression = f"{rig.location.z!r} + " + cyc(2, 0.7, 0.35)
+dz.expression = f"{rig.location.z!r} + " + cyc(1, 0.7, 0.15)
 
 cam_data = bpy.data.cameras.new("Cam")
 cam_data.lens = 32
@@ -259,8 +261,8 @@ cam_rig = bpy.data.objects.new("CamRig", None)
 bpy.context.scene.collection.objects.link(cam_rig)
 cam.parent = cam_rig
 cam.matrix_parent_inverse = cam_rig.matrix_world.inverted()
-for idx, freq, phase, amp in ((2, 1, 0.5, math.radians(1.4)),
-                              (0, 3, 2.1, math.radians(0.8))):
+for idx, freq, phase, amp in ((2, 1, 0.5, math.radians(0.7)),
+                              (0, 1, 2.1, math.radians(0.4))):
     base = cam_rig.rotation_euler[idx]
     drv = cam_rig.driver_add("rotation_euler", idx)
     d = drv.driver

@@ -352,8 +352,8 @@ const browserDesk = await puppeteer.launch(LAUNCH);
       const bg = li ? li.querySelector(".loading-bg") : null;
       const vid = li ? li.querySelector(".loading-bg-video") : null;
       return {
-        hasRenderBackdrop: !!(bg && /loading-scene\.png/.test(getComputedStyle(bg).backgroundImage || "none")),
-        hasFlythroughVideo: !!(vid && /loading-scene\.mp4/.test(vid.querySelector("source")?.src || vid.src || "none")),
+        hasRenderBackdrop: !!(bg && /boot-flight\.png/.test(getComputedStyle(bg).backgroundImage || "none")),
+        hasFlythroughVideo: !!(vid && /boot-flight\.mp4/.test(vid.querySelector("source")?.src || vid.src || "none")),
         videoLoops: vid ? vid.loop : false,
         pct: document.getElementById("loadingPercent")?.textContent,
       };

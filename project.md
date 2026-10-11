@@ -1217,3 +1217,58 @@ and the spawn picker. dev-mobile-test.mjs phase C re-encodes the whole
 arrangement as geometry assertions (mirror symmetry, corner pinning, stick
 clearances, no-scale regression guard): 82/82.
 
+## 18. Recent changes (animations swapped, boot bar made honest)
+
+### The two loading films swapped roles
+
+By request: the new F-15-over-clouds film is now the BOOT film
+(`public/boot-flight.mp4` + `boot-flight.png` poster) — it plays from the
+moment the app opens while the default region (Anaheim) streams in. The
+original diagonal cloud fly-through moved to the spawn moment
+(`public/spawn-dive.mp4` + `spawn-dive.png`) — it plays between SPAWN HERE
+and the camera dive while the destination area streams. `preparing-flight.*`
+and `loading-scene.*` are retired; index.html/style.css/dev-mobile-test.mjs
+reference the new names.
+
+### The boot film: straight flight, no rocking
+
+The first bake of the F-15 film rocked visibly (11 deg bank, 2.5 deg pitch,
+0.35 m bob). Re-baked with gentle life only: 2.5 deg bank, 1 deg pitch,
+0.15 m bob, one slow cycle each — and the cloud treadmill doubled to two
+lane round-trips per loop (~450 m/s apparent wind) so the deck visibly
+streams backward under a jet that reads as flying straight and level.
+
+### The boot bar showed nothing, and could sit frozen
+
+Three real causes, all fixed:
+
+1. **The big slice was 0-or-jump.** The `area` stage (the Anaheim preload —
+   a quarter of the whole bar) was estimated from tile-queue decay, which
+   reads 0 until it suddenly reads 100. It now reports REAL sub-steps: each
+   of the three imagery camera passes releases 25% of the slice as its await
+   resolves, and the DEM grid seeds release the last quarter.
+2. **Nothing called the bar between events.** Between tile events the bar
+   never repainted, and on a fast connection the flags all completed in
+   seconds — the bar snapped to 100 and then the page SAT there for the rest
+   of a fixed 8 s minimum window looking frozen. `MIN_BOOT_SECONDS` drops to
+   4.5 s: a finished load now opens promptly.
+3. **A stalled stage left the bar dead at 0%.** `bootDisplayFloor()` creeps
+   the display slowly (to 90% over 18 s) whenever real progress sits still,
+   so the bar always looks alive; it can never reach 100 on its own —
+   completion still comes only from real stage flags (hard cap 14 s
+   unchanged).
+
+### The spawn bar sat dead at 0% for a resident destination
+
+If the picker camera had been staring at the chosen point, its tiles were
+already resident: the queue never grew, the ratio pinned at 0, and the bar
+sat at 0% for up to the 12 s hard cap before jumping. `queueEmpty` is now
+passed to the envelope, and the window floor climbs honestly through the
+~3 s minimum — 100% still arrives exactly when the window ends. The
+pre-spawn seed also grew to "a good large amount": a 13x13 grid over
++/-0.10 deg (~11 km) around the point, plus the forward flight path, so the
+dive window does real DEM work. In flight, the forward tile preload (fan
+ahead of the nose, 3-20 km lead, twice a second) continues streaming as
+before.
+
+

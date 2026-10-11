@@ -2,7 +2,7 @@ import * as THREE from "three";
 import * as Cesium from "cesium";
 import "cesium/Build/Cesium/Widgets/widgets.css";
 import { CONFIG } from "./core/config.js";
-import { computeBootProgress, preparingFlightProgress, MonotonicPercent } from "./core/bootProgress.js";
+import { computeBootProgress, preparingFlightProgress, bootDisplayFloor, MonotonicPercent } from "./core/bootProgress.js";
 import { getQualityProfile } from "./core/quality.js";
 import { createViewer, attachTerrain, setSunForTime, initMiniViewer, getMiniViewer, setMinimapCamera, setStreetsVisible } from "./core/viewer.js";
 import { GroundSampler } from "./core/ground.js";
@@ -164,8 +164,6 @@ const loadingSub = { model: 0, globe: 0, area: 0 };
 const bootBarShown = new MonotonicPercent();
 const preparingBarShown = new MonotonicPercent();
 let maxGlobeQueue = 0; // largest tile queue seen during the globe stage
-let maxAreaQueue = 0;  // largest tile queue seen during the area preload
-let areaPreloadActive = false;
 
 // Boot loading page: fade to the menu instead of cutting. Idempotent.
 let loadingPageHidden = false;
@@ -193,10 +191,10 @@ let preparingTimer = null;
 })();
 
 // Boot loading page: minimum total time (s). The page stays up AT LEAST this
-// long even if everything finishes early - the region preload keeps
-// streaming imagery + terrain through the whole window. Hard cap below: boot
-// must never trap the player on a slow network.
-const MIN_BOOT_SECONDS = 8;
+// long so the fly-through has its moment even when everything finishes early
+// (the area preload keeps streaming through it). Hard cap below: boot must
+// never trap the player on a slow network.
+const MIN_BOOT_SECONDS = 4.5;
 const MAX_BOOT_SECONDS = 14;
 const bootStart = performance.now();
 
@@ -251,10 +249,16 @@ function updateLoadingUI() {
   // slices. Nothing here increments on a timer.
   if (loadingBarFill) {
     // Failed is a deliberate reset (bar to 0); otherwise the shown bar only
-    // ever moves forward, even when the raw queue ratio retreats.
+    // ever moves forward. Two honest layers: real stage flags + sub-progress
+    // (computeBootProgress), lifted by a slow display floor that keeps the
+    // bar visibly alive when a stage reports nothing (queue that hasn't
+    // grown, stalled network). The floor stops at 90% — completion still
+    // only comes from real work.
+    const raw = computeBootProgress(loadingStatus, loadingSub);
+    const floor = 100 * bootDisplayFloor(performance.now() - bootStart);
     const pct = loadingStatus.failed
       ? 0
-      : bootBarShown.update(Math.round(computeBootProgress(loadingStatus, loadingSub)));
+      : bootBarShown.update(Math.round(Math.max(raw, floor)));
     loadingBarFill.style.width = `${pct}%`;
     if (loadingPercent) loadingPercent.textContent = `${pct}%`;
   }
@@ -293,16 +297,14 @@ viewer.scene.globe.tileLoadProgressEvent.addEventListener((queueLength) => {
     lastPreparingQueue = queueLength;
     if (queueLength > preparingQueuePeak) preparingQueuePeak = queueLength;
   }
-  // Boot phase: the queue draining IS the real progress for the globe and
-  // area stages. Track the peak queue so remaining/peak maps to 0..1.
+  // Boot phase: the queue draining IS the real progress for the globe stage.
+  // (The area stage reports REAL sub-steps from preloadSpawnRegion's camera
+  // passes + DEM grid instead — a queue-decay estimate reads 0-or-jump and
+  // left the bar looking dead.)
   if (!loadingPageHidden && !loadingStatus.failed) {
     if (!loadingStatus.globe) {
       if (queueLength > maxGlobeQueue) maxGlobeQueue = queueLength;
       loadingSub.globe = maxGlobeQueue > 0 ? 1 - queueLength / maxGlobeQueue : 0;
-    }
-    if (areaPreloadActive && !loadingStatus.area) {
-      if (queueLength > maxAreaQueue) maxAreaQueue = queueLength;
-      loadingSub.area = maxAreaQueue > 0 ? 1 - queueLength / maxAreaQueue : 0;
     }
     if (currentState === States.MENU) updateLoadingUI();
   }
@@ -357,11 +359,8 @@ async function preloadTerrain() {
     updateLoadingUI();
   }
   try {
-    areaPreloadActive = true;
     await withTimeout(preloadSpawnRegion(), 9000);
-  } catch (e) { /* bounded above */ } finally {
-    areaPreloadActive = false;
-  }
+  } catch (e) { /* bounded above */ }
   loadingStatus.area = true;
   updateLoadingUI();
 }
@@ -377,12 +376,14 @@ async function preloadSpawnRegion() {
   };
   try {
     // Pass 1: wide 160 km top-down look warms imagery tiles for a ~300 km
-    // area around the default region.
+    // area around the default region. Each pass releases a real quarter of
+    // the area slice on the boot bar.
     viewer.camera.setView({
       destination: Cesium.Cartesian3.fromDegrees(state.lon, state.lat, 160000),
       orientation: { heading: 0, pitch: Cesium.Math.toRadians(-90), roll: 0 },
     });
     await waitForGlobeTiles(3000);
+    loadingSub.area = 0.25; updateLoadingUI();
     // Pass 2: closer 35 km pass - city-level detail imagery + terrain the
     // picker's first zoom would otherwise stream on demand.
     viewer.camera.setView({
@@ -390,6 +391,7 @@ async function preloadSpawnRegion() {
       orientation: { heading: 0, pitch: Cesium.Math.toRadians(-90), roll: 0 },
     });
     await waitForGlobeTiles(3000);
+    loadingSub.area = 0.5; updateLoadingUI();
     // Pass 3: low 8 km pass - street-level imagery around the default spawn
     // point, so the picker's opening view is already sharp.
     viewer.camera.setView({
@@ -397,6 +399,7 @@ async function preloadSpawnRegion() {
       orientation: { heading: 0, pitch: Cesium.Math.toRadians(-90), roll: 0 },
     });
     await waitForGlobeTiles(2500);
+    loadingSub.area = 0.75; updateLoadingUI();
   } catch (e) { /* best effort */ }
   // 3D terrain across the region: ~ +/-1.5 deg lon x +/-1.0 deg lat grid
   // (denser than before - as much California warm as the boot window allows).
@@ -410,6 +413,7 @@ async function preloadSpawnRegion() {
     }
   }
   try { await groundSampler.seed(pts); } catch (e) { /* best effort */ }
+  loadingSub.area = 1; updateLoadingUI();
   viewer.camera.setView(saved);
 }
 
@@ -1263,9 +1267,13 @@ function runPreparingFlight(onReady) {
   clearInterval(preparingTimer);
   preparingTimer = setInterval(() => {
     const ratio = preparingQueuePeak > 0 ? 1 - lastPreparingQueue / preparingQueuePeak : 0;
+    // queueEmpty: no tile queue ever grew for the destination (the picker
+    // camera already streamed it) — the envelope then runs on the window
+    // floor so the bar still climbs honestly instead of sitting dead.
+    const queueEmpty = preparingQueuePeak === 0 || lastPreparingQueue === 0;
     const pct = Math.round(
       100 * preparingBarShown.update(
-        preparingFlightProgress(ratio, performance.now() - start, PREPARING_MIN_MS, PREPARING_MAX_MS),
+        preparingFlightProgress(ratio, performance.now() - start, PREPARING_MIN_MS, PREPARING_MAX_MS, queueEmpty),
       ),
     );
     if (preparingBarFill) preparingBarFill.style.width = `${pct}%`;
@@ -1300,13 +1308,15 @@ function confirmSpawn() {
     vignette.style.opacity = "1";
   }
 
-  // 4 s loading beat: the sign shows while tiles stream, THEN the spawn
-  // flight plays. Seeds here (not after the wait) so the 4 s do real work.
+  // Pre-spawn beat: seed a GOOD LARGE amount of 3D terrain around the chosen
+  // point — +/-0.10 deg (~11 km) grid + the forward flight path — so the
+  // spawn-dive window does real work and the first minutes of flight have
+  // refined elevation on all sides.
   try {
     const pre = [];
-    for (let dy = -5; dy <= 5; dy++) {
-      for (let dx = -5; dx <= 5; dx++) {
-        pre.push([state.lat + dy * 0.01, state.lon + dx * 0.01]);
+    for (let dy = -6; dy <= 6; dy++) {
+      for (let dx = -6; dx <= 6; dx++) {
+        pre.push([state.lat + dy * 0.0167, state.lon + dx * 0.0167]);
       }
     }
     groundSampler.seed(pre).catch(() => {});
