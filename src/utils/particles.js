@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { getQualityProfile } from "../core/quality.js";
 
 /**
  * Crash-detonation particles.
@@ -15,6 +16,13 @@ import * as THREE from "three";
  * The Three.js camera is fixed at the origin (Cesium owns world tracking), so
  * the whole effect runs in local space around the crash point — the plane's
  * on-screen position — and every object stays on layer 1.
+ *
+ * POOLING: the whole burst is built ONCE and recycled. The original flow
+ * created ~112 sprites + their SpriteMaterials inside the impact frame — an
+ * allocation spike that stuttered weak GPUs at the exact moment two full
+ * renderers were already busy. Pooled sprites keep their own materials (the
+ * per-sprite colour ramp and opacity need them), are reset on release, and
+ * never get disposed — three.js's program cache stays warm across crashes.
  */
 
 let _puffTexture = null;
@@ -22,8 +30,8 @@ let _puffTexture = null;
 /**
  * Shared soft puff texture: an opaque hot centre fading to a transparent edge,
  * with a few low-frequency holes punched in so the silhouette is billowy
- * rather than a perfect disc. Built once, reused by every sprite, disposed in
- * clear().
+ * rather than a perfect disc. Built once, reused by every sprite, never
+ * disposed (tiny, and re-uploading it per crash is the stall it avoids).
  */
 function getPuffTexture() {
   if (_puffTexture) return _puffTexture;
@@ -79,7 +87,26 @@ function makePuff(size, { additive = true } = {}) {
   sprite.scale.set(size, size, 1);
   sprite.layers.set(1);
   sprite._baseScale = size;
+  sprite.visible = false; // pooled: hidden until a burst acquires it
   return sprite;
+}
+
+/** The pressure-wave ring (pooled like the puffs; geometry is reused). */
+function makeRing() {
+  const ring = new THREE.Mesh(
+    new THREE.RingGeometry(0.96, 1.0, 48),
+    new THREE.MeshBasicMaterial({
+      color: 0xffddaa,
+      blending: THREE.AdditiveBlending,
+      transparent: true,
+      opacity: 0.55,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    })
+  );
+  ring.layers.set(1);
+  ring.visible = false;
+  return ring;
 }
 
 /** Radial ejecta velocity, biased slightly upward. */
@@ -93,6 +120,27 @@ function radialVelocity(speed) {
   );
 }
 
+/**
+ * Tier-scaled burst budget (pure, unit-tested). The caller's explicit counts
+ * (the crash site's 72/22/16) are the high-tier baseline; the auto quality
+ * tier's explosionScale trims every category proportionally so weak GPUs get
+ * a leaner — but identically styled — burst.
+ */
+export function explosionCounts(profile = {}, opts = {}) {
+  const big = opts.big !== false;
+  const scale = Number(profile && profile.explosionScale) > 0 ? profile.explosionScale : 1;
+  const base = {
+    fire: Number.isFinite(opts.count) ? opts.count : (big ? 40 : 22),
+    sparks: big ? 22 : 12,
+    smoke: Number.isFinite(opts.smokeCount) ? opts.smokeCount : (big ? 8 : 4),
+  };
+  return {
+    fire: Math.max(1, Math.round(base.fire * scale)),
+    sparks: Math.max(1, Math.round(base.sparks * scale)),
+    smoke: Math.max(1, Math.round(base.smoke * scale)),
+  };
+}
+
 export const particles = {
   scene: null,
   list: [],
@@ -103,6 +151,9 @@ export const particles = {
   _lightLife: 0,
   _lightMax: 0.22,
   _lightBase: 0,
+  // Sprite pool, built once at init from the tier budget (+ headroom) and
+  // recycled forever. _pool[category] holds released sprites.
+  _pool: null,
 
   init(scene) {
     this.scene = scene;
@@ -111,22 +162,56 @@ export const particles = {
       this._flashLight.layers.enable(1);
       this.scene.add(this._flashLight);
     }
+    this._initPool();
+  },
+
+  /** Build the pool once. Sized from the tier's biggest possible burst. */
+  _initPool() {
+    if (this._pool) return;
+    // Biggest burst in the game: the crash site's big detonation.
+    const budget = explosionCounts(getQualityProfile(), { big: true, count: 72, smokeCount: 16 });
+    const sizes = {
+      flash: 2,
+      ring: 2,
+      fire: budget.fire + 4,
+      sparks: budget.sparks + 4,
+      smoke: budget.smoke + 2,
+    };
+    this._pool = { flash: [], ring: [], fire: [], sparks: [], smoke: [] };
+    for (let i = 0; i < sizes.flash; i++) this._pool.flash.push(makePuff(1.4));
+    for (let i = 0; i < sizes.ring; i++) this._pool.ring.push(makeRing());
+    for (let i = 0; i < sizes.fire; i++) this._pool.fire.push(makePuff(0.5));
+    for (let i = 0; i < sizes.sparks; i++) this._pool.sparks.push(makePuff(0.08));
+    for (let i = 0; i < sizes.smoke; i++) this._pool.smoke.push(makePuff(0.6, { additive: false }));
+  },
+
+  _acquire(cat, make) {
+    this._initPool();
+    const sprite = this._pool[cat].pop() || make();
+    sprite._poolCat = cat;
+    sprite.visible = true;
+    this.scene.add(sprite);
+    return sprite;
+  },
+
+  _release(p) {
+    try { this.scene?.remove(p); } catch (e) { /* already detached */ }
+    p.visible = false;
+    p._delay = 0;
+    if (this._pool && p._poolCat && this._pool[p._poolCat]) {
+      this._pool[p._poolCat].push(p);
+    }
   },
 
   clear() {
     for (const p of this.list) {
-      this.scene?.remove(p);
-      p.geometry?.dispose?.();
-      // Materials are deliberately NOT disposed: disposing them evicts their
-      // shader programs, so the next crash would recompile them (a visible
-      // stall). Leaving them to be GC'd lets three.js's program cache reuse
-      // the same programs. Geometry (the ring) is unique per burst, so it is.
+      this._release(p);
     }
     this.list.length = 0;
-    // The shared puff texture is intentionally NOT disposed here: it is tiny
-    // and reused by every burst, so keeping it cached avoids a canvas redraw
-    // and GPU re-upload on every crash. The persistent light is dimmed instead
-    // of removed, so the light count (and shader programs) never change.
+    // The shared puff texture and the pool are deliberately NOT disposed:
+    // they are the whole point (nothing is rebuilt on the next crash). The
+    // persistent light is dimmed instead of removed, so the light count (and
+    // shader programs) never change.
     this._lightLife = 0;
     if (this._flashLight) this._flashLight.intensity = 0;
   },
@@ -135,6 +220,7 @@ export const particles = {
     if (!this.scene) return;
     const big = opts.big !== false;
     const origin = center?.clone?.() ?? new THREE.Vector3(0, -0.8, -2.75);
+    const budget = explosionCounts(getQualityProfile(), { big, count: opts.count, smokeCount: opts.smokeCount });
 
     // ── Detonation light: re-aim the persistent light and re-arm its fade ──
     if (this._flashLight) {
@@ -146,7 +232,10 @@ export const particles = {
     }
 
     // ── White flash: bright additive puff, decays very fast ────────────────
-    const flash = makePuff(big ? 1.8 : 1.1);
+    const flash = this._acquire("flash", () => makePuff(big ? 1.8 : 1.1));
+    const flashSize = big ? 1.8 : 1.1;
+    flash._baseScale = flashSize;
+    flash.scale.set(flashSize, flashSize, 1);
     flash.material.color.setRGB(1, 1, 1);
     flash.material.opacity = 1.0;
     flash.position.copy(origin);
@@ -156,40 +245,31 @@ export const particles = {
     flash.maxLife = 0.22;
     flash._expand = true;
     flash._expandAmount = big ? 1.8 : 1.2;
-    this.scene.add(flash);
     this.list.push(flash);
 
     // ── Shock ring: thin, camera-facing pressure wave, fast ease-out ───────
-    const ring = new THREE.Mesh(
-      new THREE.RingGeometry(0.96, 1.0, 48),
-      new THREE.MeshBasicMaterial({
-        color: 0xffddaa,
-        blending: THREE.AdditiveBlending,
-        transparent: true,
-        opacity: 0.55,
-        side: THREE.DoubleSide,
-        depthWrite: false,
-      })
-    );
+    const ring = this._acquire("ring", makeRing);
+    ring.scale.set(1, 1, 1);
+    ring.material.opacity = 0.55;
     ring.position.copy(origin);
-    ring.layers.set(1);
+    ring.visible = true;
     ring.life = 0.45;
     ring.maxLife = 0.45;
     ring._expand = true;
     ring._expandAmount = big ? 8.0 : 4.5;
     ring._baseScale = 1;
-    this.scene.add(ring);
     this.list.push(ring);
 
-    // ── Main + secondary fireball puffs (temperature ramp, buoyant) ────────
+    // ── Main + secondary fireball puffs (temperature ramp, buoyant) ───────
     // Sizes/expansion are deliberately modest: the overlay camera shows only
     // ~4 world units at the plane, so a single oversized additive sprite can
     // fill the screen and stall a weak GPU. Keep each puff well under one
     // screen and let the group read as a fireball.
-    const fireCount = opts.count || (big ? 40 : 22);
-    for (let i = 0; i < fireCount; i++) {
+    for (let i = 0; i < budget.fire; i++) {
       const size = (big ? 0.28 : 0.18) + Math.random() * (big ? 0.7 : 0.4);
-      const puff = makePuff(size);
+      const puff = this._acquire("fire", () => makePuff(size));
+      puff._baseScale = size;
+      puff.scale.set(size, size, 1);
       puff.position.copy(origin);
       // White-hot core fraction, otherwise yellow flame.
       puff._colorFrom = i % 4 === 0
@@ -202,20 +282,22 @@ export const particles = {
       puff._gravity = -(0.8 + Math.random() * 1.2);
       puff._drag = 1.2;
       // Staged: the first ~40% detonate at t=0, the rest trail in behind.
-      puff._delay = i < fireCount * 0.4 ? 0 : Math.random() * 0.35;
+      puff._delay = i < budget.fire * 0.4 ? 0 : Math.random() * 0.35;
       puff.visible = puff._delay <= 0;
       puff.life = (big ? 0.75 : 0.5) + Math.random() * (big ? 0.8 : 0.5);
       puff.maxLife = puff.life;
       puff._expand = true;
       puff._expandAmount = (big ? 1.6 : 1.2) * (0.7 + size * 0.6);
-      this.scene.add(puff);
       this.list.push(puff);
     }
 
-    // ── Sparks: fast, strong gravity, drag, flicker, cooling colour ────────
-    const sparkCount = big ? 22 : 12;
-    for (let i = 0; i < sparkCount; i++) {
-      const puff = makePuff(0.05 + Math.random() * 0.08);
+    // ── Sparks: fast, strong gravity, drag, flicker, cooling colour ─────────
+    for (let i = 0; i < budget.sparks; i++) {
+      const size = 0.05 + Math.random() * 0.08;
+      const puff = this._acquire("sparks", () => makePuff(size));
+      puff._baseScale = size;
+      puff.scale.set(size, size, 1);
+      puff.visible = true;
       puff.position.copy(origin);
       puff._colorFrom = new THREE.Color(0xffffcc);
       puff._colorTo = new THREE.Color(0xcc5500);
@@ -226,15 +308,15 @@ export const particles = {
       puff._flicker = true;
       puff.life = 0.18 + Math.random() * 0.36;
       puff.maxLife = puff.life;
-      this.scene.add(puff);
       this.list.push(puff);
     }
 
     // ── Smoke: buoyant, expanding, darkening, trailing the fireball ────────
-    const smokeCount = opts.smokeCount ?? (big ? 8 : 4);
-    for (let i = 0; i < smokeCount; i++) {
+    for (let i = 0; i < budget.smoke; i++) {
       const size = (big ? 0.5 : 0.3) + Math.random() * (big ? 0.7 : 0.35);
-      const puff = makePuff(size, { additive: false });
+      const puff = this._acquire("smoke", () => makePuff(size, { additive: false }));
+      puff._baseScale = size;
+      puff.scale.set(size, size, 1);
       const gray = 0.3 + Math.random() * 0.2;
       puff._colorFrom = new THREE.Color(gray, gray, gray);
       puff._colorTo = new THREE.Color(0.05, 0.05, 0.05);
@@ -259,7 +341,6 @@ export const particles = {
       puff.maxLife = puff.life;
       puff._expand = true;
       puff._expandAmount = (big ? 2.0 : 1.4) * (0.7 + size * 0.5);
-      this.scene.add(puff);
       this.list.push(puff);
     }
   },
@@ -285,9 +366,9 @@ export const particles = {
 
       p.life -= dt * (p.isSmoke ? 1.1 : 1.0);
       if (p.life <= 0) {
-        this.scene.remove(p);
-        p.geometry?.dispose?.();
-        // Materials stay alive so their shader programs are reused next crash.
+        this._release(p);
+        // Pooled sprites keep their materials and geometry — nothing is
+        // disposed, so the next burst never recompiles or re-uploads.
         this.list.splice(i, 1);
         continue;
       }
