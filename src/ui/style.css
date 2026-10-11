@@ -1533,21 +1533,22 @@ body.mobile-landscape #pitch-lines .pitch-line { font-size: 7px; }
 body.mobile-landscape #pitch-ref span { font-size: 8px; top: -11px; }
 body.mobile-landscape #pitch-ref { left: 4px; right: 4px; }
 
-/* Speed, altitude: SMALL plates to the LEFT and RIGHT of the plane
-   (mirroring the web layout, scaled down for phones). */
+/* Speed, altitude: EXACTLY the web layout - the angled plates flank the
+   plane at the 30% lines, vertically centered - just proportionally
+   smaller on a phone (web: left/right 30%, top 49%, 24px values). */
 body.mobile-landscape #hud-speed-box {
-  left: 9%; right: auto; top: 46%;
-  transform: translateY(-50%); padding: 1px 4px;
+  left: 26%; right: auto; top: 46%;
+  transform: translateY(-50%); padding: 0 2px;
 }
 body.mobile-landscape #hud-alt-box {
-  left: auto; right: 9%; top: 46%;
-  transform: translateY(-50%); padding: 1px 4px;
+  left: auto; right: 26%; top: 46%;
+  transform: translateY(-50%); padding: 0 2px;
 }
 body.mobile-landscape #hud-speed-box .value-box span,
-body.mobile-landscape #hud-alt-box .value-box span { font-size: 12px; min-height: 20px; padding: 2px 6px; }
+body.mobile-landscape #hud-alt-box .value-box span { font-size: 11px; min-height: 17px; padding: 1px 4px; }
 body.mobile-landscape #hud-speed-box .label,
-body.mobile-landscape #hud-alt-box .label { font-size: 7px; }
-body.mobile-landscape .value-box { min-width: 52px; margin-top: 2px; }
+body.mobile-landscape #hud-alt-box .label { font-size: 6px; letter-spacing: 1px; }
+body.mobile-landscape .value-box { min-width: 44px; margin-top: 1px; }
 
 body.mobile-landscape #boost-container {
   left: 50%; right: auto; bottom: 22px; top: auto;
@@ -1578,10 +1579,14 @@ body.mobile-landscape #hud-status { bottom: 4px; font-size: 9px; }
 
 /* ── Mobile picker: the instruction + search stack shrinks to fit a short
    landscape screen instead of crowding the map. ─────────────────────────── */
+/* Mobile picker: the header scales down as one piece - same layout as web,
+   proportionally smaller so it never crowds a short landscape screen. */
 body.mobile-landscape .spawn-hud-top {
-  top: 8px;
+  top: 6px;
   width: 96vw;
   max-width: 96vw;
+  transform: translateX(-50%) scale(0.72);
+  transform-origin: top center;
 }
 
 body.mobile-landscape #spawn-instruction { gap: 6px; }
@@ -1622,9 +1627,10 @@ body.mobile-landscape #search-results .search-result-item {
 
 /* Short screens (web + tall-tablet): scale the picker header down so it
    never clips off the top, and cap the results list height. The scale must
-   compose WITH the centering translate, not replace it. */
+   compose WITH the centering translate, not replace it. Mobile-landscape
+   sets its own tighter scale (0.72). */
 @media (max-height: 560px) {
-  .spawn-hud-top { transform: translateX(-50%) scale(0.85); transform-origin: top center; }
+  body:not(.mobile-landscape) .spawn-hud-top { transform: translateX(-50%) scale(0.85); transform-origin: top center; }
   #search-results { max-height: 34vh; }
 }
 

@@ -170,13 +170,27 @@ let loadingPageHidden = false;
   kick();
 })();
 
-function hideLoadingPage() {  if (!loadingIndicator || loadingPageHidden) return;
-  loadingPageHidden = true;
-  loadingIndicator.classList.add("fading");
+// Boot loading page: minimum total time (s). The page stays up AT LEAST this
+// long even if everything finishes early - the region preload keeps
+// streaming imagery + terrain through the whole window.
+const MIN_BOOT_SECONDS = 7;
+const bootStart = performance.now();
+
+function hideLoadingPage() {
+  if (!loadingIndicator || loadingPageHidden) return;
+  // Never reveal before the minimum boot window: the 3D fly-through plays
+  // while the area preload keeps streaming map + 3D terrain.
+  const elapsed = (performance.now() - bootStart) / 1000;
+  const remaining = Math.max(0, MIN_BOOT_SECONDS - elapsed) * 1000;
   setTimeout(() => {
-    loadingIndicator.classList.add("hidden");
-    loadingIndicator.classList.remove("fading", "picker");
-  }, 750);
+    if (!loadingIndicator || loadingPageHidden) return;
+    loadingPageHidden = true;
+    loadingIndicator.classList.add("fading");
+    setTimeout(() => {
+      loadingIndicator.classList.add("hidden");
+      loadingIndicator.classList.remove("fading", "picker");
+    }, 750);
+  }, remaining);
 }
 
 function updateLoadingUI() {
@@ -257,16 +271,16 @@ viewer.scene.globe.tileLoadProgressEvent.addEventListener((queueLength) => {
   }
 });
 
-// Fallback: after 8 seconds, enable the start button even if terrain hasn't fully loaded.
-// The Re:Earth provider can be slow or unavailable in some environments; the game should
-// still be playable with the ellipsoid as a fallback.
+// Fallback: after 7 seconds, enable the start button even if terrain hasn't fully loaded
+// (matches the boot window). The Re:Earth provider can be slow or unavailable in some
+// environments; the game should still be playable with the ellipsoid as a fallback.
 setTimeout(() => {
   if (!loadingStatus.globe) {
     loadingStatus.globe = true;
     loadingStatus.terrain = true;
     updateLoadingUI();
   }
-}, 8000);
+}, 7000);
 
 // ── Preload terrain ─────────────────────────────────────────────────────────
 async function preloadTerrain() {
@@ -286,7 +300,7 @@ async function preloadTerrain() {
     updateLoadingUI();
   }
   try {
-    await withTimeout(preloadSpawnRegion(), 25000);
+    await withTimeout(preloadSpawnRegion(), 6500);
   } catch (e) { /* bounded above */ }
   loadingStatus.area = true;
   updateLoadingUI();
@@ -301,11 +315,22 @@ async function preloadSpawnRegion() {
       roll: viewer.camera.roll,
     },
   };
-  viewer.camera.setView({
-    destination: Cesium.Cartesian3.fromDegrees(state.lon, state.lat, 160000),
-    orientation: { heading: 0, pitch: Cesium.Math.toRadians(-90), roll: 0 },
-  });
-  await waitForGlobeTiles(12000);
+  try {
+    // Pass 1: wide 160 km top-down look warms imagery tiles for a ~300 km
+    // area around the default region.
+    viewer.camera.setView({
+      destination: Cesium.Cartesian3.fromDegrees(state.lon, state.lat, 160000),
+      orientation: { heading: 0, pitch: Cesium.Math.toRadians(-90), roll: 0 },
+    });
+    await waitForGlobeTiles(3000);
+    // Pass 2: closer 35 km pass - city-level detail imagery + terrain the
+    // picker's first zoom would otherwise stream on demand.
+    viewer.camera.setView({
+      destination: Cesium.Cartesian3.fromDegrees(state.lon, state.lat, 35000),
+      orientation: { heading: 0, pitch: Cesium.Math.toRadians(-90), roll: 0 },
+    });
+    await waitForGlobeTiles(3000);
+  } catch (e) { /* best effort */ }
   // 3D terrain across the region: ~ +/-1.2 deg lon x +/-0.8 deg lat grid.
   const pts = [];
   for (let i = 0; i < 7; i++) {
