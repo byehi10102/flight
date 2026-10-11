@@ -46,15 +46,6 @@ export class Hud {
     this._fpsLast = performance.now();
     this._score = 0;
 
-    // Uniform mobile HUD scale (MobileMode publishes --hud-scale; 1 on
-    // desktop). Cached + refreshed on resize: update() writes the
-    // #uiContainer transform every tick, so a CSS-only scale on the
-    // container would be overwritten — the scale must compose here.
-    this.hudScale = 1;
-    this._hudScaleLast = -1e9; // force a refresh on the first update tick
-    this._refreshHudScale();
-    window.addEventListener("resize", () => this._refreshHudScale());
-
     // Smoothed attitude (ref-flight): HUD eases toward true state so the
     // ladder/compass visibly track the controls instead of snapping.
     this.smoothedPitch = 0;
@@ -68,16 +59,6 @@ export class Hud {
 
     this.createHorizon();
     this.createCompass();
-  }
-
-  /** Re-read the published --hud-scale (MobileMode updates it on resize). */
-  _refreshHudScale() {
-    try {
-      const v = parseFloat(
-        getComputedStyle(document.documentElement).getPropertyValue("--hud-scale"),
-      );
-      if (Number.isFinite(v) && v > 0) this.hudScale = v;
-    } catch (e) { /* keep the last known scale */ }
   }
 
   // ── Horizon: crosshair + pitch ladder, rotated/translated by attitude ──
@@ -251,14 +232,6 @@ export class Hud {
     const yawDiff = (state.yaw || 0) - this.smoothedYaw;
     const throttleDiff = (state.throttle || 0) - this.smoothedThrottle;
     if (this.uiContainer) {
-      // Keep the uniform HUD scale fresh: MobileMode may publish
-      // --hud-scale after this Hud was constructed (and some orientation
-      // changes don't fire resize), so re-read it about once a second —
-      // cheap for a CSS var, and the first tick always refreshes.
-      if (t - this._hudScaleLast > 1000) {
-        this._hudScaleLast = t;
-        this._refreshHudScale();
-      }
       // Clamp the 3D cockpit-tilt so HUD elements never leave the screen:
       // the tilt/shift stay small, the throttle "kick" is a CONTRACTION
       // (scale never exceeds 1.0 - scaling up pushed corner elements like
@@ -283,15 +256,15 @@ export class Hud {
         this.currentShakeX *= 0.85;
         this.currentShakeY *= 0.85;
       }
-      // Compose the uniform mobile HUD scale into the per-frame transform:
-      // shift and scale both shrink by the same factor so the whole HUD
-      // reads as the desktop layout, proportionally smaller (hudScale is 1
-      // on desktop — bit-identical to the previous transform there).
-      const hs = this.hudScale || 1;
+      // NO container-wide mobile scale: on phones the HUD is laid out
+      // per-element by body.mobile-landscape CSS with every corner element
+      // pinned to its corner — a scale() here shrinks toward the centre and
+      // drags those anchors into the middle (the "cramped together in the
+      // middle" regression). Desktop is bit-identical to before.
       this.uiContainer.style.transform =
         `perspective(1000px) rotateX(${tiltX}deg) rotateY(${tiltY}deg) ` +
-        `translate(${((shiftX + this.currentShakeX) * hs).toFixed(2)}px, ${((shiftY + this.currentShakeY) * hs).toFixed(2)}px) ` +
-        `scale(${(scale * hs).toFixed(4)})`;
+        `translate(${(shiftX + this.currentShakeX).toFixed(2)}px, ${(shiftY + this.currentShakeY).toFixed(2)}px) ` +
+        `scale(${scale.toFixed(4)})`;
     }
 
     // â”€â”€ Speed / altitude (ref-flight formatting) â”€â”€

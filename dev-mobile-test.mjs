@@ -531,35 +531,80 @@ const browserMob = await puppeteer.launch(LAUNCH);
   });
   check("touch overlay VISIBLE once flying (landscape)", flying.vis);
 
-  // HUD anchored to the EDGES with sticks in the corners.
+  // HUD = the desktop arrangement at phone size: every corner element pinned
+  // to its corner (the old uniform scale dragged them to the centre).
   const hud = await page.evaluate(() => {
-    const R = (id) => { const r = document.getElementById(id).getBoundingClientRect();
-      return { l: r.left, r: r.right, t: r.top, b: r.bottom, cx: r.left + r.width / 2 }; };
-    const zones = {
-      left: document.querySelector(".stick-zone-left").getBoundingClientRect(),
-      right: document.querySelector(".stick-zone-right").getBoundingClientRect(),
-      root: document.querySelector(".stick-zone-left")?.closest("#touchControls"),
+    const R = (sel) => { const r = document.querySelector(sel).getBoundingClientRect();
+      return { l: r.left, r: r.right, t: r.top, b: r.bottom, w: r.width, h: r.height,
+               cx: r.left + r.width / 2, cy: r.top + r.height / 2 }; };
+    const B = (sel) => { const r = document.querySelector(sel).getBoundingClientRect();
+      return { cx: r.left + r.width / 2, cy: r.top + r.height / 2, w: r.width, h: r.height }; };
+    return {
+      speed: R("#hud-speed-box"), alt: R("#hud-alt-box"), mm: R("#minimap-container"),
+      boost: R("#boost-container"), gun: R("#gun-heat-container"),
+      weapons: R("#weapons-hud"), top: R("#hud-top-cluster"),
+      leftBase: B(".stick-zone-left .stick-base"), rightBase: B(".stick-zone-right .stick-base"),
+      boostBase: B(".stick-zone-boost .stick-base"), fireBase: B(".stick-zone-fire .stick-base"),
+      vw: innerWidth, vh: innerHeight,
     };
-    return { speed: R("hud-speed-box"), alt: R("hud-alt-box"), mm: R("minimap-container"),
-             boost: R("boost-container"), att: R("attitude-panel"),
-             vw: innerWidth, vh: innerHeight,
-             leftZone: { l: zones.left.left, t: zones.left.top, b: zones.left.bottom },
-             rightZone: { r: zones.right.right, t: zones.right.top, b: zones.right.bottom } };
   });
-  const onRight = (box) => Math.abs(box.r - hud.vw) <= 30;
   // Speed LEFT of the plane, altitude RIGHT (small plates, web-mirrored).
   check("speed box LEFT of the plane", hud.speed.r < hud.vw / 2, `right=${hud.speed.r} vw=${hud.vw}`);
   check("altitude box RIGHT of the plane", hud.alt.l > hud.vw / 2 && hud.alt.r <= hud.vw,
     `left=${hud.alt.l} right=${hud.alt.r} vw=${hud.vw}`);
+  // Speed/AGL plates are a mirrored pair: same width, same height, exact
+  // mirror distance from the side edges, at the same height.
+  check("speed/AGL plates mirror each other (symmetric arrows)",
+    Math.abs(hud.speed.w - hud.alt.w) <= 2
+      && Math.abs(hud.speed.l - (hud.vw - hud.alt.r)) <= 2
+      && Math.abs(hud.speed.t - hud.alt.t) <= 2,
+    `speed l=${hud.speed.l.toFixed(1)} w=${hud.speed.w.toFixed(1)} alt r=${hud.alt.r.toFixed(1)} w=${hud.alt.w.toFixed(1)}`);
+  check("speed/AGL plates sit above the boost bar",
+    hud.speed.b < hud.boost.t + 8 && hud.alt.b < hud.boost.t + 8,
+    `speed.b=${hud.speed.b} alt.b=${hud.alt.b} boost.t=${hud.boost.t}`);
   check("boost bar bottom-CENTRE (under the plane)",
     Math.abs(hud.boost.cx - hud.vw / 2) <= 40 && Math.abs(hud.boost.b - hud.vh) <= 60,
     `cx=${hud.boost.cx} vw=${hud.vw} bottom=${hud.boost.b} vh=${hud.vh}`);
-  check("right column does NOT intrude into the bottom-left joystick",
-    hud.att.l > hud.leftZone.l + 40, `attitude left ${hud.att.l} vs left-zone left ${hud.leftZone.l}`);
-  check("minimap on the right (shrunk)", onRight(hud.mm) && hud.mm.r - hud.mm.l <= 120,
-    `right=${hud.mm.r} width=${hud.mm.r - hud.mm.l}`);
-  check("attitude/pitch panel on the right (shrunk)", onRight(hud.att) && hud.att.r - hud.att.l <= 120,
-    `right=${hud.att.r} width=${hud.att.r - hud.att.l}`);
+  check("gun heat sits above the boost bar, centred",
+    Math.abs(hud.gun.cx - hud.vw / 2) <= 40 && hud.gun.b < hud.boost.t + 8,
+    `gun cx=${hud.gun.cx} b=${hud.gun.b} boost.t=${hud.boost.t}`);
+  check("top cluster pinned to the top edge, centred",
+    hud.top.t <= 8 && Math.abs(hud.top.cx - hud.vw / 2) <= 4,
+    `t=${hud.top.t} cx=${hud.top.cx} vw=${hud.vw}`);
+  // Minimap: bottom-LEFT corner with real margins (space from the edge, and
+  // room below it for the Cesium imagery credit line) — NOT dragged to the
+  // centre by a container scale.
+  check("minimap pinned bottom-left with margin from the edges",
+    hud.mm.l >= 6 && hud.mm.l <= 40 && hud.mm.b <= hud.vh - 18 && hud.mm.w >= 120,
+    `l=${hud.mm.l} b=${hud.mm.b} vh=${hud.vh} w=${hud.mm.w}`);
+  check("minimap clear of the left stick ring",
+    hud.mm.r < hud.leftBase.cx - 30,
+    `mm.r=${hud.mm.r} leftBase.cx=${hud.leftBase.cx}`);
+  check("left stick ring clear of the minimap's column (right of the map)",
+    hud.leftBase.cx > hud.mm.r + 30,
+    `leftBase.cx=${hud.leftBase.cx} mm.r=${hud.mm.r}`);
+  // Aircraft plate: bottom-right corner, on-screen, clear of the right stick.
+  check("aircraft type plate pinned bottom-right",
+    hud.weapons.r <= hud.vw && hud.weapons.r >= hud.vw - 40 && hud.weapons.b <= hud.vh,
+    `r=${hud.weapons.r} b=${hud.weapons.b} vw=${hud.vw}`);
+  check("right stick sits LEFT of the aircraft plate",
+    hud.rightBase.cx < hud.weapons.l - 20,
+    `rightBase.cx=${hud.rightBase.cx} weapons.l=${hud.weapons.l}`);
+  // Trigger sticks: boost right of the left stick + lower; fire left of the
+  // right stick + lower; both smaller than the flight sticks.
+  check("boost stick right of the left stick and lower",
+    hud.boostBase.cx > hud.leftBase.cx + 60 && hud.boostBase.cy > hud.leftBase.cy + 20
+      && hud.boostBase.w < hud.leftBase.w,
+    `boost cx=${hud.boostBase.cx} cy=${hud.boostBase.cy} w=${hud.boostBase.w} | left cx=${hud.leftBase.cx} cy=${hud.leftBase.cy} w=${hud.leftBase.w}`);
+  check("fire stick left of the right stick and lower",
+    hud.fireBase.cx < hud.rightBase.cx - 60 && hud.fireBase.cy > hud.rightBase.cy + 20
+      && hud.fireBase.w < hud.rightBase.w,
+    `fire cx=${hud.fireBase.cx} cy=${hud.fireBase.cy} w=${hud.fireBase.w} | right cx=${hud.rightBase.cx} cy=${hud.rightBase.cy} w=${hud.rightBase.w}`);
+  // No uniform scale-to-centre: the minimap keeps its laid-out size instead
+  // of shrinking toward the middle (the "cramped in the middle" regression).
+  check("no uniform HUD scale-to-centre (minimap at full mobile size in its corner)",
+    hud.mm.w >= 140 && hud.mm.l <= 20,
+    `w=${hud.mm.w} l=${hud.mm.l}`);
 
   // BLUE BOOST STICK: the only mobile boost gesture now (double-tap and
   // both-sticks boost are removed). Grab it in one synchronous evaluate and

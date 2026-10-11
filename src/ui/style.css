@@ -1444,14 +1444,83 @@ html, body {
   white-space: nowrap;
 }
 
-/* ── Mobile landscape = the desktop UI, uniformly scaled ──────────────────
-   One factor — --hud-scale, published by MobileMode from the viewport
-   (desktop reference 1280x720, readability floor 0.5) — shrinks each
-   CSS-transformed surface as a whole. #uiContainer's factor is composed
-   by hud.js into the per-frame tilt/shake transform (that JS owns the
-   transform property). No element gets its own mobile size or position:
-   the phone shows exactly the computer layout, just smaller. Joystick
-   zones and the rotate overlay (body.mobile-mode) are untouched. */
+/* ── Mobile landscape = the desktop HUD, re-anchored to a phone screen ────
+    Every corner element is PINNED to its corner at a phone-legible size.
+    The previous approach scaled #uiContainer uniformly toward the centre,
+    which read as "everything cramped together in the middle". The
+    arrangement below is the desktop arrangement: minimap bottom-left with
+    the Cesium imagery credit line under it, aircraft plate bottom-right,
+    speed/AGL arrows mirrored around the centre, bars bottom-centre with
+    the jet above them, sticks flanking the middle. --hud-scale keeps
+    scaling only the menus and the spawn picker (rules above). */
+body.mobile-landscape #uiContainer { padding: 0; }
+
+/* Top cluster: heading chip -> compass tape -> location, tight to the top. */
+body.mobile-landscape #hud-top-cluster { top: 4px; gap: 2px; }
+body.mobile-landscape #hud-compass-chip { padding: 2px 10px; }
+body.mobile-landscape #hud-heading { font-size: 12px; }
+body.mobile-landscape #compass-container { width: min(360px, 48vw); height: 20px; }
+body.mobile-landscape #compass-tape .compass-tick { width: 1px; }
+body.mobile-landscape #compass-tape .compass-label { font-size: 9px; bottom: 9px; }
+body.mobile-landscape #hud-location { font-size: 10px; }
+
+/* Corner chips: TIME/SCORE and FPS/date, small and clear of the cluster. */
+body.mobile-landscape #hud-top-left,
+body.mobile-landscape #hud-top-right { top: 6px; font-size: 11px; line-height: 1.4; }
+body.mobile-landscape #hud-top-left { left: 8px; }
+body.mobile-landscape #hud-top-right { right: 8px; }
+
+/* Speed / AGL plates: the mirrored arrow pair, slightly above the jet.
+   Fixed plate width so the two arrows read symmetric to each other. */
+body.mobile-landscape #hud-speed-box { left: 20%; top: 34%; }
+body.mobile-landscape #hud-alt-box { right: 20%; top: 34%; }
+body.mobile-landscape #hud-speed-box .value-box,
+body.mobile-landscape #hud-alt-box .value-box { min-width: 96px; }
+body.mobile-landscape #hud-speed-box .value-box span,
+body.mobile-landscape #hud-alt-box .value-box span {
+  font-size: 16px;
+  min-height: 28px;
+  padding: 3px 10px;
+}
+
+/* Centre horizon ladder: shrunk with the screen (lines are % positioned). */
+body.mobile-landscape #horizon-container { width: 340px; height: 340px; }
+
+/* Minimap: bottom-left corner with real margins from the edges — the
+   Cesium imagery credit line sits below it, against the screen edge. */
+body.mobile-landscape #minimap-container {
+  left: 10px;
+  bottom: 28px;
+  width: 150px;
+  height: 150px;
+}
+
+/* Aircraft type plate (F-15 + M61 station): bottom-right corner, shrunk. */
+body.mobile-landscape #weapons-hud {
+  right: 10px;
+  bottom: 24px;
+  gap: 6px;
+  transform: scale(0.62);
+  transform-origin: bottom right;
+}
+
+/* Bars bottom-centre, jet above them, status line under the boost bar. */
+body.mobile-landscape #boost-container { bottom: 30px; width: 170px; }
+body.mobile-landscape #gun-heat-container { bottom: 62px; width: 110px; }
+body.mobile-landscape #hud-status { bottom: 6px; font-size: 11px; }
+
+/* Sticks: the flight sticks sit between the corner elements — the left
+   stick just right of the minimap, the right stick just left of the
+   aircraft plate. The small trigger sticks keep their inner positions:
+   boost (blue) below-right of the left stick, fire (green) below-left of
+   the right stick. */
+body.mobile-landscape .stick-zone-left { left: 19%; width: 28%; }
+body.mobile-landscape .stick-zone-right { right: 19%; width: 28%; }
+body.mobile-landscape .stick-zone-boost { left: 41%; width: 12%; }
+body.mobile-landscape .stick-zone-fire { left: 49%; width: 12%; }
+
+/* Menus + spawn picker keep the uniform scale (they are centred content;
+   only the flight HUD is corner-anchored). */
 body.mobile-landscape .spawn-hud-top {
   top: 6px;
   transform: translateX(-50%) scale(var(--hud-scale, 1));
