@@ -44,6 +44,34 @@ export function computeBootProgress(flags, sub = {}, weights = DEFAULT_BOOT_WEIG
 }
 
 /**
+ * A display-side high-water mark. The tile-queue ratios feeding the progress
+ * bars are NOT monotonic — Cesium re-requests tiles during LOD refinement, so
+ * the queue spikes and the raw ratio retreats, visibly dragging the bar
+ * backwards. Wrapping the percent in this clamp keeps the tracking real while
+ * making the displayed bar never retreat.
+ */
+export class MonotonicPercent {
+  constructor() {
+    this._max = 0;
+  }
+
+  /** Forget the high-water mark (e.g. a new preparing-flight phase). */
+  reset() {
+    this._max = 0;
+  }
+
+  /**
+   * @param {number} pct raw percent/fraction (any unit)
+   * @returns {number} the largest finite value ever passed to update()
+   */
+  update(pct) {
+    const v = Number(pct);
+    if (Number.isFinite(v) && v > this._max) this._max = v;
+    return this._max;
+  }
+}
+
+/**
  * "Preparing flight" progress envelope — the progress bar between tapping
  * SPAWN HERE and the camera dive.
  *

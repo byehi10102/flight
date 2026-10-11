@@ -2,7 +2,7 @@ import * as THREE from "three";
 import * as Cesium from "cesium";
 import "cesium/Build/Cesium/Widgets/widgets.css";
 import { CONFIG } from "./core/config.js";
-import { computeBootProgress, preparingFlightProgress } from "./core/bootProgress.js";
+import { computeBootProgress, preparingFlightProgress, MonotonicPercent } from "./core/bootProgress.js";
 import { getQualityProfile } from "./core/quality.js";
 import { createViewer, attachTerrain, setSunForTime, initMiniViewer, getMiniViewer, setMinimapCamera, setStreetsVisible } from "./core/viewer.js";
 import { GroundSampler } from "./core/ground.js";
@@ -158,6 +158,11 @@ const loadingStatus = { model: false, cesium: false, globe: false, terrain: fals
 // the GLTFLoader, globe/area tiles from Cesium's tile-queue decay. The bar
 // reads these through computeBootProgress — never a timer.
 const loadingSub = { model: 0, globe: 0, area: 0 };
+// Display-side high-water marks: the queue ratios above are NOT monotonic
+// (Cesium re-requests tiles during LOD refinement, so the queue spikes and
+// the raw ratio retreats). These clamps make the shown bars never retreat.
+const bootBarShown = new MonotonicPercent();
+const preparingBarShown = new MonotonicPercent();
 let maxGlobeQueue = 0; // largest tile queue seen during the globe stage
 let maxAreaQueue = 0;  // largest tile queue seen during the area preload
 let areaPreloadActive = false;
@@ -245,9 +250,11 @@ function updateLoadingUI() {
   // sub-progress (model bytes, tile-queue decay) releases proportional
   // slices. Nothing here increments on a timer.
   if (loadingBarFill) {
+    // Failed is a deliberate reset (bar to 0); otherwise the shown bar only
+    // ever moves forward, even when the raw queue ratio retreats.
     const pct = loadingStatus.failed
       ? 0
-      : Math.round(computeBootProgress(loadingStatus, loadingSub));
+      : bootBarShown.update(Math.round(computeBootProgress(loadingStatus, loadingSub)));
     loadingBarFill.style.width = `${pct}%`;
     if (loadingPercent) loadingPercent.textContent = `${pct}%`;
   }
@@ -1247,6 +1254,7 @@ function runPreparingFlight(onReady) {
   preparingQueuePeak = 0;
   lastPreparingQueue = 0;
   preparingActive = true;
+  preparingBarShown.reset();
   if (preparingFlight) preparingFlight.classList.remove("hidden");
   try { preparingFlightVideo?.play?.().catch?.(() => {}); } catch (e) { /* cosmetic */ }
   if (preparingBarFill) preparingBarFill.style.width = "0%";
@@ -1256,7 +1264,9 @@ function runPreparingFlight(onReady) {
   preparingTimer = setInterval(() => {
     const ratio = preparingQueuePeak > 0 ? 1 - lastPreparingQueue / preparingQueuePeak : 0;
     const pct = Math.round(
-      100 * preparingFlightProgress(ratio, performance.now() - start, PREPARING_MIN_MS, PREPARING_MAX_MS),
+      100 * preparingBarShown.update(
+        preparingFlightProgress(ratio, performance.now() - start, PREPARING_MIN_MS, PREPARING_MAX_MS),
+      ),
     );
     if (preparingBarFill) preparingBarFill.style.width = `${pct}%`;
     if (preparingPercent) preparingPercent.textContent = `${pct}%`;
