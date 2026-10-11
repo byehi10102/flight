@@ -408,44 +408,37 @@ html, body {
   text-overflow: ellipsis;
 }
 
-#compass-tape {
-  position: absolute;
-  display: flex;
-  height: 100%;
-  align-items: flex-end;
-  font-size: 12px;
-  color: #0f0;
-  will-change: transform;
-  width: 4320px;
+/* Live compass tape (ref-flight style): a long horizontal strip of degree
+   ticks that scrolls under a fixed center index as the aircraft turns.
+   The tick/label rules live further down (single copy, no duplicates). */
+#compass-container {
+  position: relative;
+  width: min(560px, 44vw);
+  height: 26px;
+  overflow: hidden;
+  border-bottom: 1px solid rgba(0, 255, 0, 0.35);
+  background: linear-gradient(
+    90deg,
+    rgba(0, 20, 8, 0) 0%,
+    rgba(0, 20, 8, 0.45) 15%,
+    rgba(0, 20, 8, 0.45) 85%,
+    rgba(0, 20, 8, 0) 100%
+  );
 }
 
-#compass-tape .compass-tick {
-  position: absolute;
-  bottom: 0;
-  width: 2px;
-  background: #0f0;
-  box-shadow: 0 0 5px rgba(0, 255, 0, 0.8);
-}
-
-#compass-tape .compass-label {
-  position: absolute;
-  bottom: 12px;
-  width: 40px;
-  margin-left: -20px;
-  text-align: center;
-  font-size: 11px;
-}
-
-#compass-center-marker {
+/* Fixed center index: the current heading always sits exactly under it. */
+#compass-index {
   position: absolute;
   top: 0;
   left: 50%;
   transform: translateX(-50%);
-  width: 3px;
-  height: 100%;
-  background: #0f0;
+  width: 0;
+  height: 0;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 8px solid #0f0;
+  filter: drop-shadow(0 0 4px rgba(0, 255, 0, 0.9));
   z-index: 10;
-  box-shadow: 0 0 10px #0f0;
 }
 
 #heading-display {
@@ -1194,7 +1187,8 @@ body.mobile-landscape #attitude-panel { display: block; }
   color: #0f0;
 }
 
-/* Compass (ref-flight tape) */
+/* Compass tape ticks/labels: the strip itself is 4320px of ticks laid out
+   at (deg+360)*4px by hud.js; hud.update translates it under the index. */
 #compass-tape {
   position: absolute;
   display: flex;
@@ -1456,7 +1450,6 @@ body.mobile-landscape #attitude-panel { display: block; }
    phones. The left half stays clear for the left stick, the bottom corners
    for both sticks. Readouts are pointer-events:none so they can never
    swallow a joystick touch where the zones overlap them. */
-body.mobile-landscape #compass-container { width: min(240px, 34vw); top: 4px; }
 body.mobile-landscape #heading-display { top: 28px; font-size: 10px; }
 
 /* Compact top cluster on phones: heading chip + location under it. */

@@ -12,6 +12,7 @@
  * (showRegion() was removed together with the region banner.)
  */
 import { getViewer } from "../core/viewer.js";
+import { tapeOffsetPx } from "./compass.js";
 export class Hud {
   constructor() {
     this.speedEl = document.getElementById("speed");
@@ -282,6 +283,16 @@ export class Hud {
       else if (displayHeading >= 247.5 && displayHeading < 292.5) cardinal = "W";
       else if (displayHeading >= 292.5 && displayHeading < 337.5) cardinal = "NW";
       this.headingEl.innerText = `${displayHeading.toString().padStart(3, "0")} ${cardinal}`;
+    }
+    // Live compass tape: scroll the tick strip so the current (smoothed)
+    // heading sits under the center index. Width re-read each update —
+    // hud.update is throttled to ~10 Hz, so this stays cheap and always
+    // correct through resizes/orientation changes.
+    if (this.compassTape && this.compassTape.parentElement) {
+      const w = this.compassTape.parentElement.offsetWidth || 0;
+      if (w > 0) {
+        this.compassTape.style.transform = `translateX(${tapeOffsetPx(compassHeading, w).toFixed(1)}px)`;
+      }
     }
     // Compact top cluster: location line under the heading chip.
     if (this.locationEl) {

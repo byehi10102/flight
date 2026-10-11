@@ -94,9 +94,15 @@
 
     <!-- HUD -->
     <div id="uiContainer" class="hidden">
-      <!-- Compact top cluster: little compass chip + location beneath -->
+      <!-- Compact top cluster: heading chip + live compass tape + location -->
       <div id="hud-top-cluster">
         <div id="hud-compass-chip"><span id="hud-heading">000 N</span></div>
+        <!-- Live compass: a long horizontal tape of degree ticks that
+             scrolls under the center index as the aircraft turns. -->
+        <div id="compass-container">
+          <div id="compass-tape"></div>
+          <div id="compass-index"></div>
+        </div>
         <div id="hud-location">UNKNOWN REGION</div>
       </div>
 
