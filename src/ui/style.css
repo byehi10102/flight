@@ -1071,10 +1071,9 @@ html, body {
 
 /* ── HUD element deltas ──────────────────────────────────────────────────── */
 /* ref-flight's HUD shows pitch on the center horizon ladder, not the old
-   corner attitude panel - hidden on desktop, kept on phones where the
-   mobile stack still pins it to the right edge. */
+   corner attitude panel - hidden everywhere (mobile shows the exact
+   desktop layout, scaled). */
 #attitude-panel { display: none; }
-body.mobile-landscape #attitude-panel { display: block; }
 
 /* â”€â”€ HUD (ref-flight flight display) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 #horizon-container {
@@ -1444,158 +1443,44 @@ body.mobile-landscape #attitude-panel { display: block; }
   white-space: nowrap;
 }
 
-/* ── Mobile landscape HUD: the RIGHT edge holds the instruments ──────────
-   Stacked top-down: weapons chip, minimap (small), attitude/pitch panel,
-   speed, altitude. Bars sit bottom-centre. Sized to fit even 320px-tall
-   phones. The left half stays clear for the left stick, the bottom corners
-   for both sticks. Readouts are pointer-events:none so they can never
-   swallow a joystick touch where the zones overlap them. */
-body.mobile-landscape #heading-display { top: 28px; font-size: 10px; }
-
-/* Compact top cluster on phones: heading chip + location under it. */
-body.mobile-landscape #hud-top-cluster { top: 6px; transform: translateX(-50%) scale(0.85); }
-body.mobile-landscape #hud-compass-chip { padding: 2px 10px; }
-body.mobile-landscape #hud-heading { font-size: 12px; }
-body.mobile-landscape #hud-location { font-size: 10px; max-width: 44vw; }
-
-body.mobile-landscape #hud-top-left { top: 6px; left: 10px; font-size: 9px; line-height: 1.35; }
-body.mobile-landscape #hud-top-right { top: 6px; right: 10px; font-size: 9px; line-height: 1.35; }
-
-body.mobile-landscape #hud-top-left,
-body.mobile-landscape #hud-top-right,
-body.mobile-landscape #hud-speed-box,
-body.mobile-landscape #hud-alt-box,
-body.mobile-landscape #coords,
-body.mobile-landscape #hud-status,
-body.mobile-landscape #boost-container,
-body.mobile-landscape #minimap-container { pointer-events: none; }
-
-/* Minimap: shrunk to a corner peep. */
-body.mobile-landscape #minimap-container {
-  left: auto; right: 10px; bottom: auto; top: 56px;
-  width: 54px; height: 54px;
-}
-
-/* Attitude / pitch panel: shrunk, same right column, below the minimap. */
-body.mobile-landscape #attitude-panel {
-  right: 10px; bottom: auto; top: 122px;
-  width: 60px; height: 60px; border-radius: 6px;
-}
-body.mobile-landscape #pitch-lines .pitch-line { font-size: 7px; }
-body.mobile-landscape #pitch-ref span { font-size: 8px; top: -11px; }
-body.mobile-landscape #pitch-ref { left: 4px; right: 4px; }
-
-/* Speed, altitude: EXACTLY the web layout - the angled plates flank the
-   plane at the 30% lines, vertically centered - just proportionally
-   smaller on a phone (web: left/right 30%, top 49%, 24px values). */
-body.mobile-landscape #hud-speed-box {
-  left: 26%; right: auto; top: 46%;
-  transform: translateY(-50%); padding: 0 2px;
-}
-body.mobile-landscape #hud-alt-box {
-  left: auto; right: 26%; top: 46%;
-  transform: translateY(-50%); padding: 0 2px;
-}
-body.mobile-landscape #hud-speed-box .value-box span,
-body.mobile-landscape #hud-alt-box .value-box span { font-size: 11px; min-height: 17px; padding: 1px 4px; }
-body.mobile-landscape #hud-speed-box .label,
-body.mobile-landscape #hud-alt-box .label { font-size: 6px; letter-spacing: 1px; }
-body.mobile-landscape .value-box { min-width: 44px; margin-top: 1px; }
-
-body.mobile-landscape #boost-container {
-  left: 50%; right: auto; bottom: 22px; top: auto;
-  transform: translateX(-50%); width: min(84px, 16vw);
-}
-body.mobile-landscape #boost-container .boost-track { height: 6px; }
-body.mobile-landscape #boost-label { font-size: 7px; margin-bottom: 2px; }
-
-/* Coordinates tuck under the left info block, clear of the left stick. */
-body.mobile-landscape #coords {
-  left: 10px; bottom: auto; top: 36px; font-size: 9px;
-}
-
-/* Compact top cluster on phones: heading chip + location under it. */
-body.mobile-landscape #hud-top-cluster { top: 6px; transform: translateX(-50%) scale(0.85); }
-body.mobile-landscape #hud-compass-chip { padding: 2px 10px; }
-body.mobile-landscape #hud-heading { font-size: 12px; }
-body.mobile-landscape #hud-location { font-size: 10px; max-width: 44vw; }
-
-body.mobile-landscape #gun-heat-container {
-  left: 50%; right: auto; bottom: 46px; top: auto;
-  transform: translateX(-50%); width: 64px;
-}
-body.mobile-landscape #gun-heat-label { font-size: 6px; }
-body.mobile-landscape .gun-heat-track { height: 3px; }
-
-body.mobile-landscape #hud-status { bottom: 4px; font-size: 9px; }
-
-/* ── Mobile picker: the instruction + search stack shrinks to fit a short
-   landscape screen instead of crowding the map. ─────────────────────────── */
-/* Mobile picker: the header scales down as one piece - same layout as web,
-   proportionally smaller so it never crowds a short landscape screen. */
+/* ── Mobile landscape = the desktop UI, uniformly scaled ──────────────────
+   One factor — --hud-scale, published by MobileMode from the viewport
+   (desktop reference 1280x720, readability floor 0.5) — shrinks each
+   CSS-transformed surface as a whole. #uiContainer's factor is composed
+   by hud.js into the per-frame tilt/shake transform (that JS owns the
+   transform property). No element gets its own mobile size or position:
+   the phone shows exactly the computer layout, just smaller. Joystick
+   zones and the rotate overlay (body.mobile-mode) are untouched. */
 body.mobile-landscape .spawn-hud-top {
   top: 6px;
-  width: 96vw;
-  max-width: 96vw;
-  transform: translateX(-50%) scale(0.72);
+  transform: translateX(-50%) scale(var(--hud-scale, 1));
   transform-origin: top center;
 }
 
-body.mobile-landscape #spawn-instruction { gap: 6px; }
-
-body.mobile-landscape #instruction-text {
-  font-size: 10px;
-  letter-spacing: 1px;
-  padding: 5px 10px;
-  border-radius: 3px;
+body.mobile-landscape #confirmSpawnBtn {
+  transform: translateX(-50%) scale(var(--hud-scale, 1));
+  transform-origin: center;
 }
 
-body.mobile-landscape #search-pill {
-  height: 32px;
-  width: min(280px, 60vw);
-  padding: 0 12px;
-  gap: 8px;
-  border-width: 1.5px;
-  border-radius: 16px;
+body.mobile-landscape .menu-content {
+  transform: scale(var(--hud-scale, 1));
+  transform-origin: center;
 }
 
-body.mobile-landscape #search-pill #locationSearch {
-  font-size: 11px;
-  letter-spacing: 1px;
+body.mobile-landscape .pause-content {
+  transform: scale(var(--hud-scale, 1));
+  transform-origin: center;
 }
 
-body.mobile-landscape #search-pill-icon svg { width: 13px; height: 13px; }
-
-body.mobile-landscape #search-results {
-  width: min(280px, 60vw);
-  max-height: 120px;
-  margin-top: 5px;
-}
-
-body.mobile-landscape #search-results .search-result-item {
-  padding: 7px 12px;
-  font-size: 11px;
-}
+/* The minimap is a live Cesium viewer; keep its canvas from swallowing a
+   joystick touch where the left stick zone overlaps it. */
+body.mobile-landscape #minimap-container { pointer-events: none; }
 
 /* Short screens (web + tall-tablet): scale the picker header down so it
    never clips off the top, and cap the results list height. The scale must
    compose WITH the centering translate, not replace it. Mobile-landscape
-   sets its own tighter scale (0.72). */
+   sets its own --hud-scale above. */
 @media (max-height: 560px) {
   body:not(.mobile-landscape) .spawn-hud-top { transform: translateX(-50%) scale(0.85); transform-origin: top center; }
   #search-results { max-height: 34vh; }
 }
-
-/* (#region-notification mobile override removed with the banner) */
-body.mobile-landscape #pull-up-warning { font-size: 26px; }
-
-body.mobile-landscape #pitch-lines-center { display: none; }
-
-/* Weapons panel: compact chip under the top-right info block on phones;
-   the F-15 plate is dropped to keep it one slim row. */
-body.mobile-landscape #weapons-hud {
-  right: 10px; bottom: auto; top: 34px;
-  transform: scale(0.5);
-  transform-origin: top right;
-}
-body.mobile-landscape #aircraft-icon { display: none; }
