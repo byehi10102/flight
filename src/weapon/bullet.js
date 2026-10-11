@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import * as Cesium from "cesium";
 import { movePosition } from "../utils/geo.js";
+import { stationWorldPoint } from "./muzzle.js";
 
 /**
  * Wing-gun tracer rounds. The Bullet class below is ref-flight's
@@ -318,29 +319,24 @@ export class Bullets {
       // ahead. The ref-flight MISSILE station (15, -15, 0) hangs from the
       // under-wing pylons - below the plane - which read as "not from the
       // wings".
-      const offset = new THREE.Vector3(5.2 * side, -0.4, -1.2);
-      const scaledOffset = offset.clone().multiplyScalar(model.scale.x);
-      scaledOffset.applyQuaternion(model.quaternion);
-      scaledOffset.add(model.position);
+      // The geometry lives in the pure, unit-tested muzzle module: the
+      // station mapped 1:1 through the camera basis, NO fov rescale (see
+      // muzzle.js - the reference's tan-ratio factor belongs only to its
+      // UNSYNCED 75 deg overlay; ours is synced and planeModel already bakes
+      // the live ratio into model.scale/position, so re-applying it here
+      // double-compensated and pulled the muzzle from the wing to the
+      // fuselage - "firing from behind the airplane").
+      const rel = stationWorldPoint(
+        { x: 5.2 * side, y: -0.4, z: -1.2 },
+        { scale: model.scale, quaternion: model.quaternion, position: model.position },
+        { right: cam.right, up: cam.up, direction: cam.direction },
+      );
 
-      // ref-flight's exact fov conversion: drawn (75 deg overlay) units to
-      // world meters through the live Cesium fov.
-      const planeFov = 75;
-      const worldFov = Cesium.Math.toDegrees(cam.frustum.fovy);
-      const factor = Math.tan(Cesium.Math.toRadians(worldFov) * 0.5)
-        / Math.tan(Cesium.Math.toRadians(planeFov) * 0.5);
-      scaledOffset.x *= factor;
-      scaledOffset.y *= factor;
-
-      const right = cam.right, up = cam.up, dir = cam.direction;
-      const worldOffset = new Cesium.Cartesian3();
-      const xVec = Cesium.Cartesian3.multiplyByScalar(right, scaledOffset.x, new Cesium.Cartesian3());
-      const yVec = Cesium.Cartesian3.multiplyByScalar(up, scaledOffset.y, new Cesium.Cartesian3());
-      const zVec = Cesium.Cartesian3.multiplyByScalar(dir, -scaledOffset.z, new Cesium.Cartesian3());
-      Cesium.Cartesian3.add(xVec, yVec, worldOffset);
-      Cesium.Cartesian3.add(worldOffset, zVec, worldOffset);
-
-      const finalPos = Cesium.Cartesian3.add(cam.positionWC, worldOffset, new Cesium.Cartesian3());
+      const finalPos = Cesium.Cartesian3.add(
+        cam.positionWC,
+        new Cesium.Cartesian3(rel.x, rel.y, rel.z),
+        new Cesium.Cartesian3(),
+      );
       const carto = Cesium.Cartographic.fromCartesian(finalPos);
       return {
         lon: Cesium.Math.toDegrees(carto.longitude),
