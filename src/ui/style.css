@@ -213,7 +213,8 @@ html, body {
   overflow: hidden;
 }
 
-#loading-bar-fill {
+#loading-bar-fill,
+#preparing-bar-fill {
   height: 100%;
   width: 0%;
   background: linear-gradient(90deg, #00aa00, #0f0);

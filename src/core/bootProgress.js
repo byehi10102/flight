@@ -42,3 +42,23 @@ export function computeBootProgress(flags, sub = {}, weights = DEFAULT_BOOT_WEIG
   }
   return pct;
 }
+
+/**
+ * "Preparing flight" progress envelope — the progress bar between tapping
+ * SPAWN HERE and the camera dive.
+ *
+ * The REAL work signal is the destination tile queue draining
+ * (queueRatio, 0..1). The envelope guarantees three things the raw ratio
+ * can't on its own:
+ *   - a finished load before MIN window ends holds at 95% (the phase plays
+ *     at least ~3 s so the moment never flashes by),
+ *   - it reaches 100% the moment the min window ends,
+ *   - a stalled network can never trap the player (hard cap → 100%).
+ */
+export function preparingFlightProgress(queueRatio, elapsedMs, minMs = 3000, maxMs = 12000) {
+  const raw = Math.max(0, Math.min(1, Number(queueRatio) || 0));
+  const t = Number.isFinite(elapsedMs) ? elapsedMs : 0;
+  if (t >= maxMs) return 1;
+  if (raw >= 1) return t >= minMs ? 1 : 0.95;
+  return raw;
+}

@@ -2,7 +2,7 @@ import * as THREE from "three";
 import * as Cesium from "cesium";
 import "cesium/Build/Cesium/Widgets/widgets.css";
 import { CONFIG } from "./core/config.js";
-import { computeBootProgress } from "./core/bootProgress.js";
+import { computeBootProgress, preparingFlightProgress } from "./core/bootProgress.js";
 import { getQualityProfile } from "./core/quality.js";
 import { createViewer, attachTerrain, setSunForTime, initMiniViewer, getMiniViewer, setMinimapCamera, setStreetsVisible } from "./core/viewer.js";
 import { GroundSampler } from "./core/ground.js";
@@ -143,6 +143,10 @@ const loadingIndicator = document.getElementById("loadingIndicator");
 const loadingText = document.getElementById("loadingText");
 const loadingBarFill = document.getElementById("loading-bar-fill");
 const loadingPercent = document.getElementById("loadingPercent");
+const preparingFlight = document.getElementById("preparingFlight");
+const preparingFlightVideo = document.getElementById("preparingFlightVideo");
+const preparingBarFill = document.getElementById("preparing-bar-fill");
+const preparingPercent = document.getElementById("preparingPercent");
 const vignette = document.getElementById("transition-vignette");
 const locationSearch = document.getElementById("locationSearch");
 const searchResults = document.getElementById("search-results");
@@ -161,6 +165,12 @@ let areaPreloadActive = false;
 // Boot loading page: fade to the menu instead of cutting. Idempotent.
 let loadingPageHidden = false;
 let lastThrottledRender = 0;
+
+// ── Preparing-flight phase (between SPAWN HERE and the camera dive) ─────────
+let preparingActive = false;
+let preparingQueuePeak = 0;
+let lastPreparingQueue = 0;
+let preparingTimer = null;
 // Mobile browsers (iOS Safari especially) honor the muted attribute
 // inconsistently and silently refuse autoplay; force the properties and
 // retry play() so the 3D fly-through actually shows on phones.
@@ -269,6 +279,13 @@ const unregisterGlobeTracker = viewer.scene.postRender.addEventListener(() => {
 });
 
 viewer.scene.globe.tileLoadProgressEvent.addEventListener((queueLength) => {
+  // Preparing-flight phase: the destination tile queue draining IS the
+  // progress bar between SPAWN HERE and the dive (the picker camera is
+  // looking straight at the tapped point).
+  if (preparingActive) {
+    lastPreparingQueue = queueLength;
+    if (queueLength > preparingQueuePeak) preparingQueuePeak = queueLength;
+  }
   // Boot phase: the queue draining IS the real progress for the globe and
   // area stages. Track the peak queue so remaining/peak maps to 0..1.
   if (!loadingPageHidden && !loadingStatus.failed) {
@@ -1215,6 +1232,45 @@ function getSpawnPinImage() {
   return spawnPinImage;
 }
 
+// ── Preparing-flight phase ─────────────────────────────────────────────────────
+// Replaces the old blind 4-second wait with a real-progress moment: the
+// Blender-rendered loop plays full-screen while the destination's tile queue
+// drains (the picker camera is already looking at the tapped point, so that
+// queue IS the destination load). Holds at 95% through a ~3s minimum so the
+// moment never flashes by, hard-caps at ~12s so a stalled network can never
+// trap the player, then hands off to the unchanged camera-dive transition.
+const PREPARING_MIN_MS = 3000;
+const PREPARING_MAX_MS = 12000;
+
+function runPreparingFlight(onReady) {
+  const start = performance.now();
+  preparingQueuePeak = 0;
+  lastPreparingQueue = 0;
+  preparingActive = true;
+  if (preparingFlight) preparingFlight.classList.remove("hidden");
+  try { preparingFlightVideo?.play?.().catch?.(() => {}); } catch (e) { /* cosmetic */ }
+  if (preparingBarFill) preparingBarFill.style.width = "0%";
+  if (preparingPercent) preparingPercent.textContent = "0%";
+
+  clearInterval(preparingTimer);
+  preparingTimer = setInterval(() => {
+    const ratio = preparingQueuePeak > 0 ? 1 - lastPreparingQueue / preparingQueuePeak : 0;
+    const pct = Math.round(
+      100 * preparingFlightProgress(ratio, performance.now() - start, PREPARING_MIN_MS, PREPARING_MAX_MS),
+    );
+    if (preparingBarFill) preparingBarFill.style.width = `${pct}%`;
+    if (preparingPercent) preparingPercent.textContent = `${pct}%`;
+    if (pct >= 100) {
+      clearInterval(preparingTimer);
+      preparingTimer = null;
+      preparingActive = false;
+      if (preparingFlight) preparingFlight.classList.add("hidden");
+      try { preparingFlightVideo?.pause?.(); } catch (e) { /* cosmetic */ }
+      onReady();
+    }
+  }, 100);
+}
+
 // ── Confirm spawn with transition animation ──────────────────────────────────
 function confirmSpawn() {
   // Radial (see-through center) fade, NOT solid black — the spawn flight
@@ -1255,7 +1311,7 @@ function confirmSpawn() {
   spawnPending = true;
   if (confirmSpawnBtn) confirmSpawnBtn.classList.add("hidden");
 
-  setTimeout(() => {
+  runPreparingFlight(() => {
     spawnPending = false;
     if (gen !== transitionGen) return;
     if (spawnMarker) {
@@ -1464,7 +1520,7 @@ function confirmSpawn() {
         vignette.classList.remove("solid");
       }
     }, 5000);
-  }, 4000);
+  });
 }
 
 // ── Flight update ────────────────────────────────────────────────────────────

@@ -52,6 +52,26 @@
       </div>
     </div>
 
+    <!-- Preparing flight: the real-progress moment between SPAWN HERE and the
+         camera dive. Lazy video (preload="none" — never touches boot),
+         Blender-rendered looping graphic; the bar tracks the destination tile
+         queue draining, holds at 95% through a ~3s minimum, caps at ~12s. -->
+    <div id="preparingFlight" class="loading-container hidden">
+      <div class="loading-bg"></div>
+      <video id="preparingFlightVideo" class="loading-bg-video" muted loop playsinline preload="none">
+        <source src="/preparing-flight.mp4" type="video/mp4" />
+      </video>
+      <div class="loading-content">
+        <div class="loading-title">PREPARING FLIGHT</div>
+        <div class="loading-bar-track">
+          <div id="preparing-bar-fill"></div>
+        </div>
+        <div class="loading-percent" id="preparingPercent">0%</div>
+        <div class="spinner"></div>
+        <div id="preparingText" class="loading-text">Streaming destination terrain...</div>
+      </div>
+    </div>
+
     <!-- Loading -->
     <div id="loadingIndicator" class="loading-container">
       <div class="loading-bg"></div>
