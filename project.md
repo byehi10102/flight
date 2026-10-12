@@ -1304,12 +1304,23 @@ Seeding is fire-and-forget, so anything not finished by the cap keeps
 refining during the dive and the first seconds of flight (the in-flight
 forward fan continues as before).
 
-### Boot is longer and warms more of the spawn map
+### Boot: as long as necessary, then one continuous exit
 
-MIN_BOOT_SECONDS 4.5 -> 7: the film gets its moment and the wider Anaheim
-preload (+/-2.5 deg lon x +/-1.5 deg lat DEM grid, 13x9) has time to
-stream. The reveal chain (bar at 100 -> zoom-off tail -> fade -> menu)
-now reads as one continuous exit.
+The boot reveal is NOT on a timer. The 6 s loop repeats for as long as the
+real load takes — the Anaheim preload (3 imagery passes + a +/-2.5 deg
+x +/-1.5 deg DEM grid) now waits for the globe's tile queue to actually
+DRAIN before the area stage completes (bounded 8 s; overall bound 30 s),
+so "100%" means the big load genuinely streamed. The old 14 s force-cap
+became a 45 s hang safety net; the 7 s minimum window is gone — the film
+gets its moment naturally because the load itself takes longer now.
+
+At 100% the outro is QUEUED, not seeked: the film finishes its current
+lap, and at the loop's next natural boundary the render loop simply stops
+wrapping — the video plays straight into its 2 s zoom-off tail as the
+literal next frame (no seek, no cut: loop -> outro is one continuous
+shot). The page fades under the tail, then the menu. If the film is
+stalled/not playing (backgrounded tab, blocked autoplay), a plain fade
+takes over so boot can never hang on the reveal.
 
 ### Mobile sticks spread outward
 

@@ -192,19 +192,23 @@ let preparingTimer = null;
 
 // ── Boot film: JS owns the loop ────────────────────────────────────────────
 // The boot film is [seamless 6 s loop][2 s zoom-off tail]: the F-15 cruises
-// over the cloud deck for the loop; at 100% the jet burners flare and it
-// accelerates into the distance while the page fades to the menu. JS wraps
-// the video at the loop boundary until boot completes (the tail is reserved
-// for the exit), then plays the tail once.
+// over the cloud deck while the loop repeats AS LONG AS the load takes; at
+// 100% the outro is queued, and at the loop's NEXT natural boundary the film
+// simply continues (no seek) into the tail — burners flare, the jet zooms
+// off into the distance, and the page fades into the menu. Continuing from
+// the boundary is what makes loop -> outro feel like one continuous shot.
 const BOOT_FILM_LOOP_S = 6.0;
 const BOOT_FILM_TAIL_S = 2.0;
 const bootFilm = document.querySelector("#loadingIndicator .loading-bg-video");
 let bootFilmTailActive = false;
+let bootOutroPending = false;
+let bootOutroFading = false;
 if (bootFilm) {
   // Wrap the loop tightly (per frame, from the render loop below) so the
-  // tail never bleeds into the looping phase.
+  // tail never bleeds into the looping phase. When the outro is queued the
+  // boundary must NOT be wrapped — the rAF handover plays the tail there.
   const wrapBootFilm = () => {
-    if (!bootFilm || bootFilmTailActive) return;
+    if (!bootFilm || bootFilmTailActive || bootOutroPending) return;
     if (bootFilm.currentTime >= BOOT_FILM_LOOP_S) {
       try { bootFilm.currentTime -= BOOT_FILM_LOOP_S; } catch (e) { /* seeking */ }
     }
@@ -213,45 +217,56 @@ if (bootFilm) {
   bootFilm.addEventListener("seeking", wrapBootFilm);
 }
 
-// Boot loading page: minimum total time (s). The page stays up AT LEAST this
-// long so the fly-through has its moment even when everything finishes early
-// (the area preload keeps streaming through it). Hard cap below: boot must
-// never trap the player on a slow network.
-const MIN_BOOT_SECONDS = 7;
-const MAX_BOOT_SECONDS = 14;
+/** Start the outro: the film is exactly at the loop boundary — let it play
+ *  straight into the tail (no seek: the next frame IS the tail's first) and
+ *  fade the page out under it. Falls back to a plain fade if the film is
+ *  not playing/seekable. */
+function startBootOutro() {
+  if (bootOutroFading) return;
+  bootOutroFading = true;
+  bootFilmTailActive = true;
+  let played = false;
+  try {
+    if (bootFilm && !bootFilm.paused
+        && Number.isFinite(bootFilm.duration)
+        && bootFilm.duration >= BOOT_FILM_LOOP_S + BOOT_FILM_TAIL_S - 0.05) {
+      played = true;
+      const p = bootFilm.play();
+      if (p && p.catch) p.catch(() => {});
+    }
+  } catch (e) { /* plain fade */ }
+  // Let the zoom read for ~0.9 s of the tail, then fade over ~1.1 s.
+  setTimeout(() => {
+    loadingIndicator?.classList.add("fading");
+  }, played ? 900 : 0);
+  setTimeout(() => {
+    if (loadingIndicator) {
+      loadingIndicator.classList.add("hidden");
+      loadingIndicator.classList.remove("fading", "picker");
+    }
+    try { bootFilm?.pause(); } catch (e) { /* cosmetic */ }
+  }, played ? 2000 : 1100);
+}
+
+// Boot safety net (s): a hung provider must never trap the player forever.
+// This is NOT a load timer — the reveal waits for real completion however
+// long that takes (the film loops as long as necessary); the cap only
+// force-finishes stages if something has truly hung.
+const MAX_BOOT_SECONDS = 45;
 const bootStart = performance.now();
 
 function hideLoadingPage() {
   if (!loadingIndicator || loadingPageHidden) return;
-  // Never reveal before the minimum boot window: the 3D fly-through plays
-  // while the area preload keeps streaming map + 3D terrain.
-  const elapsed = (performance.now() - bootStart) / 1000;
-  const remaining = Math.max(0, MIN_BOOT_SECONDS - elapsed) * 1000;
-  setTimeout(() => {
-    if (!loadingIndicator || loadingPageHidden) return;
-    loadingPageHidden = true;
-    // 100%: the jet's burners flare and it ZOOMS OFF into the distance
-    // (the film's 2 s tail) while everything fades into the menu. If the
-    // film isn't loaded/seekable, fall back to the plain fade.
-    let tailMs = 900; // how long to let the zoom read before the fade starts
-    try {
-      if (bootFilm && Number.isFinite(bootFilm.duration)
-          && bootFilm.duration >= BOOT_FILM_LOOP_S + BOOT_FILM_TAIL_S - 0.05) {
-        bootFilmTailActive = true;
-        bootFilm.currentTime = BOOT_FILM_LOOP_S;
-        const p = bootFilm.play();
-        if (p && p.catch) p.catch(() => {});
-      }
-    } catch (e) { /* plain fade */ }
-    setTimeout(() => {
-      loadingIndicator.classList.add("fading");
-      setTimeout(() => {
-        loadingIndicator.classList.add("hidden");
-        loadingIndicator.classList.remove("fading", "picker");
-        try { bootFilm?.pause(); } catch (e) { /* cosmetic */ }
-      }, 1100);
-    }, tailMs);
-  }, remaining);
+  // The bar is at 100 and everything has REALLY loaded: queue the outro.
+  // The film finishes its current lap, and at the loop's next natural
+  // boundary the render loop hands over to startBootOutro() — the tail
+  // plays as the literal next frame of the loop, one continuous shot.
+  // (Not on a timer: the loop repeats as long as the load took.)
+  loadingPageHidden = true;
+  bootOutroPending = true;
+  // Safety net: if the film is stalled/not playing and never reaches the
+  // boundary, do the plain fade so boot can never hang on the reveal.
+  setTimeout(() => { if (!bootOutroFading) startBootOutro(); }, 8000);
 }
 
 function updateLoadingUI() {
@@ -398,7 +413,10 @@ async function preloadTerrain() {
     updateLoadingUI();
   }
   try {
-    await withTimeout(preloadSpawnRegion(), 11000);
+    // Not a timer cut: generous bound so the big Anaheim preload (passes +
+    // DEM grid + queue drain) genuinely completes on slow connections. The
+    // boot film loops as long as this takes.
+    await withTimeout(preloadSpawnRegion(), 30000);
   } catch (e) { /* bounded above */ }
   loadingStatus.area = true;
   updateLoadingUI();
@@ -452,6 +470,10 @@ async function preloadSpawnRegion() {
     }
   }
   try { await groundSampler.seed(pts); } catch (e) { /* best effort */ }
+  // "Area done" = the big load actually STREAMED, not just requested: wait
+  // for the globe's tile queue to drain (bounded) before completing the
+  // stage — the outro never plays while tiles are still visibly loading.
+  await waitForGlobeTiles(8000);
   loadingSub.area = 1; updateLoadingUI();
   viewer.camera.setView(saved);
 }
@@ -1970,10 +1992,17 @@ function animate() {
   const now = performance.now();
 
   // Boot film loop wrap (per frame = tight; timeupdate alone overshoots the
-  // loop boundary by up to 250 ms and would flash the zoom-off tail early).
-  if (!loadingPageHidden && bootFilm && !bootFilmTailActive
+  // loop boundary by up to 250 ms). When the outro is queued (loading done,
+  // bar at 100), the boundary is NOT wrapped — the film simply continues
+  // into the zoom-off tail as its literal next frame, one continuous shot.
+  // (Guard on tail state, not loadingPageHidden: the page flag flips the
+  // moment the outro is QUEUED, but the film still needs this handover.)
+  if (bootFilm && !bootFilmTailActive
       && bootFilm.currentTime >= BOOT_FILM_LOOP_S) {
-    try { bootFilm.currentTime -= BOOT_FILM_LOOP_S; } catch (e) { /* seeking */ }
+    if (bootOutroPending) startBootOutro();
+    else if (!loadingPageHidden) {
+      try { bootFilm.currentTime -= BOOT_FILM_LOOP_S; } catch (e) { /* seeking */ }
+    }
   }
 
   if (currentState === States.FLYING || currentState === States.PAUSED || currentState === States.TRANSITIONING) {

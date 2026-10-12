@@ -346,7 +346,7 @@ const browserDesk = await puppeteer.launch(LAUNCH);
     const faded = await page.waitForFunction(() => {
       const li = document.getElementById("loadingIndicator");
       return li && li.classList.contains("hidden");
-    }, { timeout: 25000, polling: 150 }).then(() => true).catch(() => false);
+    }, { timeout: 40000, polling: 150 }).then(() => true).catch(() => false);
     const boot = await page.evaluate(() => {
       const li = document.getElementById("loadingIndicator");
       const bg = li ? li.querySelector(".loading-bg") : null;
