@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import * as Cesium from "cesium";
 import "cesium/Build/Cesium/Widgets/widgets.css";
-import { CONFIG } from "./core/config.js";
+import { CONFIG, computeMinimapZoomAltitude } from "./core/config.js";
 import { computeBootProgress, preparingFlightProgress, bootDisplayFloor, MonotonicPercent } from "./core/bootProgress.js";
 import { getQualityProfile } from "./core/quality.js";
 import { createViewer, attachTerrain, setSunForTime, initMiniViewer, getMiniViewer, setMinimapCamera, setStreetsVisible } from "./core/viewer.js";
@@ -52,9 +52,10 @@ const state = {
   spawnName: null,
   spawnLon: null,
   spawnLat: null,
-  // Minimap range in meters (1K / 5K / 10K setting, persisted).
-  minimapRange: Number(localStorage.getItem("skywardMinimapRange")) || 1000,
-  minimapZoom: 2000,
+  // Dynamic minimap zoom: the map's view altitude, smoothed toward
+  // computeMinimapZoomAltitude(AGL) every frame — no manual range setting.
+  // 2400 m ≈ the view at a 1500 m spawn AGL.
+  minimapZoom: 2400,
   // Single smoothed heading feeding BOTH the real-map camera and the canvas
   // overlay, so the two can never disagree mid-turn (ref-flight parity).
   minimapHeading: 0,
@@ -1385,14 +1386,16 @@ function runPreparingFlight(onReady) {
   preparingTimer = setInterval(() => {
     const elapsed = performance.now() - start;
     const ratio = preparingQueuePeak > 0 ? 1 - lastPreparingQueue / preparingQueuePeak : 0;
-    // Warm the minimap at the pose the flight loop will use (same zoom
-    // math as the animate() loop, at the spawn point). Renders here even
-    // though the HUD is hidden — its tiles only stream when it renders.
+    // Warm the minimap at the pose the flight loop will use (same dynamic
+    // zoom target: AGL-driven). Renders here even though the HUD is hidden —
+    // its tiles only stream when it renders.
     try {
       const mv = getMiniViewer();
       if (mv) {
-        const rangeKm = (state.minimapRange || 1000) / 1000;
-        const zoomAlt = rangeKm * 1500 + (state.speed || 500) * (rangeKm * 2);
+        const ground = groundSampler.get(state.lat, state.lon, 0);
+        const agl = Math.max(0, state.alt - (Number.isFinite(ground) ? ground : 0));
+        const zoomAlt = computeMinimapZoomAltitude(agl, CONFIG.minimap);
+        state.minimapZoom = zoomAlt; // spawn with the map already at target
         mv.camera.setView({
           destination: Cesium.Cartesian3.fromDegrees(state.lon, state.lat, zoomAlt),
           orientation: {
@@ -2161,12 +2164,14 @@ function animate() {
       state.minimapHeading += diff * Math.min(1, dt * 8);
       while (state.minimapHeading <= -180) state.minimapHeading += 360;
       while (state.minimapHeading > 180) state.minimapHeading -= 360;
-      const rangeKm = (state.minimapRange || 1000) / 1000;
-      let zoomAlt = rangeKm * 1500 + state.speed * (rangeKm * 2);
-      if (state.isBoosting) zoomAlt *= 1.2;
-      state.minimapZoom = zoomAlt;
+      // Dynamic zoom: the map view altitude tracks height above ground —
+      // zoomed in near the deck, zoomed out high up — smoothed so climbing
+      // and diving never snaps the map. Same target the preparing warm-up
+      // uses, so the map is already at the right zoom at spawn.
+      const zoomTarget = computeMinimapZoomAltitude(state.agl, CONFIG.minimap);
+      state.minimapZoom += (zoomTarget - state.minimapZoom) * Math.min(1, dt * CONFIG.minimap.zoomSmooth);
       try {
-        setMinimapCamera(state.lon, state.lat, zoomAlt, state.minimapHeading);
+        setMinimapCamera(state.lon, state.lat, state.minimapZoom, state.minimapHeading);
       } catch (e) { /* minimap is cosmetic */ }
     }
 
@@ -2234,20 +2239,6 @@ function animate() {
 }
 
 // ── UI events ────────────────────────────────────────────────────────────────
-// Minimap range setting (home page): 1K / 5K / 10K meters, default 1K.
-document.querySelectorAll("#rangeBtns .range-btn").forEach((btn) => {
-  if (Number(btn.dataset.range) === state.minimapRange) btn.classList.add("active");
-  else btn.classList.remove("active");
-  btn.addEventListener("click", () => {
-    state.minimapRange = Number(btn.dataset.range) || 1000;
-    try {
-      localStorage.setItem("skywardMinimapRange", String(state.minimapRange));
-    } catch (e) { /* storage unavailable */ }
-    document.querySelectorAll("#rangeBtns .range-btn").forEach((b) =>
-      b.classList.toggle("active", b === btn)
-    );
-  });
-});
 
 startBtn.addEventListener("click", () => {
   if (mainMenu) mainMenu.classList.add("hidden");

@@ -2,6 +2,18 @@
  * Every tunable in one place.
  */
 export const CONFIG = {
+  minimap: {
+    // Dynamic map zoom: the minimap's camera altitude (view height) scales
+    // with height above ground — near the deck the map is zoomed in tight
+    // (detail), high up it is zoomed out (overview). Clamped so the map
+    // never becomes a street map or a whole country.
+    zoomPerAgl: 1.6,
+    minZoomAlt: 1800,
+    maxZoomAlt: 40000,
+    // Per-second lerp rate toward the target zoom (smooth, no snapping).
+    zoomSmooth: 3,
+  },
+
   terrain: {
     url: "https://terrain.reearth.land/cesium-mesh/ellipsoid",
     attribution: "Terrain: Re:Earth / Mapterhorn (CC BY 4.0)",
@@ -96,3 +108,16 @@ export const DEG = Math.PI / 180;
 export const RAD = 180 / Math.PI;
 export const MPS_TO_KNOTS = 1.94384;
 export const M_TO_FT = 3.28084;
+
+/**
+ * The minimap's dynamic view altitude for a given height above ground.
+ * Close to the ground -> zoomed in (the floor is the tightest view);
+ * high up -> zoomed out (the ceiling is the widest overview). Pure so
+ * the mapping is unit-testable; consumers smooth toward the target.
+ */
+export function computeMinimapZoomAltitude(agl, cfg = CONFIG.minimap) {
+  const c = cfg || CONFIG.minimap;
+  const a = Number(agl);
+  const v = Number.isFinite(a) && a > 0 ? a * (c.zoomPerAgl || 1.6) : 0;
+  return Math.max(c.minZoomAlt || 1800, Math.min(c.maxZoomAlt || 40000, v));
+}

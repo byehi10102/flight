@@ -455,8 +455,7 @@ export function initMp(ctx) {
     const cy = h / 2;
     const radius = Math.min(cx, cy) - 10;
     const heading = state.minimapHeading ?? 0;
-    const rangeKm = (state.minimapRange || 1000) / 1000;
-    const zoomAlt = state.minimapZoom || rangeKm * 1500;
+    const zoomAlt = state.minimapZoom || 2400;
     const pixelsPerMeter = h / (zoomAlt * 1.1547);
     const hdg = (heading * Math.PI) / 180;
     const cosLat = Math.cos((state.lat * Math.PI) / 180);

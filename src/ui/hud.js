@@ -434,15 +434,14 @@ export class Hud {
       ctx.stroke();
     }
 
-    // Heading-rotated, meter-true grid (ref-flight): each line is exactly
-    // one range-unit (rangeKm Ã— 1000 m), so grid matches the world scale.
+    // Heading-rotated, scale-true grid: four divisions across the view, so
+    // the grid always reads against the LIVE dynamic zoom (altitude-driven).
     // `heading` is the SAME smoothed value driving the real-map camera.
     const heading = state.minimapHeading ?? this.smoothedHeading;
-    const rangeKm = (state.minimapRange || 1000) / 1000;
-    const zoomAlt = state.minimapZoom || rangeKm * 1500;
+    const zoomAlt = state.minimapZoom || 2400;
     const verticalMeters = zoomAlt * 1.1547;
     const pixelsPerMeter = h / verticalMeters;
-    const metersPerGrid = rangeKm * 1000;
+    const metersPerGrid = verticalMeters / 4;
     const gridSize = (metersPerGrid * h) / verticalMeters;
     ctx.save();
     ctx.translate(cx, cy);

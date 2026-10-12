@@ -1363,3 +1363,23 @@ empty tick used to end the phase mid-refinement) after a 1.5 s grace for
 requests to register. The picker view is saved and restored before the
 dive, so the fly-in is unchanged; Escape during the preparing phase stops
 the warm-up cleanly and restores the picker view.
+
+## 21. Recent changes (dynamic minimap zoom; range selector removed)
+
+The 1K/5K/10K minimap range selector is gone from the menu - the map now
+zooms itself. The view altitude (camera height of the mini viewer) tracks
+height above ground: near the deck it clamps to a tight 1800 m view (street
+detail), high up it eases out to a 40 km overview, at 1.6x AGL in between -
+spawn AGL 1500 m lands at ~2400 m, right where the old 1K setting flew.
+The zoom is smoothed toward the target every frame (no snapping while
+climbing/diving), the map CONTAINER never changes size (same 200px desktop /
+130px mobile square - only the view zooms), and the preparing-phase warm-up
+aims the mini viewer at the same AGL-derived target so the map spawns
+already at the right zoom.
+
+computeMinimapZoomAltitude() lives in config.js next to its tunables and is
+pure + unit-tested (monotonic with altitude, floor/ceiling clamps, spawn
+ballpark, garbage-AGL safety). Consumers: the flight loop (smoothed
+state.minimapZoom, which hud.js and the multiplayer peer markers already
+read), the preparing warm-up, and the hud grid - which now draws four
+scale-true divisions across the LIVE view instead of one fixed range-unit.
