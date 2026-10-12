@@ -190,11 +190,34 @@ let preparingTimer = null;
   kick();
 })();
 
+// ── Boot film: JS owns the loop ────────────────────────────────────────────
+// The boot film is [seamless 6 s loop][2 s zoom-off tail]: the F-15 cruises
+// over the cloud deck for the loop; at 100% the jet burners flare and it
+// accelerates into the distance while the page fades to the menu. JS wraps
+// the video at the loop boundary until boot completes (the tail is reserved
+// for the exit), then plays the tail once.
+const BOOT_FILM_LOOP_S = 6.0;
+const BOOT_FILM_TAIL_S = 2.0;
+const bootFilm = document.querySelector("#loadingIndicator .loading-bg-video");
+let bootFilmTailActive = false;
+if (bootFilm) {
+  // Wrap the loop tightly (per frame, from the render loop below) so the
+  // tail never bleeds into the looping phase.
+  const wrapBootFilm = () => {
+    if (!bootFilm || bootFilmTailActive) return;
+    if (bootFilm.currentTime >= BOOT_FILM_LOOP_S) {
+      try { bootFilm.currentTime -= BOOT_FILM_LOOP_S; } catch (e) { /* seeking */ }
+    }
+  };
+  bootFilm.addEventListener("timeupdate", wrapBootFilm);
+  bootFilm.addEventListener("seeking", wrapBootFilm);
+}
+
 // Boot loading page: minimum total time (s). The page stays up AT LEAST this
 // long so the fly-through has its moment even when everything finishes early
 // (the area preload keeps streaming through it). Hard cap below: boot must
 // never trap the player on a slow network.
-const MIN_BOOT_SECONDS = 4.5;
+const MIN_BOOT_SECONDS = 7;
 const MAX_BOOT_SECONDS = 14;
 const bootStart = performance.now();
 
@@ -207,11 +230,27 @@ function hideLoadingPage() {
   setTimeout(() => {
     if (!loadingIndicator || loadingPageHidden) return;
     loadingPageHidden = true;
-    loadingIndicator.classList.add("fading");
+    // 100%: the jet's burners flare and it ZOOMS OFF into the distance
+    // (the film's 2 s tail) while everything fades into the menu. If the
+    // film isn't loaded/seekable, fall back to the plain fade.
+    let tailMs = 900; // how long to let the zoom read before the fade starts
+    try {
+      if (bootFilm && Number.isFinite(bootFilm.duration)
+          && bootFilm.duration >= BOOT_FILM_LOOP_S + BOOT_FILM_TAIL_S - 0.05) {
+        bootFilmTailActive = true;
+        bootFilm.currentTime = BOOT_FILM_LOOP_S;
+        const p = bootFilm.play();
+        if (p && p.catch) p.catch(() => {});
+      }
+    } catch (e) { /* plain fade */ }
     setTimeout(() => {
-      loadingIndicator.classList.add("hidden");
-      loadingIndicator.classList.remove("fading", "picker");
-    }, 750);
+      loadingIndicator.classList.add("fading");
+      setTimeout(() => {
+        loadingIndicator.classList.add("hidden");
+        loadingIndicator.classList.remove("fading", "picker");
+        try { bootFilm?.pause(); } catch (e) { /* cosmetic */ }
+      }, 1100);
+    }, tailMs);
   }, remaining);
 }
 
@@ -359,7 +398,7 @@ async function preloadTerrain() {
     updateLoadingUI();
   }
   try {
-    await withTimeout(preloadSpawnRegion(), 9000);
+    await withTimeout(preloadSpawnRegion(), 11000);
   } catch (e) { /* bounded above */ }
   loadingStatus.area = true;
   updateLoadingUI();
@@ -401,14 +440,14 @@ async function preloadSpawnRegion() {
     await waitForGlobeTiles(2500);
     loadingSub.area = 0.75; updateLoadingUI();
   } catch (e) { /* best effort */ }
-  // 3D terrain across the region: ~ +/-1.5 deg lon x +/-1.0 deg lat grid
-  // (denser than before - as much California warm as the boot window allows).
+  // 3D terrain across the region: ~ +/-2.5 deg lon x +/-1.5 deg lat grid
+  // (wider than before - more of the spawn map warm before the picker opens).
   const pts = [];
-  for (let i = 0; i < 9; i++) {
-    for (let j = 0; j < 7; j++) {
+  for (let i = 0; i < 13; i++) {
+    for (let j = 0; j < 9; j++) {
       pts.push([
-        state.lat + (j / 6 - 0.5) * 2.0,
-        state.lon + (i / 8 - 0.5) * 3.0,
+        state.lat + (j / 8 - 0.5) * 3.0,
+        state.lon + (i / 12 - 0.5) * 5.0,
       ]);
     }
   }
@@ -1251,7 +1290,7 @@ function getSpawnPinImage() {
 // moment never flashes by, hard-caps at ~12s so a stalled network can never
 // trap the player, then hands off to the unchanged camera-dive transition.
 const PREPARING_MIN_MS = 3000;
-const PREPARING_MAX_MS = 12000;
+const PREPARING_MAX_MS = 15000;
 
 function runPreparingFlight(onReady) {
   const start = performance.now();
@@ -1308,26 +1347,23 @@ function confirmSpawn() {
     vignette.style.opacity = "1";
   }
 
-  // Pre-spawn beat: seed a GOOD LARGE amount of 3D terrain around the chosen
-  // point — +/-0.10 deg (~11 km) grid + the forward flight path — so the
-  // spawn-dive window does real work and the first minutes of flight have
-  // refined elevation on all sides.
+  // Pre-spawn beat: the preparing screen owns this moment (no second loading
+  // chip over it - just the one bar). Seeds a HUGE DEM area around the chosen
+  // point - +/-0.25 deg (~28 km) grid + the forward flight path - so the dive
+  // window streams a real neighborhood and the spawn arrives without visible
+  // tile loading around the jet.
   try {
     const pre = [];
-    for (let dy = -6; dy <= 6; dy++) {
-      for (let dx = -6; dx <= 6; dx++) {
-        pre.push([state.lat + dy * 0.0167, state.lon + dx * 0.0167]);
+    for (let dy = -16; dy <= 16; dy++) {
+      for (let dx = -16; dx <= 16; dx++) {
+        pre.push([state.lat + dy * 0.015625, state.lon + dx * 0.015625]);
       }
     }
     groundSampler.seed(pre).catch(() => {});
     viewer.scene.requestRender();
   } catch (e) { /* warm-up is best-effort */ }
-  if (loadingIndicator && loadingText) {
-    loadingText.textContent = "Loading...";
-    loadingIndicator.classList.remove("hidden");
-  }
-  // Own the 4 s wait: no double-clicks, and the tile-progress handler
-  // leaves the sign alone until the flight setup takes over.
+  // Own the wait: no double-clicks, and the tile-progress handler
+  // leaves the picker chip alone until the flight setup takes over.
   spawnPending = true;
   if (confirmSpawnBtn) confirmSpawnBtn.classList.add("hidden");
 
@@ -1932,6 +1968,13 @@ function animate() {
   if (!Number.isFinite(dt) || dt < 0) dt = 0.016;
   dt = Math.min(dt, 0.25);
   const now = performance.now();
+
+  // Boot film loop wrap (per frame = tight; timeupdate alone overshoots the
+  // loop boundary by up to 250 ms and would flash the zoom-off tail early).
+  if (!loadingPageHidden && bootFilm && !bootFilmTailActive
+      && bootFilm.currentTime >= BOOT_FILM_LOOP_S) {
+    try { bootFilm.currentTime -= BOOT_FILM_LOOP_S; } catch (e) { /* seeking */ }
+  }
 
   if (currentState === States.FLYING || currentState === States.PAUSED || currentState === States.TRANSITIONING) {
     if (currentState === States.FLYING) {

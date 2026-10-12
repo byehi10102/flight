@@ -212,23 +212,38 @@ def make_cone(name, x, y, z, length, radius, color, strength):
     out = mat.node_tree.nodes["Material Output"]
     mat.node_tree.links.new(em.outputs[0], out.inputs[0])
     ob.data.materials.append(mat)
-    return em
+    return em, ob
 
 tail_y = hi4.y
 noz_z = (lo4.z + hi4.z) / 2 + 0.1
-burners = [
-    make_cone("BurnerL", -0.72, tail_y - 0.25, noz_z, 3.2, 0.30, (1.0, 0.62, 0.22, 1.0), 26),
-    make_cone("BurnerR", 0.72, tail_y - 0.25, noz_z, 3.2, 0.30, (1.0, 0.62, 0.22, 1.0), 26),
-    make_cone("BurnerCoreL", -0.72, tail_y - 0.25, noz_z, 1.7, 0.20, (1.0, 0.92, 0.75, 1.0), 60),
-    make_cone("BurnerCoreR", 0.72, tail_y - 0.25, noz_z, 1.7, 0.20, (1.0, 0.92, 0.75, 1.0), 60),
+# Red-hot afterburners, bigger and fiercer than the first bake.
+burner_pairs = [
+    make_cone("BurnerL", -0.72, tail_y - 0.25, noz_z, 4.6, 0.36, (1.0, 0.22, 0.05, 1.0), 42),
+    make_cone("BurnerR", 0.72, tail_y - 0.25, noz_z, 4.6, 0.36, (1.0, 0.22, 0.05, 1.0), 42),
+    make_cone("BurnerCoreL", -0.72, tail_y - 0.25, noz_z, 2.6, 0.24, (1.0, 0.72, 0.40, 1.0), 95),
+    make_cone("BurnerCoreR", 0.72, tail_y - 0.25, noz_z, 2.6, 0.24, (1.0, 0.72, 0.40, 1.0), 95),
 ]
+# The cones must RIDE THE JET: the zoom-off tail moves the rig -900 m, and
+# the flames have to stay in the tailpipes. World position preserved at
+# parenting time via matrix_parent_inverse.
+for _em, _ob in burner_pairs:
+    _ob.parent = rig
+    _ob.matrix_parent_inverse = rig.matrix_world.inverted()
+burners = [em for em, _ob in burner_pairs]
+# Loop frames 1..FRAMES: red flicker (integer cycles). Tail frames FRAMES+1..
+# FRAMES+TAIL: the burners flare to full as the jet zooms off.
+TAIL_FRAMES = 48
+TOTAL_FRAMES = FRAMES + TAIL_FRAMES
 for em in burners:
     base = em.inputs["Strength"].default_value
     drv = em.inputs["Strength"].driver_add("default_value")
     d = drv.driver
     d.type = "SCRIPTED"
-    d.expression = (f"{base!r} * (1 + 0.18*sin(2*pi*4*(frame-1)/{FRAMES}) "
-                   f"+ 0.10*sin(2*pi*7*(frame-1)/{FRAMES}))")
+    d.expression = (
+        f"{base!r} * (1 + 0.28*sin(2*pi*4*(frame-1)/{FRAMES}) "
+        f"+ 0.16*sin(2*pi*7*(frame-1)/{FRAMES})) if frame <= {FRAMES} "
+        f"else {base!r} * (2.2 + 3.0*((frame-{FRAMES})/{TAIL_FRAMES}))"
+    )
 
 # ---------------------------------------------------------- jet + cam motion
 # bank/pitch/bob: integer sine cycles over the loop -> frame 144 == frame 1.
@@ -248,6 +263,15 @@ zdrv = rig.driver_add("location", 2)
 dz = zdrv.driver
 dz.type = "SCRIPTED"
 dz.expression = f"{rig.location.z!r} + " + cyc(1, 0.7, 0.15)
+# The zoom-off tail: static through the loop, then the jet accelerates
+# away along its nose (-Y) until it is a dot in the haze at the horizon.
+ydrv = rig.driver_add("location", 1)
+dy = ydrv.driver
+dy.type = "SCRIPTED"
+dy.expression = (
+    f"{rig.location.y!r} if frame <= {FRAMES} "
+    f"else {rig.location.y!r} - 900*(((frame-{FRAMES})/{TAIL_FRAMES})**1.7)"
+)
 
 cam_data = bpy.data.cameras.new("Cam")
 cam_data.lens = 32
@@ -332,7 +356,7 @@ glow.data.materials.append(gm)
 
 # ------------------------------------------------------------------ render
 sc = bpy.context.scene
-sc.frame_start, sc.frame_end = 1, FRAMES
+sc.frame_start, sc.frame_end = 1, TOTAL_FRAMES
 sc.render.fps = FPS
 sc.render.resolution_x, sc.render.resolution_y = RES_X, RES_Y
 sc.render.engine = "BLENDER_EEVEE"
@@ -346,13 +370,13 @@ sc.camera = cam
 
 # numeric framing check: jet projected into camera NDC at key frames
 import bpy_extras
-for f in (1, 72, 144):
+for f in (1, 72, 144, 156, 192):
     sc.frame_set(f)
     bpy.context.view_layer.update()
     lo5, hi5 = world_bounds(meshes)
     ndc = []
     for corner in ((lo5.x, lo5.y, lo5.z), (hi5.x, hi5.y, hi5.z),
-                   (lo5.x, hi5.y, hi5.z), (hi5.x, lo5.y, hi5.z)):
+                   (lo5.x, hi5.y, hi5.z), (hi5.x, lo5.y, lo5.z)):
         p = bpy_extras.object_utils.world_to_camera_view(
             sc, cam, mathutils.Vector(corner))
         ndc.append((round(p.x, 3), round(p.y, 3)))

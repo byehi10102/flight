@@ -1272,3 +1272,50 @@ ahead of the nose, 3-20 km lead, twice a second) continues streaming as
 before.
 
 
+
+## 19. Recent changes (red burners + zoom-off exit, one honest bar, stick spread)
+
+### The boot film: red afterburners and a 100% zoom-off exit
+
+The burners are now red-hot and fierce - bigger cones (4.6 m), deep red
+(1.0, 0.22, 0.05) with a hot pale-gold core, 1.6x the emission strength,
+and stronger flicker. At 100% the film plays its new 2 s tail: the burners
+flare to ~5x and the jet accelerates away along its nose until it is a
+glowing dot over the horizon haze, while the page fades into the menu.
+The mp4 is now [6 s seamless loop][2 s tail]; JS owns the looping (the
+element's native `loop` is off) so the tail is reserved for the exit: the
+render loop wraps the video at exactly 6 s until boot completes, then
+seeks to the tail and fades (plain fade if the film is not seekable).
+
+### One loading screen, one loading indicator
+
+Tapping SPAWN HERE used to show TWO spinning circles: the preparing
+screen's own spinner ring PLUS the "Loading Terrain..." picker chip that
+confirmSpawn un-hidden on top of it. The chip is no longer shown during
+the preparing phase and the screen's spinner element is gone - the moment
+is just the title, the bar, the percent, and the status line.
+
+### A huge spawn-area preload
+
+The pre-spawn DEM seed grew from +/-0.10 deg to +/-0.25 deg (~28 km),
+a 33x33 grid plus the forward flight path; the preparing window's hard cap
+rose 12 s -> 15 s so a real neighborhood actually streams before the dive.
+Seeding is fire-and-forget, so anything not finished by the cap keeps
+refining during the dive and the first seconds of flight (the in-flight
+forward fan continues as before).
+
+### Boot is longer and warms more of the spawn map
+
+MIN_BOOT_SECONDS 4.5 -> 7: the film gets its moment and the wider Anaheim
+preload (+/-2.5 deg lon x +/-1.5 deg lat DEM grid, 13x9) has time to
+stream. The reveal chain (bar at 100 -> zoom-off tail -> fade -> menu)
+now reads as one continuous exit.
+
+### Mobile sticks spread outward
+
+The flight sticks were "all too close to the middle": the left stick
+moved 33% -> 27% of screen width (still clear of the minimap, which
+shrank 150 -> 130 px), the right stick 67% -> 72% (clear of the aircraft
+plate, which shrank to scale 0.5). The boost trigger moved to 41%, the
+fire trigger to 60%. The centre column (bars, gun heat, status) keeps its
+clearances.

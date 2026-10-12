@@ -1496,8 +1496,8 @@ body.mobile-landscape #horizon-container { width: 340px; height: 340px; }
 body.mobile-landscape #minimap-container {
   left: 10px;
   bottom: 28px;
-  width: 150px;
-  height: 150px;
+  width: 130px;
+  height: 130px;
 }
 
 /* Aircraft type plate (F-15 + M61 station): bottom-right corner, shrunk. */
@@ -1505,7 +1505,7 @@ body.mobile-landscape #weapons-hud {
   right: 10px;
   bottom: 24px;
   gap: 6px;
-  transform: scale(0.62);
+  transform: scale(0.5);
   transform-origin: bottom right;
 }
 
@@ -1518,11 +1518,11 @@ body.mobile-landscape #hud-status { bottom: 6px; font-size: 11px; }
    stick just right of the minimap, the right stick just left of the
    aircraft plate. The small trigger sticks keep their inner positions:
    boost (blue) below-right of the left stick, fire (green) below-left of
-   the right stick. */
-body.mobile-landscape .stick-zone-left { left: 19%; width: 28%; }
-body.mobile-landscape .stick-zone-right { right: 19%; width: 28%; }
-body.mobile-landscape .stick-zone-boost { left: 41%; width: 12%; }
-body.mobile-landscape .stick-zone-fire { left: 49%; width: 12%; }
+   the right stick. All four sit well clear of the centre column (bars). */
+body.mobile-landscape .stick-zone-left { left: 13%; width: 28%; }
+body.mobile-landscape .stick-zone-right { right: 14%; width: 28%; }
+body.mobile-landscape .stick-zone-boost { left: 35%; width: 12%; }
+body.mobile-landscape .stick-zone-fire { left: 54%; width: 12%; }
 
 /* Menus + spawn picker keep the uniform scale (they are centred content;
    only the flight HUD is corner-anchored). */

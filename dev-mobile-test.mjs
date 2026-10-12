@@ -346,7 +346,7 @@ const browserDesk = await puppeteer.launch(LAUNCH);
     const faded = await page.waitForFunction(() => {
       const li = document.getElementById("loadingIndicator");
       return li && li.classList.contains("hidden");
-    }, { timeout: 15000, polling: 150 }).then(() => true).catch(() => false);
+    }, { timeout: 25000, polling: 150 }).then(() => true).catch(() => false);
     const boot = await page.evaluate(() => {
       const li = document.getElementById("loadingIndicator");
       const bg = li ? li.querySelector(".loading-bg") : null;
@@ -354,13 +354,17 @@ const browserDesk = await puppeteer.launch(LAUNCH);
       return {
         hasRenderBackdrop: !!(bg && /boot-flight\.png/.test(getComputedStyle(bg).backgroundImage || "none")),
         hasFlythroughVideo: !!(vid && /boot-flight\.mp4/.test(vid.querySelector("source")?.src || vid.src || "none")),
-        videoLoops: vid ? vid.loop : false,
+        // JS owns the loop now (the element must NOT loop natively, or the
+        // 2s zoom-off tail at 100% could never play).
+        jsOwnsLoop: vid ? !vid.loop : false,
+        hasZoomTail: vid && Number.isFinite(vid.duration) ? vid.duration >= 7.9 : false,
         pct: document.getElementById("loadingPercent")?.textContent,
       };
     });
     check("loading page faded out after boot (menu take-over)", faded, JSON.stringify(boot));
-    check("loading backdrop = Blender render + looping fly-through video",
-      boot.hasRenderBackdrop && boot.hasFlythroughVideo && boot.videoLoops, JSON.stringify(boot));
+    check("loading backdrop = Blender render + JS-managed fly-through with zoom-off tail",
+      boot.hasRenderBackdrop && boot.hasFlythroughVideo && boot.jsOwnsLoop && boot.hasZoomTail,
+      JSON.stringify(boot));
   }
   check("speed box on the LEFT third (ref-flight HUD)", r.speedCX < r.vw * 0.45,
     `centerX=${r.speedCX} of ${r.vw}`);
@@ -603,7 +607,7 @@ const browserMob = await puppeteer.launch(LAUNCH);
   // No uniform scale-to-centre: the minimap keeps its laid-out size instead
   // of shrinking toward the middle (the "cramped in the middle" regression).
   check("no uniform HUD scale-to-centre (minimap at full mobile size in its corner)",
-    hud.mm.w >= 140 && hud.mm.l <= 20,
+    hud.mm.w >= 120 && hud.mm.l <= 20,
     `w=${hud.mm.w} l=${hud.mm.l}`);
 
   // BLUE BOOST STICK: the only mobile boost gesture now (double-tap and
