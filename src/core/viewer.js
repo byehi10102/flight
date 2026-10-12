@@ -314,6 +314,18 @@ export function initMiniViewer(containerId) {
     miniViewer.scene.fog.enabled = false;
     miniViewer.scene.globe.enableLighting = false;
     miniViewer.scene.highDynamicRange = false;
+    // REALISTIC DETAIL on the small canvas: screen-space error shrinks with
+    // viewport height, so a 200px map needs a finer SSE than the main globe
+    // (SSE 2) to resolve comparable imagery detail - SSE 1 doubles the
+    // effective tile detail, and native-DPR rendering kills the blur on
+    // HiDPI phones. A handful of tiles at this size, so the cost is tiny.
+    miniViewer.scene.globe.maximumScreenSpaceError = 1;
+    miniViewer.scene.globe.tileCacheSize = 400;
+    try {
+      // Full device-pixel rendering (no browser-recommended downscale) —
+      // this alone un-blurs the map on HiDPI phones.
+      miniViewer.useBrowserRecommendedResolution = false;
+    } catch (e) { /* older Cesium */ }
     try {
       miniViewer.scene.postProcessStages.fxaa.enabled = false;
     } catch (e) { /* older Cesium */ }

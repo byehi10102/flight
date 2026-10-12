@@ -789,6 +789,20 @@ function exitSpawnPicking() {
   mobileMode.unlock();
   // Leaving the picker from a multiplayer room tears the party down.
   mp?.leaveParty();
+  // If a preparing-flight phase is mid-warm-up (its interval parks the main
+  // camera at the spawn pose behind the opaque screen), stop it now and put
+  // the picker view back so this exit path stays clean.
+  if (preparingActive) {
+    clearInterval(preparingTimer);
+    preparingTimer = null;
+    preparingActive = false;
+    try {
+      if (preparingSavedView) viewer.camera.setView(preparingSavedView);
+    } catch (e) { /* best-effort */ }
+    preparingSavedView = null;
+    if (preparingFlight) preparingFlight.classList.add("hidden");
+    try { preparingFlightVideo?.pause?.(); } catch (e) { /* cosmetic */ }
+  }
   stopAllFlyingSounds(0.3);
   try {
     viewer.camera.cancelFlight();
@@ -1305,14 +1319,24 @@ function getSpawnPinImage() {
 }
 
 // ── Preparing-flight phase ─────────────────────────────────────────────────────
-// Replaces the old blind 4-second wait with a real-progress moment: the
-// Blender-rendered loop plays full-screen while the destination's tile queue
-// drains (the picker camera is already looking at the tapped point, so that
-// queue IS the destination load). Holds at 95% through a ~3s minimum so the
-// moment never flashes by, hard-caps at ~12s so a stalled network can never
-// trap the player, then hands off to the unchanged camera-dive transition.
+// The Blender fly-through plays full-screen (opaque) while the SPAWN VIEW is
+// actually loaded: the main camera is parked at the destination's final pose
+// so the globe streams exactly the tiles the spawned view needs (the DEM grid
+// seeded in confirmSpawn never shows up in the globe's queue on its own), and
+// the minimap is created and warmed at the destination so it is fully
+// rendered by spawn. The bar tracks that real queue; "done" requires the
+// queue to STAY empty for ~1.2s (LOD refinement idles between passes — a
+// single empty tick let the dive start with tiles still incoming). Min ~3s
+// so the moment never flashes by; hard cap so a stalled network can never
+// trap the player; then the picker view is restored and the unchanged
+// camera-dive transition flies in.
 const PREPARING_MIN_MS = 3000;
 const PREPARING_MAX_MS = 15000;
+const PREPARING_DRAIN_MS = 1200;   // queue must stay empty this long
+const PREPARING_GRACE_MS = 1500;   // requests need time to even register
+
+let preparingSavedView = null;
+let preparingDrainedAt = 0;
 
 function runPreparingFlight(onReady) {
   const start = performance.now();
@@ -1320,6 +1344,38 @@ function runPreparingFlight(onReady) {
   lastPreparingQueue = 0;
   preparingActive = true;
   preparingBarShown.reset();
+  preparingDrainedAt = 0;
+
+  // Warm exactly what the spawned view needs, behind the opaque screen:
+  // park the MAIN camera at the destination's final pose. The dive flies
+  // from the picker view, so save it and restore it at the end.
+  try {
+    preparingSavedView = {
+      destination: viewer.camera.position.clone(),
+      orientation: {
+        heading: viewer.camera.heading,
+        pitch: viewer.camera.pitch,
+        roll: viewer.camera.roll,
+      },
+    };
+    viewer.camera.setView({
+      destination: Cesium.Cartesian3.fromDegrees(state.lon, state.lat, state.alt),
+      orientation: {
+        heading: Cesium.Math.toRadians(state.heading || 0),
+        pitch: Cesium.Math.toRadians(state.pitch || 0),
+        roll: 0,
+      },
+    });
+    viewer.scene.requestRender();
+  } catch (e) { /* warming is best-effort */ }
+
+  // The minimap viewer exists EARLY and renders at the destination each
+  // tick, so its own tile stream (separate viewer = separate cache) is
+  // finished by spawn — the map is already the place you're flying over.
+  if (!getMiniViewer()) {
+    try { initMiniViewer("minimapCesium"); } catch (e) { /* cosmetic */ }
+  }
+
   if (preparingFlight) preparingFlight.classList.remove("hidden");
   try { preparingFlightVideo?.play?.().catch?.(() => {}); } catch (e) { /* cosmetic */ }
   if (preparingBarFill) preparingBarFill.style.width = "0%";
@@ -1327,14 +1383,44 @@ function runPreparingFlight(onReady) {
 
   clearInterval(preparingTimer);
   preparingTimer = setInterval(() => {
+    const elapsed = performance.now() - start;
     const ratio = preparingQueuePeak > 0 ? 1 - lastPreparingQueue / preparingQueuePeak : 0;
-    // queueEmpty: no tile queue ever grew for the destination (the picker
-    // camera already streamed it) — the envelope then runs on the window
-    // floor so the bar still climbs honestly instead of sitting dead.
-    const queueEmpty = preparingQueuePeak === 0 || lastPreparingQueue === 0;
+    // Warm the minimap at the pose the flight loop will use (same zoom
+    // math as the animate() loop, at the spawn point). Renders here even
+    // though the HUD is hidden — its tiles only stream when it renders.
+    try {
+      const mv = getMiniViewer();
+      if (mv) {
+        const rangeKm = (state.minimapRange || 1000) / 1000;
+        const zoomAlt = rangeKm * 1500 + (state.speed || 500) * (rangeKm * 2);
+        mv.camera.setView({
+          destination: Cesium.Cartesian3.fromDegrees(state.lon, state.lat, zoomAlt),
+          orientation: {
+            heading: Cesium.Math.toRadians(0),
+            pitch: Cesium.Math.toRadians(-90),
+            roll: 0,
+          },
+        });
+        mv.render();
+      }
+    } catch (e) { /* the minimap is cosmetic */ }
+    // Sustained drain: an empty queue only counts once it has STAYED empty
+    // (refinement idles the queue between LOD passes) and after the grace
+    // window (requests need a moment to register in the queue at all).
+    const queueIdle = lastPreparingQueue === 0
+      && elapsed > PREPARING_GRACE_MS
+      && !!viewer.scene.globe.tilesLoaded;
+    if (queueIdle) {
+      if (!preparingDrainedAt) preparingDrainedAt = performance.now();
+    } else {
+      preparingDrainedAt = 0;
+    }
+    const drained = preparingDrainedAt !== 0
+      && performance.now() - preparingDrainedAt >= PREPARING_DRAIN_MS;
+    const queueEmpty = drained;
     const pct = Math.round(
       100 * preparingBarShown.update(
-        preparingFlightProgress(ratio, performance.now() - start, PREPARING_MIN_MS, PREPARING_MAX_MS, queueEmpty),
+        preparingFlightProgress(ratio, elapsed, PREPARING_MIN_MS, PREPARING_MAX_MS, queueEmpty),
       ),
     );
     if (preparingBarFill) preparingBarFill.style.width = `${pct}%`;
@@ -1343,6 +1429,12 @@ function runPreparingFlight(onReady) {
       clearInterval(preparingTimer);
       preparingTimer = null;
       preparingActive = false;
+      // Restore the picker view so the dive flies from it, exactly as
+      // before (the whole warm-up happened behind the opaque screen).
+      try {
+        if (preparingSavedView) viewer.camera.setView(preparingSavedView);
+      } catch (e) { /* best-effort */ }
+      preparingSavedView = null;
       if (preparingFlight) preparingFlight.classList.add("hidden");
       try { preparingFlightVideo?.pause?.(); } catch (e) { /* cosmetic */ }
       onReady();

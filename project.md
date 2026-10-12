@@ -1330,3 +1330,36 @@ shrank 150 -> 130 px), the right stick 67% -> 72% (clear of the aircraft
 plate, which shrank to scale 0.5). The boost trigger moved to 41%, the
 fire trigger to 60%. The centre column (bars, gun heat, status) keeps its
 clearances.
+
+## 20. Recent changes (realistic minimap; spawn fully loaded + map warm)
+
+### The minimap now looks like what you are flying over
+
+Two causes made the map read as fake: it rendered at browser-downscaled
+resolution (blurry mush on HiDPI phones) with default tile detail (a 200px
+canvas satisfies coarse tiles, so the imagery was far blurrier than the
+main view), and it was only created AFTER the preparing phase with its own
+separate tile cache that started streaming from zero at spawn. Fixes, in
+src/core/viewer.js + src/main.js: the mini viewer renders at full device
+resolution (useBrowserRecommendedResolution = false), doubles tile detail
+(maximumScreenSpaceError 1) with a 400-tile cache, and - the big one - is
+created EARLY in the preparing phase and rendered at the spawn point every
+tick (same center/zoom math as the flight loop), so its tiles finish
+streaming before the dive. Desktop and mobile both get this (shared code).
+
+### The spawn view is loaded BEFORE the dive, not after it
+
+The preparing bar tracked the globe tile queue - but the huge DEM grid
+seeded in confirmSpawn goes through sampleTerrainMostDetailed, which never
+enters that queue, so the bar could read "done" while the destination
+view had not even started loading (worst on a fast picker session: queue
+empty from the first tick, 3 s floor, dive, THEN the spawned view's LOD
+pyramid streams - "tiles loading right when I spawn"). Now, behind the
+opaque preparing screen, the MAIN camera is parked at the destination's
+final pose so the globe streams exactly the tiles the spawned view needs;
+the bar tracks that real queue. "Done" now also requires the queue to STAY
+empty for 1.2 s (LOD refinement idles the queue between passes - a single
+empty tick used to end the phase mid-refinement) after a 1.5 s grace for
+requests to register. The picker view is saved and restored before the
+dive, so the fly-in is unchanged; Escape during the preparing phase stops
+the warm-up cleanly and restores the picker view.
