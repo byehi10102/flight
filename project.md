@@ -1411,3 +1411,33 @@ film plays straight through its next natural loop boundary into the tail
 start - the parked camera keeps warming tiles through the whole outro. Both
 films are now driven by one shared makeFilmController() (JS-owned loop,
 boundary handover, stall safety net, hard-cancel on Escape).
+
+## 23. Recent changes (original fly-through restored + zoom tail; boot loads a lot more Anaheim)
+
+### The second film is the ORIGINAL again - with a zoom-away ending
+
+Last round replaced the spawn film with a new bake that read as a twin of
+the boot film. The ORIGINAL diagonal fly-through (the old
+public/loading-scene.mp4: banked jet, elongated cloud streaks, 60 frames
+@ 30fps, 2 s seamless loop, motion blur) is restored from git history and
+now carries the spawn moment again - with a zoom-away ending ADDED, not
+re-made: a 60-frame tail (build_dive_tail.py: same banked pose, streak
+clouds, dark teal palette matched to the original frame stats, motion
+blur) in which the jet recedes to a dot, joined with ffmpeg xfade so the
+first 2.00 s of the file is the ORIGINAL untouched loop (verified ~50 dB
+against the source - re-encode noise only). The controller wraps at 2.0 s
+while loading; at 100% the film plays through the 0.4 s crossfade into
+the tail - the blend IS the loop-to-outro bridge. The film controller is
+now per-film parameterized (loopS/tailS): boot 6 s + 2 s, dive 2 s +
+1.7 s. The original poster (loading-scene.png) is restored as
+spawn-dive.png.
+
+### Boot loads a LOT more Anaheim before the picker opens
+
+"Still says loading when I load in": the picker was opening with tiles
+still streaming. The boot preload now runs FOUR imagery passes (160 km,
+35 km, 8 km and a new 3 km close pass - the sharpest level the picker's
+deepest zoom uses), the DEM grid widened to +/-3.5 deg lon x +/-2.0 deg
+(~700 x 440 km, 15x11), and the stage only completes after the tile queue
+DRAINS (bounded 6 s) - same honesty as the spawn phase. Bar sub-steps are
+now fifths (four passes + seed/drain). Boot bound 30 -> 35 s.

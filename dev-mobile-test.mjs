@@ -545,9 +545,9 @@ const browserMob = await puppeteer.launch(LAUNCH);
         duration: v && Number.isFinite(v.duration) ? v.duration : null,
       };
     });
-    check("spawn-dive film is the diagonal fly-through with a JS-owned loop + tail",
+    check("spawn-dive film is the original fly-through with a JS-owned loop + zoom tail",
       /spawn-dive\.mp4/.test(dive.src) && dive.jsOwnsLoop
-        && (dive.duration === null || dive.duration >= 7.9),
+        && (dive.duration === null || dive.duration >= 3.5),
       JSON.stringify(dive));
   }
 

@@ -198,14 +198,14 @@ let preparingTimer = null;
 // simply continues (no seek) into the tail — burners flare, the jet zooms
 // off into the distance, and the page fades into the menu. Continuing from
 // the boundary is what makes loop -> outro feel like one continuous shot.
-// Both loading films are [seamless 6 s loop][2 s zoom-off tail]: the plane
-// cruises while the loop repeats AS LONG as the load takes; at 100% the
-// outro is QUEUED, and at the loop's NEXT natural boundary the film simply
-// continues (no seek) into the tail — burners flare, the jet zooms off into
-// the distance, and the page fades. Continuing from the boundary is what
-// makes loop -> outro feel like one continuous shot.
-const FILM_LOOP_S = 6.0;
-const FILM_TAIL_S = 2.0;
+// Both loading films are [seamless loop][zoom-off tail]: the plane cruises
+// while the loop repeats AS LONG as the load takes; at 100% the outro is
+// QUEUED, and at the loop's NEXT natural boundary the film simply continues
+// (no seek) into the tail — burners flare, the jet zooms off into the
+// distance, and the page fades. Continuing from the boundary is what
+// makes loop -> outro feel like one continuous shot. Loop/tail lengths are
+// per-film (the boot film is 6 s + 2 s; the restored original fly-through is
+// a 2 s loop).
 
 /**
  * JS-owned film loop + zoom-off outro for one <video>. tick() runs from the
@@ -216,13 +216,14 @@ const FILM_TAIL_S = 2.0;
  * also fires from the safety net if the film stalls and never reaches the
  * boundary, so a flow can never hang on the film.
  */
-function makeFilmController(video, { shouldWrap, onOutro }) {
+function makeFilmController(video, { loopS, tailS, shouldWrap, onOutro }) {
   let tailActive = false;
   let pending = false;
+  const LOOP_S = loopS;
   const hasTail = () => {
     try {
       return !!video && Number.isFinite(video.duration)
-        && video.duration >= FILM_LOOP_S + FILM_TAIL_S - 0.05;
+        && video.duration >= LOOP_S + tailS - 0.05;
     } catch (e) { return false; }
   };
   const isPlaying = () => {
@@ -246,7 +247,7 @@ function makeFilmController(video, { shouldWrap, onOutro }) {
     },
     tick() {
       if (!video || tailActive) return;
-      if (video.currentTime < FILM_LOOP_S) return;
+      if (video.currentTime < LOOP_S) return;
       if (pending) {
         pending = false;
         tailActive = true;
@@ -262,15 +263,18 @@ function makeFilmController(video, { shouldWrap, onOutro }) {
         return;
       }
       if (shouldWrap()) {
-        try { video.currentTime -= FILM_LOOP_S; } catch (e) { /* seeking */ }
+        try { video.currentTime -= LOOP_S; } catch (e) { /* seeking */ }
       }
     },
   };
 }
 
-// Boot film: wraps until the page is done; outro fades into the menu.
+// Boot film: [6 s loop][2 s tail]. Wraps until the page is done; outro
+// fades into the menu.
 const bootFilm = document.querySelector("#loadingIndicator .loading-bg-video");
 const bootFilmCtl = makeFilmController(bootFilm, {
+  loopS: 6.0,
+  tailS: 2.0,
   shouldWrap: () => !loadingPageHidden,
   onOutro: (played) => {
     // Let the zoom read for ~0.9 s of the tail, then fade over ~1.1 s.
@@ -285,21 +289,25 @@ const bootFilmCtl = makeFilmController(bootFilm, {
   },
 });
 
-// Spawn-dive film: wraps while the preparing video plays; its outro fades
-// the preparing screen and then runs the phase's bound completion (restore
+// Spawn-dive film: the ORIGINAL diagonal fly-through (2 s seamless loop,
+// restored from git) with a zoom-away tail joined on — [2 s loop][~1.7 s
+// tail]. Wraps while the preparing video plays; its outro fades the
+// preparing screen and then runs the phase's bound completion (restore
 // picker view -> dive). runPreparingFlight binds preparingFinish each run.
 let preparingFinish = null;
 const diveFilm = document.getElementById("preparingFlightVideo");
 const diveFilmCtl = makeFilmController(diveFilm, {
+  loopS: 2.0,
+  tailS: 1.6,
   shouldWrap: () => true,
   onOutro: (played) => {
-    setTimeout(() => preparingFlight?.classList.add("fading"), played ? 900 : 0);
+    setTimeout(() => preparingFlight?.classList.add("fading"), played ? 500 : 0);
     setTimeout(() => {
       try { diveFilm?.pause(); } catch (e) { /* cosmetic */ }
       const fn = preparingFinish;
       preparingFinish = null;
       if (fn) fn();
-    }, played ? 2000 : 200);
+    }, played ? 1400 : 200);
   },
 });
 
@@ -468,7 +476,7 @@ async function preloadTerrain() {
     // Not a timer cut: generous bound so the big Anaheim preload (passes +
     // DEM grid + queue drain) genuinely completes on slow connections. The
     // boot film loops as long as this takes.
-    await withTimeout(preloadSpawnRegion(), 30000);
+    await withTimeout(preloadSpawnRegion(), 35000);
   } catch (e) { /* bounded above */ }
   loadingStatus.area = true;
   updateLoadingUI();
@@ -485,14 +493,14 @@ async function preloadSpawnRegion() {
   };
   try {
     // Pass 1: wide 160 km top-down look warms imagery tiles for a ~300 km
-    // area around the default region. Each pass releases a real quarter of
+    // area around the default region. Each step releases a real fifth of
     // the area slice on the boot bar.
     viewer.camera.setView({
       destination: Cesium.Cartesian3.fromDegrees(state.lon, state.lat, 160000),
       orientation: { heading: 0, pitch: Cesium.Math.toRadians(-90), roll: 0 },
     });
     await waitForGlobeTiles(3000);
-    loadingSub.area = 0.25; updateLoadingUI();
+    loadingSub.area = 0.2; updateLoadingUI();
     // Pass 2: closer 35 km pass - city-level detail imagery + terrain the
     // picker's first zoom would otherwise stream on demand.
     viewer.camera.setView({
@@ -500,7 +508,7 @@ async function preloadSpawnRegion() {
       orientation: { heading: 0, pitch: Cesium.Math.toRadians(-90), roll: 0 },
     });
     await waitForGlobeTiles(3000);
-    loadingSub.area = 0.5; updateLoadingUI();
+    loadingSub.area = 0.4; updateLoadingUI();
     // Pass 3: low 8 km pass - street-level imagery around the default spawn
     // point, so the picker's opening view is already sharp.
     viewer.camera.setView({
@@ -508,16 +516,25 @@ async function preloadSpawnRegion() {
       orientation: { heading: 0, pitch: Cesium.Math.toRadians(-90), roll: 0 },
     });
     await waitForGlobeTiles(2500);
-    loadingSub.area = 0.75; updateLoadingUI();
+    loadingSub.area = 0.6; updateLoadingUI();
+    // Pass 4: 3 km pass - the sharpest imagery the picker's closest zoom
+    // uses, so even a deep zoom-in over Anaheim starts warm.
+    viewer.camera.setView({
+      destination: Cesium.Cartesian3.fromDegrees(state.lon, state.lat, 3000),
+      orientation: { heading: 0, pitch: Cesium.Math.toRadians(-90), roll: 0 },
+    });
+    await waitForGlobeTiles(2500);
+    loadingSub.area = 0.8; updateLoadingUI();
   } catch (e) { /* best effort */ }
-  // 3D terrain across the region: ~ +/-2.5 deg lon x +/-1.5 deg lat grid
-  // (wider than before - more of the spawn map warm before the picker opens).
+  // 3D terrain across the region: ~ +/-3.5 deg lon x +/-2.0 deg lat grid
+  // (a LOT of Anaheim: ~700 x 440 km of DEM refinement) so the picker opens
+  // with real elevation everywhere you can pan.
   const pts = [];
-  for (let i = 0; i < 13; i++) {
-    for (let j = 0; j < 9; j++) {
+  for (let i = 0; i < 15; i++) {
+    for (let j = 0; j < 11; j++) {
       pts.push([
-        state.lat + (j / 8 - 0.5) * 3.0,
-        state.lon + (i / 12 - 0.5) * 5.0,
+        state.lat + (j / 10 - 0.5) * 4.0,
+        state.lon + (i / 14 - 0.5) * 7.0,
       ]);
     }
   }
