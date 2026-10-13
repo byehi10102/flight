@@ -209,6 +209,14 @@ const bootFilmTail = document.getElementById("bootFilmTail");
 let bootOutroPending = false;
 let bootOutroStarted = false;
 
+// Boot loading page state: hidden = the reveal chain has STARTED (100%,
+// outro queued); gone = the page element is display:none — only then does
+// the Cesium render loop return to full rate. Between the two, the zoom-off
+// tail + fade are playing and the globe must stay THROTTLED: switching to
+// full-rate rendering exactly at 100% is what made the whole app choppy
+// right at the end of the first film.
+let bootPageGone = false;
+
 function startBootOutro() {
   if (bootOutroStarted) return;
   bootOutroStarted = true;
@@ -232,33 +240,51 @@ function startBootOutro() {
       loadingIndicator.classList.remove("fading", "picker");
     }
     try { bootFilmLoop?.pause(); bootFilmTail?.pause(); } catch (e) { /* cosmetic */ }
+    bootPageGone = true;
   }, played ? 2000 : 1100);
 }
 
 // ── The spawn-dive DASH ────────────────────────────────────────────────────
 // The ORIGINAL fly-through loops natively (public/spawn-dive.mp4 — the pure
-// 2 s loop). At 100% the SAME frame surges toward the corner the plane is
-// flying at (.film-dash, GPU-composited CSS) and the plane exits the
-// screen — the scene never changes, the airplane just dashes off — then
-// the screen fades into the game and the phase's bound completion runs.
+// 2 s loop). At 100% the outro is queued, and at the loop's next boundary
+// the preloaded DASH tail (public/spawn-dive-tail.mp4 — a rendered
+// continuation where ONLY the plane accelerates and exits toward the
+// lower-right corner; the clouds hold still) swaps in — the same
+// single-frame continuation as the boot film. Then the screen fades into
+// the game and the phase's bound completion runs.
 let preparingFinish = null;
 let diveDashStarted = false;
+let diveOutroPending = false;
+const DIVE_FILM_LOOP_S = 2.0;
 const diveFilm = document.getElementById("preparingFlightVideo");
+const diveFilmTail = document.getElementById("diveFilmTail");
 
 function startDiveDash() {
   if (diveDashStarted) return;
   diveDashStarted = true;
-  try { diveFilm?.classList.add("film-dash"); } catch (e) { /* cosmetic */ }
-  setTimeout(() => preparingFlight?.classList.add("fading"), 550);
+  let played = false;
+  try {
+    if (diveFilm && !diveFilm.paused) {
+      diveFilm.pause();
+      if (diveFilmTail) {
+        diveFilmTail.classList.remove("hidden");
+        const p = diveFilmTail.play();
+        if (p && p.catch) p.catch(() => {});
+        played = true;
+      }
+    }
+  } catch (e) { /* plain fade */ }
+  setTimeout(() => preparingFlight?.classList.add("fading"), played ? 450 : 0);
   setTimeout(() => {
     try {
       diveFilm?.pause();
-      diveFilm?.classList.remove("film-dash");
+      diveFilmTail?.pause();
+      diveFilmTail?.classList.add("hidden");
     } catch (e) { /* cosmetic */ }
     const fn = preparingFinish;
     preparingFinish = null;
     if (fn) fn();
-  }, 1300);
+  }, played ? 1250 : 200);
 }
 
 // Boot safety net (s): a hung provider must never trap the player forever.
@@ -484,15 +510,16 @@ async function preloadSpawnRegion() {
     await waitForGlobeTiles(2500);
     loadingSub.area = 0.8; updateLoadingUI();
   } catch (e) { /* best effort */ }
-  // 3D terrain across the region: ~ +/-3.5 deg lon x +/-2.0 deg lat grid
-  // (a LOT of Anaheim: ~700 x 440 km of DEM refinement) so the picker opens
-  // with real elevation everywhere you can pan.
+  // 3D terrain across the region: ~100 miles in EACH direction of the spawn
+  // map (~160 km): +/-1.45 deg lat x +/-1.75 deg lon, 9x9. Deliberately
+  // right-sized: the earlier much-wider grid hammered the main thread
+  // during the film and the video stuttered.
   const pts = [];
-  for (let i = 0; i < 15; i++) {
-    for (let j = 0; j < 11; j++) {
+  for (let i = 0; i < 9; i++) {
+    for (let j = 0; j < 9; j++) {
       pts.push([
-        state.lat + (j / 10 - 0.5) * 4.0,
-        state.lon + (i / 14 - 0.5) * 7.0,
+        state.lat + (j / 8 - 0.5) * 2.9,
+        state.lon + (i / 8 - 0.5) * 3.5,
       ]);
     }
   }
@@ -825,7 +852,14 @@ function exitSpawnPicking() {
     preparingActive = false;
     preparingFinish = null;
     diveDashStarted = false;
+    diveOutroPending = false;
     endDetailLod();
+    try {
+      if (diveFilmTail) {
+        diveFilmTail.classList.add("hidden");
+        diveFilmTail.pause();
+      }
+    } catch (e) { /* cosmetic */ }
     try {
       if (preparingSavedView) viewer.camera.setView(preparingSavedView);
     } catch (e) { /* best-effort */ }
@@ -1409,6 +1443,16 @@ function runPreparingFlight(onReady) {
   preparingBarShown.reset();
   preparingDrainedAt = 0;
   diveDashStarted = false;
+  diveOutroPending = false;
+  // Start fetching the DASH tail now (its element is preload="none", so it
+  // never touches boot); the phase gives it plenty of time to buffer
+  // before the bar reaches 100%.
+  try {
+    if (diveFilmTail) {
+      diveFilmTail.classList.add("hidden");
+      diveFilmTail.load();
+    }
+  } catch (e) { /* cosmetic */ }
 
   // Warm exactly what the spawned view needs, behind the opaque screen:
   // park the MAIN camera at the destination's final pose. The dive flies
@@ -1518,8 +1562,16 @@ function runPreparingFlight(onReady) {
         try { diveFilm?.pause(); } catch (e) { /* cosmetic */ }
         onReady();
       };
-      diveDashStarted = false;
-      startDiveDash();
+      diveOutroPending = true;
+      // Safety net: a stalled loop film that never reaches its boundary
+      // must not hang the phase — run the dash handler anyway (it degrades
+      // to a plain fade when the films aren't playing).
+      setTimeout(() => {
+        if (diveOutroPending && !diveDashStarted) {
+          diveOutroPending = false;
+          startDiveDash();
+        }
+      }, 8000);
     }
   }, 100);
 }
@@ -2174,6 +2226,13 @@ function animate() {
     bootOutroPending = false;
     startBootOutro();
   }
+  // Dive film: same observation — the dash tail swaps in at the loop's
+  // boundary once the bar has reached 100%.
+  if (diveOutroPending && !diveDashStarted && diveFilm
+      && diveFilm.currentTime >= DIVE_FILM_LOOP_S) {
+    diveOutroPending = false;
+    startDiveDash();
+  }
 
   if (currentState === States.FLYING || currentState === States.PAUSED || currentState === States.TRANSITIONING) {
     if (currentState === States.FLYING) {
@@ -2302,13 +2361,13 @@ function animate() {
   }
 
   // Cesium render is driven from HERE (its internal loop is disabled - it
-  // duplicated every frame). While the boot page is up the globe is hidden
-  // behind the video, so throttle to ~10 renders/s: tile streaming happens
-  // inside render() and needs only a few passes a second, while the video
-  // and the progress bar are pure DOM and stay smooth. Full-rate rendering
-  // resumes with the menu.
-  if (loadingPageHidden || now - lastThrottledRender > 100) {
-    if (!loadingPageHidden) lastThrottledRender = now;
+  // duplicated every frame). While the boot page (or its outro) is up the
+  // globe is THROTTLED hard (~6 renders/s: tile streaming needs only a few
+  // passes a second, and the extra headroom is what lets the films decode
+  // smoothly). Full rate resumes only once the page is fully gone - kicking
+  // to full rate at 100% made the whole app choppy right at the tail.
+  if (bootPageGone || now - lastThrottledRender > 150) {
+    if (!bootPageGone) lastThrottledRender = now;
     try { viewer.render(); } catch (e) { /* one bad frame never kills the loop */ }
   }
 }

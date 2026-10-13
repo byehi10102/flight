@@ -537,19 +537,24 @@ const browserMob = await puppeteer.launch(LAUNCH);
   check("touch overlay VISIBLE once flying (landscape)", flying.vis);
 
   // The spawn-dive film: the PURE original fly-through with a native loop
-  // (no JS seeking = no stutter); at 100% a CSS dash (.film-dash) surges it.
+  // (no JS seeking = no stutter); at 100% a rendered DASH tail element
+  // (only the plane moves, exits toward the corner) swaps in at the boundary.
   {
     const dive = await page.evaluate(() => {
       const v = document.getElementById("preparingFlightVideo");
+      const tail = document.getElementById("diveFilmTail");
       return {
         src: v?.querySelector("source")?.src || v?.src || "",
         nativeLoop: v ? v.loop : false,
         duration: v && Number.isFinite(v.duration) ? v.duration : null,
+        tailSrc: tail?.querySelector("source")?.src || tail?.src || "",
+        tailHidden: tail ? tail.classList.contains("hidden") : false,
       };
     });
-    check("spawn-dive film is the original fly-through, native loop (dash is CSS)",
+    check("spawn-dive film is the original fly-through, native loop + dash tail element",
       /spawn-dive\.mp4/.test(dive.src) && dive.nativeLoop
-        && (dive.duration === null || Math.abs(dive.duration - 2.0) < 0.3),
+        && (dive.duration === null || Math.abs(dive.duration - 2.0) < 0.3)
+        && /spawn-dive-tail\.mp4/.test(dive.tailSrc) && dive.tailHidden,
       JSON.stringify(dive));
   }
 

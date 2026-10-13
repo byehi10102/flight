@@ -58,6 +58,12 @@
       <video id="preparingFlightVideo" class="loading-bg-video" muted loop playsinline preload="none">
         <source src="/spawn-dive.mp4" type="video/mp4" />
       </video>
+      <!-- The DASH: a separately rendered tail (only the plane moves) that
+           swaps in at 100%, exactly at the loop boundary — the same
+           single-frame continuation as the boot film's zoom-off. -->
+      <video id="diveFilmTail" class="loading-bg-video hidden" muted playsinline preload="none">
+        <source src="/spawn-dive-tail.mp4" type="video/mp4" />
+      </video>
       <div class="loading-content">
         <div class="loading-title">PREPARING FLIGHT</div>
         <div class="loading-bar-track">

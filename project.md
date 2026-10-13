@@ -1491,3 +1491,31 @@ boot-flight.mp4 (frames 1-144, native loop) and boot-flight-tail.mp4
 OBSERVES the loop boundary (no seeking) and swaps the tail element in
 exactly there - a single-frame continuation of the same bake, so the
 zoom-off still plays as one continuous shot.
+
+## 26. Recent changes (rendered DASH tail; boot chop at 100% fixed)
+
+### The dash is a REAL rendered animation now - only the plane moves
+
+The CSS surge moved the whole frame - "looks like you just moved the
+video." Scrapped. The dash is now a separately rendered Blender tail
+(public/spawn-dive-tail.mp4, 36 frames @ 30fps, 1.2 s): the same matched
+dark-teal streak scene, and ONLY the plane accelerates - held 15-deg
+nose-down pose, verified exit track: starts right-of-centre, crosses the
+frame, and is out past the right edge by frame 24 heading lower-right
+(NDC y 0.45 -> 0.00), burners flaring; the cloud background holds still.
+It plays ONLY when the bar reaches 100%: the outro is queued then, and at
+the loop's next observed boundary the preloaded tail element swaps in -
+the same single-frame-continuation mechanism as the boot film, no seek,
+no crossfade. Then the screen fades into the game.
+
+### The app got choppy right at the first film's 100%
+
+Two causes: (1) the render loop switched to FULL-rate Cesium rendering
+exactly when the outro started (loadingPageHidden flipped at 100%), so
+the tail video + fade + full-rate globe all fought - the throttle now
+holds (~6 renders/s) until the loading page is fully display:none
+(bootPageGone), resuming full rate only for the menu; (2) the hugely
+widened boot DEM grid (700x440 km, 165 samples) hammered the main thread
+during the film. Right-sized to the request: ~100 miles in EACH
+direction (+/-1.45 deg lat x +/-1.75 deg lon, 9x9) - the four imagery
+passes and queue-drain stay.

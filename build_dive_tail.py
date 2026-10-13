@@ -20,7 +20,7 @@ _args = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
 REPO = _args[0] if _args else "."
 GLB = os.path.join(REPO, "public", "models", "f-15.glb")
 OUT = os.path.join(REPO, "render-dive-tail")
-FRAMES = 60
+FRAMES = 36
 FPS = 30
 RES_X, RES_Y = 1920, 1080
 JET_LEN = 19.43  # real F-15C length, metres
@@ -159,10 +159,10 @@ for li, (z, S, N, radius, xoff, sq) in enumerate(lanes):
     proto = make_puff_object(f"Puff{li}", 100 + li, 9, radius, sq)
     proto.data.materials.append(cloud_mat)
     span = N * S
-    # The ORIGINAL's streaks drift sub-pixel per frame (measured: f0 vs f30
-    # SAD 4.6, no measurable translation) - a gentle stream, not a rush.
-    # The camera here is ~480 m out, so a few m/frame reads as slow drift.
-    vpf = 2.0
+    # The ORIGINAL's streaks drift sub-pixel per frame (measured). During
+    # the dash the BACKGROUND must hold still - only the plane moves - so
+    # the drift stays near-frozen.
+    vpf = 0.5
     for i in range(N):
         ob = proto if i == 0 else proto.copy()
         ob.name = f"Cloud_{li}_{i}"
@@ -254,15 +254,11 @@ TOTAL_FRAMES = FRAMES
 def cyc(freq, phase, amp):
     return f"{amp!r}*sin(2*pi*{freq!r}*(frame-1)/{FRAMES}+{phase!r})"
 
-# Diagonal-through-the-clouds pose: the jet holds a visible bank, the camera
-# sits LOW - among the near cloud lane - looking UP at it, so the airframe
-# crosses the frame diagonally against the deck and sky.
+# The DASH pose: the jet flies toward the screen's lower-right (the user's
+# description of the original) - a held slight nose-DOWN pitch, no roll
+# sine. The dash itself moves the PLANE across the frame; the clouds stay.
 rig.rotation_mode = "XYZ"
-# Held 25-deg bank (the diagonal read) baked into the static Z rotation; the
-# orientation flip already lives there too.
-rig.rotation_euler[2] += math.radians(25)
-# Gentle life only — no rocking: tiny pitch/bob, one slow cycle each; the
-# bank is a held attitude, not a sine.
+rig.rotation_euler[0] += math.radians(15)  # nose down-right (dash direction)
 for idx, freq, phase, amp in ((0, 1, 1.3, math.radians(1.0)),):
     base = rig.rotation_euler[idx]
     drv = rig.driver_add("rotation_euler", idx)
@@ -272,27 +268,33 @@ for idx, freq, phase, amp in ((0, 1, 1.3, math.radians(1.0)),):
 zdrv = rig.driver_add("location", 2)
 dz = zdrv.driver
 dz.type = "SCRIPTED"
-dz.expression = f"{rig.location.z!r} + " + cyc(1, 0.7, 0.15)
+# Bob + the DASH descent: the exit angles down toward the corner.
+dz.expression = (
+    f"{rig.location.z!r} + " + cyc(1, 0.7, 0.15)
+    + f" - 95*(((frame-1)/{FRAMES})**1.8)"
+)
 # The zoom-away: the jet accelerates along its nose (-Y) from frame 1,
 # receding to a dot. (This film is joined onto the original loop's end.)
 ydrv = rig.driver_add("location", 1)
 dy = ydrv.driver
 dy.type = "SCRIPTED"
+# The DASH: the plane ALONE accelerates along its nose and exits the frame
+# toward the lower-right corner; the cloud background stays put.
 dy.expression = (
-    f"{rig.location.y!r} - 1600*(((frame-1)/{FRAMES})**1.5)"
+    f"{rig.location.y!r} - 450*(((frame-1)/{FRAMES})**1.8)"
 )
 
 cam_data = bpy.data.cameras.new("Cam")
 cam_data.lens = 35
 cam = bpy.data.objects.new("Cam", cam_data)
-# Matched to the ORIGINAL film's MEASURED composition: the jet is SMALL
-# (~80 px silhouette -> ~480 m away), sits right-of-centre, body axis at
-# ~-14 deg with the nose toward the UPPER-RIGHT. Camera behind-left and
-# slightly above: the nose projects up-right, and the zoom-off (along the
-# nose, -Y) reads as flying away up-right - the same "along its flight
-# path" exit as the boot film.
-cam.location = (-120, 460, 40)
-direction = mathutils.Vector((0, 0, 0)) - cam.location
+# DASH ACROSS THE FRAME: camera off the LEFT side of the flight path
+# (~330 m out, slightly below), so the nose projects screen-RIGHT and a
+# touch DOWN — a dash along the nose crosses the frame and exits through
+# the lower-right corner. Aiming slightly left of the jet parks it
+# right-of-centre like the original's measured composition. The jet is
+# small (~100 px), matching the original.
+cam.location = (-330, 40, -60)
+direction = mathutils.Vector((-25, 15, 0)) - cam.location
 cam.rotation_euler = direction.to_track_quat("-Z", "Y").to_euler()
 bpy.context.scene.collection.objects.link(cam)
 
@@ -392,7 +394,7 @@ sc.camera = cam
 # plus the NOSE-vs-TAIL projection (the zoom must fly toward the nose's
 # screen direction - upper-right, like the original's pose).
 import bpy_extras
-for f in (1, 20, 40, 60):
+for f in (1, 12, 24, 36):
     sc.frame_set(f)
     bpy.context.view_layer.update()
     lo5, hi5 = world_bounds(meshes)
@@ -415,7 +417,7 @@ nose = bpy_extras.object_utils.world_to_camera_view(
 tailp = bpy_extras.object_utils.world_to_camera_view(
     sc, cam, mathutils.Vector((0, hi4.y, 0)))
 print(f"nose NDC ({nose.x:.2f}, {nose.y:.2f}) vs tail ({tailp.x:.2f}, {tailp.y:.2f}) "
-      f"-> nose is {'UPPER-RIGHT' if nose.x > tailp.x and nose.y > tailp.y else 'wrong side'}")
+      f"-> nose is {'RIGHT-DOWN (dash dir)' if nose.x > tailp.x and nose.y < tailp.y else 'wrong side'}")
 
 bpy.ops.render.render(animation=True)
 print("RENDER DONE ->", OUT)
