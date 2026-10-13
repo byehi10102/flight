@@ -1441,3 +1441,26 @@ deepest zoom uses), the DEM grid widened to +/-3.5 deg lon x +/-2.0 deg
 (~700 x 440 km, 15x11), and the stage only completes after the tile queue
 DRAINS (bounded 6 s) - same honesty as the spawn phase. Bar sub-steps are
 now fifths (four passes + seed/drain). Boot bound 30 -> 35 s.
+
+## 24. Recent changes (dive tail re-shot to MEASURED original composition)
+
+The first tail read as "pretty bad": the jet filled the frame (the original
+jet is TINY - its static high-contrast pixels measure ~2642 px, a ~80 px
+silhouette), so the crossfade teleported the jet closer, and it vanished
+bottom-centre in the first half-second - not along its flight path.
+
+The tail is now matched to the ORIGINAL by measurement, not guesswork
+(dev-vid-motion.mjs + dev-vid-jet-axis.mjs, both committed): temporal
+differencing isolates the static jet (the streaks move, the jet holds its
+pose) and image moments give its screen geometry - centroid (1112, 551),
+body axis -14.4 deg, nose toward the UPPER-RIGHT. Frame-pair SAD search
+shows the streaks drift sub-pixel per frame. The re-shot tail: camera
+~480 m out behind-left (jet ~6 percent of frame width, like the
+original), nose projecting upper-right, streaks drifting gently, and the
+jet recedes 1600 m over the full 2 s toward its nose - center track
+(0.50, 0.49) -> (0.69, 0.62), shrinking to a ~20 px dot. Same dark-teal
+palette, motion blur, red burners. Joined as before: first 2.00 s of
+public/spawn-dive.mp4 is the ORIGINAL untouched loop (50.6 dB vs source);
+the 0.4 s xfade at the boundary is the outro bridge; the zoom only ever
+plays at 100% while the loop replays (and the real full-detail tile load
+takes its time) until then.

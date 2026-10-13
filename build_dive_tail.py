@@ -159,8 +159,10 @@ for li, (z, S, N, radius, xoff, sq) in enumerate(lanes):
     proto = make_puff_object(f"Puff{li}", 100 + li, 9, radius, sq)
     proto.data.materials.append(cloud_mat)
     span = N * S
-    vpf = 2 * span / FRAMES  # 2 lane round-trips per loop: periodic (2*N*S
-    #  is a whole number of spacings) AND fast enough to read as real flight
+    # The ORIGINAL's streaks drift sub-pixel per frame (measured: f0 vs f30
+    # SAD 4.6, no measurable translation) - a gentle stream, not a rush.
+    # The camera here is ~480 m out, so a few m/frame reads as slow drift.
+    vpf = 2.0
     for i in range(N):
         ob = proto if i == 0 else proto.copy()
         ob.name = f"Cloud_{li}_{i}"
@@ -277,17 +279,20 @@ ydrv = rig.driver_add("location", 1)
 dy = ydrv.driver
 dy.type = "SCRIPTED"
 dy.expression = (
-    f"{rig.location.y!r} - 700*(((frame-1)/{FRAMES})**1.7)"
+    f"{rig.location.y!r} - 1600*(((frame-1)/{FRAMES})**1.5)"
 )
 
 cam_data = bpy.data.cameras.new("Cam")
 cam_data.lens = 35
 cam = bpy.data.objects.new("Cam", cam_data)
-# Far enough back that the whole banked airframe fits with headroom, and a
-# mild up-angle: the jet stays fully in frame during the loop AND recedes
-# toward the frame centre in the tail (like the boot film's exit).
-cam.location = (7, 30, -8)
-direction = mathutils.Vector((0, 0, 0.5)) - cam.location
+# Matched to the ORIGINAL film's MEASURED composition: the jet is SMALL
+# (~80 px silhouette -> ~480 m away), sits right-of-centre, body axis at
+# ~-14 deg with the nose toward the UPPER-RIGHT. Camera behind-left and
+# slightly above: the nose projects up-right, and the zoom-off (along the
+# nose, -Y) reads as flying away up-right - the same "along its flight
+# path" exit as the boot film.
+cam.location = (-120, 460, 40)
+direction = mathutils.Vector((0, 0, 0)) - cam.location
 cam.rotation_euler = direction.to_track_quat("-Z", "Y").to_euler()
 bpy.context.scene.collection.objects.link(cam)
 
@@ -383,7 +388,9 @@ sc.render.image_settings.file_format = "PNG"
 sc.render.image_settings.color_mode = "RGB"
 sc.camera = cam
 
-# numeric framing check: jet projected into camera NDC at key frames
+# numeric framing check: jet projected into camera NDC at key frames,
+# plus the NOSE-vs-TAIL projection (the zoom must fly toward the nose's
+# screen direction - upper-right, like the original's pose).
 import bpy_extras
 for f in (1, 20, 40, 60):
     sc.frame_set(f)
@@ -400,6 +407,15 @@ for f in (1, 20, 40, 60):
     ys = [n[1] for n in ndc]
     print(f"frame {f}: jet NDC x [{min(xs):.2f}..{max(xs):.2f}] "
           f"y [{min(ys):.2f}..{max(ys):.2f}]")
+
+sc.frame_set(1)
+bpy.context.view_layer.update()
+nose = bpy_extras.object_utils.world_to_camera_view(
+    sc, cam, mathutils.Vector((0, -hi4.y, 0)))
+tailp = bpy_extras.object_utils.world_to_camera_view(
+    sc, cam, mathutils.Vector((0, hi4.y, 0)))
+print(f"nose NDC ({nose.x:.2f}, {nose.y:.2f}) vs tail ({tailp.x:.2f}, {tailp.y:.2f}) "
+      f"-> nose is {'UPPER-RIGHT' if nose.x > tailp.x and nose.y > tailp.y else 'wrong side'}")
 
 bpy.ops.render.render(animation=True)
 print("RENDER DONE ->", OUT)
