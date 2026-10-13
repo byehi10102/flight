@@ -198,56 +198,110 @@ let preparingTimer = null;
 // simply continues (no seek) into the tail — burners flare, the jet zooms
 // off into the distance, and the page fades into the menu. Continuing from
 // the boundary is what makes loop -> outro feel like one continuous shot.
-const BOOT_FILM_LOOP_S = 6.0;
-const BOOT_FILM_TAIL_S = 2.0;
-const bootFilm = document.querySelector("#loadingIndicator .loading-bg-video");
-let bootFilmTailActive = false;
-let bootOutroPending = false;
-let bootOutroFading = false;
-if (bootFilm) {
-  // Wrap the loop tightly (per frame, from the render loop below) so the
-  // tail never bleeds into the looping phase. When the outro is queued the
-  // boundary must NOT be wrapped — the rAF handover plays the tail there.
-  const wrapBootFilm = () => {
-    if (!bootFilm || bootFilmTailActive || bootOutroPending) return;
-    if (bootFilm.currentTime >= BOOT_FILM_LOOP_S) {
-      try { bootFilm.currentTime -= BOOT_FILM_LOOP_S; } catch (e) { /* seeking */ }
-    }
+// Both loading films are [seamless 6 s loop][2 s zoom-off tail]: the plane
+// cruises while the loop repeats AS LONG as the load takes; at 100% the
+// outro is QUEUED, and at the loop's NEXT natural boundary the film simply
+// continues (no seek) into the tail — burners flare, the jet zooms off into
+// the distance, and the page fades. Continuing from the boundary is what
+// makes loop -> outro feel like one continuous shot.
+const FILM_LOOP_S = 6.0;
+const FILM_TAIL_S = 2.0;
+
+/**
+ * JS-owned film loop + zoom-off outro for one <video>. tick() runs from the
+ * render loop every frame: it wraps the video at the loop boundary while
+ * shouldWrap() says so, and when an outro is queued it instead lets the
+ * film play straight into the tail (the literal next frame — no seek, no
+ * cut) and calls onOutro(played) once, at the boundary. onOutro(false)
+ * also fires from the safety net if the film stalls and never reaches the
+ * boundary, so a flow can never hang on the film.
+ */
+function makeFilmController(video, { shouldWrap, onOutro }) {
+  let tailActive = false;
+  let pending = false;
+  const hasTail = () => {
+    try {
+      return !!video && Number.isFinite(video.duration)
+        && video.duration >= FILM_LOOP_S + FILM_TAIL_S - 0.05;
+    } catch (e) { return false; }
   };
-  bootFilm.addEventListener("timeupdate", wrapBootFilm);
-  bootFilm.addEventListener("seeking", wrapBootFilm);
+  const isPlaying = () => {
+    try { return !!video && !video.paused; } catch (e) { return false; }
+  };
+  return {
+    queueOutro() {
+      if (tailActive || pending) return;
+      pending = true;
+      setTimeout(() => {
+        if (pending) { pending = false; onOutro(false); }
+      }, 8000);
+    },
+    isPending: () => pending,
+    isActive: () => tailActive,
+    /** Hard-cancel (flow abandoned, e.g. leaving the picker mid-phase). */
+    cancel() {
+      pending = false;
+      tailActive = false;
+      try { video?.pause(); } catch (e) { /* cosmetic */ }
+    },
+    tick() {
+      if (!video || tailActive) return;
+      if (video.currentTime < FILM_LOOP_S) return;
+      if (pending) {
+        pending = false;
+        tailActive = true;
+        let played = false;
+        if (isPlaying() && hasTail()) {
+          played = true;
+          try {
+            const p = video.play();
+            if (p && p.catch) p.catch(() => {});
+          } catch (e) { played = false; }
+        }
+        onOutro(played);
+        return;
+      }
+      if (shouldWrap()) {
+        try { video.currentTime -= FILM_LOOP_S; } catch (e) { /* seeking */ }
+      }
+    },
+  };
 }
 
-/** Start the outro: the film is exactly at the loop boundary — let it play
- *  straight into the tail (no seek: the next frame IS the tail's first) and
- *  fade the page out under it. Falls back to a plain fade if the film is
- *  not playing/seekable. */
-function startBootOutro() {
-  if (bootOutroFading) return;
-  bootOutroFading = true;
-  bootFilmTailActive = true;
-  let played = false;
-  try {
-    if (bootFilm && !bootFilm.paused
-        && Number.isFinite(bootFilm.duration)
-        && bootFilm.duration >= BOOT_FILM_LOOP_S + BOOT_FILM_TAIL_S - 0.05) {
-      played = true;
-      const p = bootFilm.play();
-      if (p && p.catch) p.catch(() => {});
-    }
-  } catch (e) { /* plain fade */ }
-  // Let the zoom read for ~0.9 s of the tail, then fade over ~1.1 s.
-  setTimeout(() => {
-    loadingIndicator?.classList.add("fading");
-  }, played ? 900 : 0);
-  setTimeout(() => {
-    if (loadingIndicator) {
-      loadingIndicator.classList.add("hidden");
-      loadingIndicator.classList.remove("fading", "picker");
-    }
-    try { bootFilm?.pause(); } catch (e) { /* cosmetic */ }
-  }, played ? 2000 : 1100);
-}
+// Boot film: wraps until the page is done; outro fades into the menu.
+const bootFilm = document.querySelector("#loadingIndicator .loading-bg-video");
+const bootFilmCtl = makeFilmController(bootFilm, {
+  shouldWrap: () => !loadingPageHidden,
+  onOutro: (played) => {
+    // Let the zoom read for ~0.9 s of the tail, then fade over ~1.1 s.
+    setTimeout(() => loadingIndicator?.classList.add("fading"), played ? 900 : 0);
+    setTimeout(() => {
+      if (loadingIndicator) {
+        loadingIndicator.classList.add("hidden");
+        loadingIndicator.classList.remove("fading", "picker");
+      }
+      try { bootFilm?.pause(); } catch (e) { /* cosmetic */ }
+    }, played ? 2000 : 1100);
+  },
+});
+
+// Spawn-dive film: wraps while the preparing video plays; its outro fades
+// the preparing screen and then runs the phase's bound completion (restore
+// picker view -> dive). runPreparingFlight binds preparingFinish each run.
+let preparingFinish = null;
+const diveFilm = document.getElementById("preparingFlightVideo");
+const diveFilmCtl = makeFilmController(diveFilm, {
+  shouldWrap: () => true,
+  onOutro: (played) => {
+    setTimeout(() => preparingFlight?.classList.add("fading"), played ? 900 : 0);
+    setTimeout(() => {
+      try { diveFilm?.pause(); } catch (e) { /* cosmetic */ }
+      const fn = preparingFinish;
+      preparingFinish = null;
+      if (fn) fn();
+    }, played ? 2000 : 200);
+  },
+});
 
 // Boot safety net (s): a hung provider must never trap the player forever.
 // This is NOT a load timer — the reveal waits for real completion however
@@ -260,14 +314,11 @@ function hideLoadingPage() {
   if (!loadingIndicator || loadingPageHidden) return;
   // The bar is at 100 and everything has REALLY loaded: queue the outro.
   // The film finishes its current lap, and at the loop's next natural
-  // boundary the render loop hands over to startBootOutro() — the tail
+  // boundary the render loop hands over to the outro - the tail
   // plays as the literal next frame of the loop, one continuous shot.
   // (Not on a timer: the loop repeats as long as the load took.)
   loadingPageHidden = true;
-  bootOutroPending = true;
-  // Safety net: if the film is stalled/not playing and never reaches the
-  // boundary, do the plain fade so boot can never hang on the reveal.
-  setTimeout(() => { if (!bootOutroFading) startBootOutro(); }, 8000);
+  bootFilmCtl.queueOutro();
 }
 
 function updateLoadingUI() {
@@ -790,19 +841,25 @@ function exitSpawnPicking() {
   mobileMode.unlock();
   // Leaving the picker from a multiplayer room tears the party down.
   mp?.leaveParty();
-  // If a preparing-flight phase is mid-warm-up (its interval parks the main
-  // camera at the spawn pose behind the opaque screen), stop it now and put
-  // the picker view back so this exit path stays clean.
-  if (preparingActive) {
+  // If a preparing-flight phase is mid-warm-up or mid-outro (its interval
+  // parks the main camera at the spawn pose behind the opaque screen), stop
+  // it now and put the picker view back so this exit path stays clean.
+  if (preparingActive || diveFilmCtl.isPending() || diveFilmCtl.isActive()) {
     clearInterval(preparingTimer);
     preparingTimer = null;
     preparingActive = false;
+    preparingFinish = null;
+    diveFilmCtl.cancel();
+    endDetailLod();
     try {
       if (preparingSavedView) viewer.camera.setView(preparingSavedView);
     } catch (e) { /* best-effort */ }
     preparingSavedView = null;
-    if (preparingFlight) preparingFlight.classList.add("hidden");
-    try { preparingFlightVideo?.pause?.(); } catch (e) { /* cosmetic */ }
+    if (preparingFlight) {
+      preparingFlight.classList.add("hidden");
+      preparingFlight.classList.remove("fading");
+    }
+    try { diveFilm?.pause(); } catch (e) { /* cosmetic */ }
   }
   stopAllFlyingSounds(0.3);
   try {
@@ -1332,12 +1389,42 @@ function getSpawnPinImage() {
 // trap the player; then the picker view is restored and the unchanged
 // camera-dive transition flies in.
 const PREPARING_MIN_MS = 3000;
-const PREPARING_MAX_MS = 15000;
+const PREPARING_MAX_MS = 25000;
 const PREPARING_DRAIN_MS = 1200;   // queue must stay empty this long
 const PREPARING_GRACE_MS = 1500;   // requests need time to even register
 
 let preparingSavedView = null;
+let preparingSavedLod = null;
 let preparingDrainedAt = 0;
+
+/** Full-detail warm-up: the flight-tuned LOD skipping (baseScreenSpaceError
+ *  1024 + skipLevelOfDetail) loads COARSE tiles fast and refines lazily —
+ *  which is exactly the "green first, detail appears later" look at spawn.
+ *  During the preparing window the globe loads the TRUE detail pyramid
+ *  instead (every visible level, no skipping); the flight values come back
+ *  when the phase ends. */
+function beginDetailLod() {
+  try {
+    const g = viewer.scene.globe;
+    preparingSavedLod = {
+      baseScreenSpaceError: g.baseScreenSpaceError,
+      skipLevelOfDetail: g.skipLevelOfDetail,
+    };
+    g.baseScreenSpaceError = 1;
+    g.skipLevelOfDetail = false;
+  } catch (e) { /* best-effort; defaults still load */ }
+}
+
+function endDetailLod() {
+  try {
+    if (preparingSavedLod) {
+      const g = viewer.scene.globe;
+      g.baseScreenSpaceError = preparingSavedLod.baseScreenSpaceError;
+      g.skipLevelOfDetail = preparingSavedLod.skipLevelOfDetail;
+    }
+  } catch (e) { /* best-effort */ }
+  preparingSavedLod = null;
+}
 
 function runPreparingFlight(onReady) {
   const start = performance.now();
@@ -1346,6 +1433,7 @@ function runPreparingFlight(onReady) {
   preparingActive = true;
   preparingBarShown.reset();
   preparingDrainedAt = 0;
+  diveFilmCtl.cancel(); // fresh film state for this phase
 
   // Warm exactly what the spawned view needs, behind the opaque screen:
   // park the MAIN camera at the destination's final pose. The dive flies
@@ -1369,6 +1457,9 @@ function runPreparingFlight(onReady) {
     });
     viewer.scene.requestRender();
   } catch (e) { /* warming is best-effort */ }
+  // Full-detail LOD for the warm-up (see beginDetailLod): the queue below
+  // then tracks the ENTIRE refinement pyramid, not just coarse tiles.
+  beginDetailLod();
 
   // The minimap viewer exists EARLY and renders at the destination each
   // tick, so its own tile stream (separate viewer = separate cache) is
@@ -1429,18 +1520,30 @@ function runPreparingFlight(onReady) {
     if (preparingBarFill) preparingBarFill.style.width = `${pct}%`;
     if (preparingPercent) preparingPercent.textContent = `${pct}%`;
     if (pct >= 100) {
+      // 100%: the bar stops here and the film takes over — it finishes its
+      // current lap, then (at the loop boundary) plays the zoom-off tail
+      // while the screen fades; the bound completion then restores the
+      // picker view and starts the dive. The parked camera keeps warming
+      // tiles through the whole outro.
       clearInterval(preparingTimer);
       preparingTimer = null;
-      preparingActive = false;
-      // Restore the picker view so the dive flies from it, exactly as
-      // before (the whole warm-up happened behind the opaque screen).
-      try {
-        if (preparingSavedView) viewer.camera.setView(preparingSavedView);
-      } catch (e) { /* best-effort */ }
-      preparingSavedView = null;
-      if (preparingFlight) preparingFlight.classList.add("hidden");
-      try { preparingFlightVideo?.pause?.(); } catch (e) { /* cosmetic */ }
-      onReady();
+      preparingFinish = () => {
+        preparingActive = false;
+        endDetailLod();
+        // Restore the picker view so the dive flies from it, exactly as
+        // before (the whole warm-up happened behind the opaque screen).
+        try {
+          if (preparingSavedView) viewer.camera.setView(preparingSavedView);
+        } catch (e) { /* best-effort */ }
+        preparingSavedView = null;
+        if (preparingFlight) {
+          preparingFlight.classList.add("hidden");
+          preparingFlight.classList.remove("fading");
+        }
+        try { diveFilm?.pause(); } catch (e) { /* cosmetic */ }
+        onReady();
+      };
+      diveFilmCtl.queueOutro();
     }
   }, 100);
 }
@@ -2086,19 +2189,12 @@ function animate() {
   dt = Math.min(dt, 0.25);
   const now = performance.now();
 
-  // Boot film loop wrap (per frame = tight; timeupdate alone overshoots the
-  // loop boundary by up to 250 ms). When the outro is queued (loading done,
-  // bar at 100), the boundary is NOT wrapped — the film simply continues
-  // into the zoom-off tail as its literal next frame, one continuous shot.
-  // (Guard on tail state, not loadingPageHidden: the page flag flips the
-  // moment the outro is QUEUED, but the film still needs this handover.)
-  if (bootFilm && !bootFilmTailActive
-      && bootFilm.currentTime >= BOOT_FILM_LOOP_S) {
-    if (bootOutroPending) startBootOutro();
-    else if (!loadingPageHidden) {
-      try { bootFilm.currentTime -= BOOT_FILM_LOOP_S; } catch (e) { /* seeking */ }
-    }
-  }
+  // Both loading films: JS owns the loop (per-frame tick; timeupdate alone
+  // overshoots the boundary by up to 250 ms). When an outro is queued the
+  // boundary is NOT wrapped — the film plays straight into its zoom-off
+  // tail as the literal next frame, one continuous shot.
+  bootFilmCtl.tick();
+  diveFilmCtl?.tick();
 
   if (currentState === States.FLYING || currentState === States.PAUSED || currentState === States.TRANSITIONING) {
     if (currentState === States.FLYING) {

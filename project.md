@@ -1383,3 +1383,31 @@ ballpark, garbage-AGL safety). Consumers: the flight loop (smoothed
 state.minimapZoom, which hud.js and the multiplayer peer markers already
 read), the preparing warm-up, and the hud grid - which now draws four
 scale-true divisions across the LIVE view instead of one fixed range-unit.
+
+## 22. Recent changes (spawn loads FULL detail; second film gets its own zoom-off outro)
+
+### "Green first, detail later" is gone: the warm-up loads the whole pyramid
+
+The globe runs flight-tuned LOD settings (baseScreenSpaceError 1024 +
+skipLevelOfDetail) that load COARSE tiles fast and refine lazily - perfect
+while flying, but it is exactly why the spawned view showed green low-res
+tiles resolving into detail after the dive: even a fully "drained" queue had
+only loaded the coarse levels. For the preparing window the globe now
+switches to a full-detail warm-up (baseScreenSpaceError 1,
+skipLevelOfDetail false): every visible level of the pyramid streams, the
+sustained-drain wait covers it, and the flight settings are restored when
+the phase ends. The phase cap rose 15 -> 25 s - the second load now takes
+longer than the first, by design.
+
+### The spawn-dive film: re-baked diagonally through the clouds + zoom-off tail
+
+The old 5 s diagonal fly-through became a new bake (build_spawn_dive.py,
+same machinery as the boot film): the F-15 holds a 25-deg bank, the camera
+sits low AMONG the clouds looking up, a near cloud lane crosses the
+foreground, red burners - and it ends with its own 2 s zoom-off tail. The
+mp4 is [6 s seamless loop][2 s tail]; at 100% the outro is queued and the
+film plays straight through its next natural loop boundary into the tail
+(no seek, no cut), the screen fades under it, and only then does the dive
+start - the parked camera keeps warming tiles through the whole outro. Both
+films are now driven by one shared makeFilmController() (JS-owned loop,
+boundary handover, stall safety net, hard-cancel on Escape).

@@ -535,6 +535,22 @@ const browserMob = await puppeteer.launch(LAUNCH);
   });
   check("touch overlay VISIBLE once flying (landscape)", flying.vis);
 
+  // The spawn-dive film: JS-owned loop + zoom-off tail, like the boot film.
+  {
+    const dive = await page.evaluate(() => {
+      const v = document.getElementById("preparingFlightVideo");
+      return {
+        src: v?.querySelector("source")?.src || v?.src || "",
+        jsOwnsLoop: v ? !v.loop : false,
+        duration: v && Number.isFinite(v.duration) ? v.duration : null,
+      };
+    });
+    check("spawn-dive film is the diagonal fly-through with a JS-owned loop + tail",
+      /spawn-dive\.mp4/.test(dive.src) && dive.jsOwnsLoop
+        && (dive.duration === null || dive.duration >= 7.9),
+      JSON.stringify(dive));
+  }
+
   // HUD = the desktop arrangement at phone size: every corner element pinned
   // to its corner (the old uniform scale dragged them to the centre).
   const hud = await page.evaluate(() => {
