@@ -252,13 +252,26 @@ let preparingFinish = null;
 const diveFilm = document.getElementById("preparingFlightVideo");
 
 function finishPreparingWithFade() {
-  // A little fade, then the bound completion (restore picker view -> dive).
+  // 1) Restore the picker view FIRST, behind the still-opaque screen. The
+  //    fade must never play over the parked warm-up camera - that flashed
+  //    the plane view before the dive.
+  try {
+    if (preparingSavedView) viewer.camera.setView(preparingSavedView);
+  } catch (e) { /* best-effort */ }
+  preparingSavedView = null;
+  // 2) Fade straight INTO the spawning animation: the dive launches now
+  //    and the screen dissolves over its first beat.
   preparingFlight?.classList.add("fading");
   setTimeout(() => {
-    const fn = preparingFinish;
-    preparingFinish = null;
-    if (fn) fn();
+    if (preparingFlight) {
+      preparingFlight.classList.add("hidden");
+      preparingFlight.classList.remove("fading");
+    }
+    try { diveFilm?.pause(); } catch (e) { /* cosmetic */ }
   }, 700);
+  const fn = preparingFinish;
+  preparingFinish = null;
+  if (fn) fn();
 }
 
 // Boot safety net (s): a hung provider must never trap the player forever.
@@ -1532,20 +1545,12 @@ function runPreparingFlight(onReady) {
       // tiles through the whole outro.
       clearInterval(preparingTimer);
       preparingTimer = null;
+      // The completion just hands off: the camera restore, screen fade and
+      // hide are handled by finishPreparingWithFade (which calls this at
+      // the START of the fade so the dive plays under it).
       preparingFinish = () => {
         preparingActive = false;
         endDetailLod();
-        // Restore the picker view so the dive flies from it, exactly as
-        // before (the whole warm-up happened behind the opaque screen).
-        try {
-          if (preparingSavedView) viewer.camera.setView(preparingSavedView);
-        } catch (e) { /* best-effort */ }
-        preparingSavedView = null;
-        if (preparingFlight) {
-          preparingFlight.classList.add("hidden");
-          preparingFlight.classList.remove("fading");
-        }
-        try { diveFilm?.pause(); } catch (e) { /* cosmetic */ }
         onReady();
       };
       // 100%: a little fade of the preparing screen, then the bound

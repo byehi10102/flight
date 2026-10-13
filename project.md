@@ -1551,3 +1551,13 @@ pass + fraction of the current slice). Bounds: preload 60 s, hard cap
 75 s (hang safety only). The spawn bar's drain certainty rose to a
 sustained 2 s. The DEM grid keeps the requested ~100 miles in each
 direction and the four imagery passes stay.
+
+## 28. Recent changes (no more plane-view flash before the dive)
+
+The fade briefly showed the SPAWN VIEW before the dive: the preparing
+screen dissolves over 0.7 s while the main camera was still parked at the
+spawn pose (the tile warm-up), so the plane view bled through before the
+camera restored and the flyTo started. Now the picker view is restored
+FIRST, behind the still-opaque screen, and the dive LAUNCHES at the same
+moment the fade begins - the screen dissolves straight into the spawning
+animation instead of revealing the wrong camera and then animating.
