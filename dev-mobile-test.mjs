@@ -930,6 +930,30 @@ const browserMob = await puppeteer.launch(LAUNCH);
   }
 
 
+  // NEW LOCATION after a crash: the full-screen boot film plays while the
+  // picker view loads (not the little chip), then fades into the picker.
+  {
+    // Pause via the game's own handler, then NEW LOCATION from the menu.
+    await page.evaluate(() => window.dispatchEvent(new KeyboardEvent("keydown", { key: "p" })));
+    await page.waitForFunction(
+      () => window.SKY_DEV?.currentState === "PAUSED" && !document.getElementById("pauseMenu").classList.contains("hidden"),
+      { timeout: 10000, polling: 200 },
+    );
+    await page.click("#restartBtn");
+    const filmShown = await page.waitForFunction(() => {
+      const li = document.getElementById("loadingIndicator");
+      return li && !li.classList.contains("hidden") && !li.classList.contains("picker");
+    }, { timeout: 10000, polling: 150 }).then(() => true).catch(() => false);
+    check("NEW LOCATION shows the full-screen boot film page (not the chip)", filmShown);
+    const filmDone = await page.waitForFunction(() => {
+      const li = document.getElementById("loadingIndicator");
+      return li && li.classList.contains("hidden");
+    }, { timeout: 40000, polling: 200 }).then(() => true).catch(() => false);
+    const pickerOpen = await page.evaluate(() => window.SKY_DEV?.currentState === "PICK_SPAWN");
+    check("picker-entry film fades out into the open picker", filmDone && pickerOpen,
+      `filmDone=${filmDone} state=${await page.evaluate(() => window.SKY_DEV?.currentState)}`);
+  }
+
   check("no console/page errors during the whole mobile flight", errors.length === 0,
     errors.slice(0, 3).join("; "));
   await page.close();

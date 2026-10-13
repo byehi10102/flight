@@ -1561,3 +1561,17 @@ camera restored and the flyTo started. Now the picker view is restored
 FIRST, behind the still-opaque screen, and the dive LAUNCHES at the same
 moment the fade begins - the screen dissolves straight into the spawning
 animation instead of revealing the wrong camera and then animating.
+
+## 29. Recent changes (NEW LOCATION after a crash plays the boot film)
+
+Choosing NEW LOCATION used to drop straight into the picker with the
+little "Loading Terrain..." chip. Now the post-crash picker entry (and any
+vignette entry, e.g. from the pause menu) plays the SAME full-screen film
+page as boot - the F-15 over the clouds, title, bar - while the picker's
+view genuinely streams. The bar is load-driven like the other bars: live
+queue-drain ratio plus a sustained-idle gate (grace 1.5 s, drain 1 s,
+hang caps only); when genuinely loaded the page fades (0.7 s) straight
+into the already-open picker. The globe stays THROTTLED while the film
+is up (smooth decode), the in-picker chip stays for pan-around loading
+after the film, Escape stops the film cleanly, and the boot-only reveal
+machinery (outro, bootPageGone) is untouched.

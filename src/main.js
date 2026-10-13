@@ -274,6 +274,89 @@ function finishPreparingWithFade() {
   if (fn) fn();
 }
 
+// ── Picker-entry loading film (NEW LOCATION after a crash, etc.) ───────────
+// Entering the spawn picker far from what is loaded shows the SAME
+// full-screen film page as boot - the F-15 over the clouds with the bar -
+// while the picker's view genuinely streams, then fades into the picker.
+// The bar is load-driven (queue drain, sustained-idle gate); the only
+// timers are hang guards.
+const PICKER_FILM_MIN_MS = 1500;
+const PICKER_FILM_MAX_MS = 25000;
+let pickerFilmActive = false;
+let pickerFilmTimer = null;
+let pickerFilmPeak = 0;
+let pickerFilmLast = 0;
+let pickerFilmDrainedAt = 0;
+const pickerBarShown = new MonotonicPercent();
+
+function stopPickerFilm(hideNow = true) {
+  clearInterval(pickerFilmTimer);
+  pickerFilmTimer = null;
+  pickerFilmActive = false;
+  try { bootFilmLoop?.pause(); } catch (e) { /* cosmetic */ }
+  if (hideNow && loadingIndicator) {
+    loadingIndicator.classList.add("hidden");
+    loadingIndicator.classList.remove("fading", "picker");
+  }
+}
+
+function startPickerFilm() {
+  pickerFilmActive = true;
+  pickerFilmPeak = 0;
+  pickerFilmLast = 0;
+  pickerFilmDrainedAt = 0;
+  pickerBarShown.reset();
+  if (loadingIndicator) {
+    loadingIndicator.classList.remove("hidden", "picker", "fading");
+  }
+  try {
+    if (bootFilmLoop) {
+      const p = bootFilmLoop.play();
+      if (p && p.catch) p.catch(() => {});
+    }
+  } catch (e) { /* cosmetic */ }
+  if (loadingText) loadingText.textContent = "Loading Map...";
+  if (loadingBarFill) loadingBarFill.style.width = "0%";
+  if (loadingPercent) loadingPercent.textContent = "0%";
+  const start = performance.now();
+  clearInterval(pickerFilmTimer);
+  pickerFilmTimer = setInterval(() => {
+    const elapsed = performance.now() - start;
+    const ratio = pickerFilmPeak > 0 ? 1 - pickerFilmLast / pickerFilmPeak : 0;
+    const queueIdle = pickerFilmLast === 0
+      && elapsed > PREPARING_GRACE_MS
+      && !!viewer.scene.globe.tilesLoaded;
+    if (queueIdle) {
+      if (!pickerFilmDrainedAt) pickerFilmDrainedAt = performance.now();
+    } else {
+      pickerFilmDrainedAt = 0;
+    }
+    const drained = pickerFilmDrainedAt !== 0
+      && performance.now() - pickerFilmDrainedAt >= 1000;
+    const pct = Math.round(
+      100 * pickerBarShown.update(
+        preparingFlightProgress(ratio, elapsed, PICKER_FILM_MIN_MS, PICKER_FILM_MAX_MS, drained),
+      ),
+    );
+    if (loadingBarFill) loadingBarFill.style.width = `${pct}%`;
+    if (loadingPercent) loadingPercent.textContent = `${pct}%`;
+    if (pct >= 100) {
+      // Fade the film page straight into the (already-open) picker.
+      pickerFilmActive = false;
+      clearInterval(pickerFilmTimer);
+      pickerFilmTimer = null;
+      try { bootFilmLoop?.pause(); } catch (e) { /* cosmetic */ }
+      loadingIndicator?.classList.add("fading");
+      setTimeout(() => {
+        if (loadingIndicator) {
+          loadingIndicator.classList.add("hidden");
+          loadingIndicator.classList.remove("fading", "picker");
+        }
+      }, 700);
+    }
+  }, 100);
+}
+
 // Boot safety net (s): a hung provider must never trap the player forever.
 // This is NOT a load timer — the reveal waits for real completion however
 // long that takes (the film loops as long as necessary); the cap only
@@ -400,7 +483,12 @@ viewer.scene.globe.tileLoadProgressEvent.addEventListener((queueLength) => {
     }
     if (currentState === States.MENU) updateLoadingUI();
   }
-  if (loadingIndicator && loadingText && currentState === States.PICK_SPAWN && !spawnPending) {
+  if (pickerFilmActive) {
+    pickerFilmLast = queueLength;
+    if (queueLength > pickerFilmPeak) pickerFilmPeak = queueLength;
+  }
+  if (loadingIndicator && loadingText && currentState === States.PICK_SPAWN
+      && !spawnPending && !pickerFilmActive) {
     if (queueLength > 0) {
       loadingText.textContent = "Loading Terrain...";
       // Compact chip over the map, never the full-screen boot page.
@@ -810,6 +898,10 @@ function enterSpawnPicking(useVignette = true) {
     currentState = States.PICK_SPAWN;
     setStreetsVisible(true);
     showNotablePlaces();
+    // Coming back from a crash (NEW LOCATION): show the full-screen film
+    // page - the same one from boot - while the picker's view genuinely
+    // loads, then fade straight into the picker.
+    if (useVignette) startPickerFilm();
     if (confirmSpawnBtn) confirmSpawnBtn.classList.add("hidden");
     if (searchResults) searchResults.style.display = "none";
     if (locationSearch) locationSearch.value = "";
@@ -857,6 +949,8 @@ function enterSpawnPicking(useVignette = true) {
 
 function exitSpawnPicking() {
   transitionGen++;
+  // Leaving while the picker-entry film is up: stop it cleanly.
+  if (pickerFilmActive) stopPickerFilm();
   // Leaving the game releases the orientation hold.
   mobileMode.unlock();
   // Leaving the picker from a multiplayer room tears the party down.
@@ -2343,7 +2437,7 @@ function animate() {
   // (~6 renders/s: tile streaming needs only a few passes a second, and the
   // headroom is what lets the films decode smoothly - full-rate rendering
   // during the preparing phase is what made the second film choppy).
-  const filmsOwnTheScreen = !bootPageGone || preparingActive;
+  const filmsOwnTheScreen = !bootPageGone || preparingActive || pickerFilmActive;
   if (!filmsOwnTheScreen || now - lastThrottledRender > 150) {
     if (filmsOwnTheScreen) lastThrottledRender = now;
     try { viewer.render(); } catch (e) { /* one bad frame never kills the loop */ }
