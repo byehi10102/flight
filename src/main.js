@@ -191,125 +191,75 @@ let preparingTimer = null;
   kick();
 })();
 
-// ── Boot film: JS owns the loop ────────────────────────────────────────────
-// The boot film is [seamless 6 s loop][2 s zoom-off tail]: the F-15 cruises
-// over the cloud deck while the loop repeats AS LONG AS the load takes; at
-// 100% the outro is queued, and at the loop's NEXT natural boundary the film
-// simply continues (no seek) into the tail — burners flare, the jet zooms
-// off into the distance, and the page fades into the menu. Continuing from
-// the boundary is what makes loop -> outro feel like one continuous shot.
-// Both loading films are [seamless loop][zoom-off tail]: the plane cruises
-// while the loop repeats AS LONG as the load takes; at 100% the outro is
-// QUEUED, and at the loop's NEXT natural boundary the film simply continues
-// (no seek) into the tail — burners flare, the jet zooms off into the
-// distance, and the page fades. Continuing from the boundary is what
-// makes loop -> outro feel like one continuous shot. Loop/tail lengths are
-// per-film (the boot film is 6 s + 2 s; the restored original fly-through is
-// a 2 s loop).
+// ── Loading films: native loops, zero JS seeking ────────────────────────────
+// Both films loop NATIVELY (<video loop>) — JS never touches currentTime,
+// because every programmatic seek hiccuped the decoder and read as the
+// film being "laggy". The outros:
+//   BOOT: at 100% the preloaded TAIL element (public/boot-flight-tail.mp4,
+//   the baked zoom-off) swaps in exactly at the loop boundary — a single-
+//   frame continuation, no seek, no crossfade — then the page fades to the
+//   menu.
+//   DIVE: at 100% the SAME frame surges via a CSS transform (.film-dash)
+//   toward the corner the plane is flying at and the plane exits the
+//   screen — the scene never changes, the airplane just dashes off — then
+//   the screen fades into the game.
+const BOOT_FILM_LOOP_S = 6.0;
+const bootFilmLoop = document.querySelector("#loadingIndicator .loading-bg-video:not(#bootFilmTail)");
+const bootFilmTail = document.getElementById("bootFilmTail");
+let bootOutroPending = false;
+let bootOutroStarted = false;
 
-/**
- * JS-owned film loop + zoom-off outro for one <video>. tick() runs from the
- * render loop every frame: it wraps the video at the loop boundary while
- * shouldWrap() says so, and when an outro is queued it instead lets the
- * film play straight into the tail (the literal next frame — no seek, no
- * cut) and calls onOutro(played) once, at the boundary. onOutro(false)
- * also fires from the safety net if the film stalls and never reaches the
- * boundary, so a flow can never hang on the film.
- */
-function makeFilmController(video, { loopS, tailS, shouldWrap, onOutro }) {
-  let tailActive = false;
-  let pending = false;
-  const LOOP_S = loopS;
-  const hasTail = () => {
-    try {
-      return !!video && Number.isFinite(video.duration)
-        && video.duration >= LOOP_S + tailS - 0.05;
-    } catch (e) { return false; }
-  };
-  const isPlaying = () => {
-    try { return !!video && !video.paused; } catch (e) { return false; }
-  };
-  return {
-    queueOutro() {
-      if (tailActive || pending) return;
-      pending = true;
-      setTimeout(() => {
-        if (pending) { pending = false; onOutro(false); }
-      }, 8000);
-    },
-    isPending: () => pending,
-    isActive: () => tailActive,
-    /** Hard-cancel (flow abandoned, e.g. leaving the picker mid-phase). */
-    cancel() {
-      pending = false;
-      tailActive = false;
-      try { video?.pause(); } catch (e) { /* cosmetic */ }
-    },
-    tick() {
-      if (!video || tailActive) return;
-      if (video.currentTime < LOOP_S) return;
-      if (pending) {
-        pending = false;
-        tailActive = true;
-        let played = false;
-        if (isPlaying() && hasTail()) {
-          played = true;
-          try {
-            const p = video.play();
-            if (p && p.catch) p.catch(() => {});
-          } catch (e) { played = false; }
-        }
-        onOutro(played);
-        return;
+function startBootOutro() {
+  if (bootOutroStarted) return;
+  bootOutroStarted = true;
+  let played = false;
+  try {
+    if (bootFilmLoop && !bootFilmLoop.paused) {
+      bootFilmLoop.pause();
+      if (bootFilmTail) {
+        bootFilmTail.classList.remove("hidden");
+        const p = bootFilmTail.play();
+        if (p && p.catch) p.catch(() => {});
+        played = true;
       }
-      if (shouldWrap()) {
-        try { video.currentTime -= LOOP_S; } catch (e) { /* seeking */ }
-      }
-    },
-  };
+    }
+  } catch (e) { /* plain fade */ }
+  // Let the zoom read for ~0.9 s of the tail, then fade over ~1.1 s.
+  setTimeout(() => loadingIndicator?.classList.add("fading"), played ? 900 : 0);
+  setTimeout(() => {
+    if (loadingIndicator) {
+      loadingIndicator.classList.add("hidden");
+      loadingIndicator.classList.remove("fading", "picker");
+    }
+    try { bootFilmLoop?.pause(); bootFilmTail?.pause(); } catch (e) { /* cosmetic */ }
+  }, played ? 2000 : 1100);
 }
 
-// Boot film: [6 s loop][2 s tail]. Wraps until the page is done; outro
-// fades into the menu.
-const bootFilm = document.querySelector("#loadingIndicator .loading-bg-video");
-const bootFilmCtl = makeFilmController(bootFilm, {
-  loopS: 6.0,
-  tailS: 2.0,
-  shouldWrap: () => !loadingPageHidden,
-  onOutro: (played) => {
-    // Let the zoom read for ~0.9 s of the tail, then fade over ~1.1 s.
-    setTimeout(() => loadingIndicator?.classList.add("fading"), played ? 900 : 0);
-    setTimeout(() => {
-      if (loadingIndicator) {
-        loadingIndicator.classList.add("hidden");
-        loadingIndicator.classList.remove("fading", "picker");
-      }
-      try { bootFilm?.pause(); } catch (e) { /* cosmetic */ }
-    }, played ? 2000 : 1100);
-  },
-});
-
-// Spawn-dive film: the ORIGINAL diagonal fly-through (2 s seamless loop,
-// restored from git) with a zoom-away tail joined on — [2 s loop][~1.7 s
-// tail]. Wraps while the preparing video plays; its outro fades the
-// preparing screen and then runs the phase's bound completion (restore
-// picker view -> dive). runPreparingFlight binds preparingFinish each run.
+// ── The spawn-dive DASH ────────────────────────────────────────────────────
+// The ORIGINAL fly-through loops natively (public/spawn-dive.mp4 — the pure
+// 2 s loop). At 100% the SAME frame surges toward the corner the plane is
+// flying at (.film-dash, GPU-composited CSS) and the plane exits the
+// screen — the scene never changes, the airplane just dashes off — then
+// the screen fades into the game and the phase's bound completion runs.
 let preparingFinish = null;
+let diveDashStarted = false;
 const diveFilm = document.getElementById("preparingFlightVideo");
-const diveFilmCtl = makeFilmController(diveFilm, {
-  loopS: 2.0,
-  tailS: 1.6,
-  shouldWrap: () => true,
-  onOutro: (played) => {
-    setTimeout(() => preparingFlight?.classList.add("fading"), played ? 500 : 0);
-    setTimeout(() => {
-      try { diveFilm?.pause(); } catch (e) { /* cosmetic */ }
-      const fn = preparingFinish;
-      preparingFinish = null;
-      if (fn) fn();
-    }, played ? 1400 : 200);
-  },
-});
+
+function startDiveDash() {
+  if (diveDashStarted) return;
+  diveDashStarted = true;
+  try { diveFilm?.classList.add("film-dash"); } catch (e) { /* cosmetic */ }
+  setTimeout(() => preparingFlight?.classList.add("fading"), 550);
+  setTimeout(() => {
+    try {
+      diveFilm?.pause();
+      diveFilm?.classList.remove("film-dash");
+    } catch (e) { /* cosmetic */ }
+    const fn = preparingFinish;
+    preparingFinish = null;
+    if (fn) fn();
+  }, 1300);
+}
 
 // Boot safety net (s): a hung provider must never trap the player forever.
 // This is NOT a load timer — the reveal waits for real completion however
@@ -326,7 +276,15 @@ function hideLoadingPage() {
   // plays as the literal next frame of the loop, one continuous shot.
   // (Not on a timer: the loop repeats as long as the load took.)
   loadingPageHidden = true;
-  bootFilmCtl.queueOutro();
+  bootOutroPending = true;
+  // Safety net: if the film is stalled and never crosses the loop boundary,
+  // do the plain fade so boot can never hang on the reveal.
+  setTimeout(() => {
+    if (bootOutroPending && !bootOutroStarted) {
+      bootOutroPending = false;
+      startBootOutro();
+    }
+  }, 8000);
 }
 
 function updateLoadingUI() {
@@ -861,12 +819,12 @@ function exitSpawnPicking() {
   // If a preparing-flight phase is mid-warm-up or mid-outro (its interval
   // parks the main camera at the spawn pose behind the opaque screen), stop
   // it now and put the picker view back so this exit path stays clean.
-  if (preparingActive || diveFilmCtl.isPending() || diveFilmCtl.isActive()) {
+  if (preparingActive || diveDashStarted) {
     clearInterval(preparingTimer);
     preparingTimer = null;
     preparingActive = false;
     preparingFinish = null;
-    diveFilmCtl.cancel();
+    diveDashStarted = false;
     endDetailLod();
     try {
       if (preparingSavedView) viewer.camera.setView(preparingSavedView);
@@ -1450,7 +1408,7 @@ function runPreparingFlight(onReady) {
   preparingActive = true;
   preparingBarShown.reset();
   preparingDrainedAt = 0;
-  diveFilmCtl.cancel(); // fresh film state for this phase
+  diveDashStarted = false;
 
   // Warm exactly what the spawned view needs, behind the opaque screen:
   // park the MAIN camera at the destination's final pose. The dive flies
@@ -1560,7 +1518,8 @@ function runPreparingFlight(onReady) {
         try { diveFilm?.pause(); } catch (e) { /* cosmetic */ }
         onReady();
       };
-      diveFilmCtl.queueOutro();
+      diveDashStarted = false;
+      startDiveDash();
     }
   }, 100);
 }
@@ -2206,12 +2165,15 @@ function animate() {
   dt = Math.min(dt, 0.25);
   const now = performance.now();
 
-  // Both loading films: JS owns the loop (per-frame tick; timeupdate alone
-  // overshoots the boundary by up to 250 ms). When an outro is queued the
-  // boundary is NOT wrapped — the film plays straight into its zoom-off
-  // tail as the literal next frame, one continuous shot.
-  bootFilmCtl.tick();
-  diveFilmCtl?.tick();
+  // Boot film: OBSERVE the native loop's boundary (no seeking — the loop
+  // runs itself, zero decoder hiccups). When the outro is queued, the
+  // preloaded tail element swaps in exactly at the boundary — a single-
+  // frame continuation.
+  if (bootOutroPending && !bootOutroStarted && bootFilmLoop
+      && bootFilmLoop.currentTime >= BOOT_FILM_LOOP_S) {
+    bootOutroPending = false;
+    startBootOutro();
+  }
 
   if (currentState === States.FLYING || currentState === States.PAUSED || currentState === States.TRANSITIONING) {
     if (currentState === States.FLYING) {

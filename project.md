@@ -1464,3 +1464,30 @@ public/spawn-dive.mp4 is the ORIGINAL untouched loop (50.6 dB vs source);
 the 0.4 s xfade at the boundary is the outro bridge; the zoom only ever
 plays at 100% while the loop replays (and the real full-detail tile load
 takes its time) until then.
+
+## 25. Recent changes (no-seek films; the dive outro is a dash, not a view change)
+
+### "Kinda laggy" films: the stutter was US, not the decoder
+
+Both films looped via a render-loop currentTime seek every lap (every 2 s
+for the dive, 6 s for the boot) - each seek hiccuped the decoder. Both
+videos now loop NATIVELY (<video loop>): zero JS seeks, zero stutter.
+
+### The dive outro: the airplane dashes, the scene never changes
+
+The xfade-joined rendered tail read as "the screen changes to a different
+view" - because it did. It is gone. public/spawn-dive.mp4 is now the PURE
+ORIGINAL 2 s fly-through, looping natively; at 100% a GPU-composited CSS
+transform (.film-dash, 0.62 s accelerating ease) surges the SAME frame
+toward the lower-right corner - the direction the plane is flying - and the
+plane exits the screen; the existing fade then dissolves the screen into
+the game. No fade-in of a different scene, no crossfade, no new view.
+
+### The boot outro: same zoom, but seek-free
+
+The boot loop and its baked zoom-off tail are now two files:
+boot-flight.mp4 (frames 1-144, native loop) and boot-flight-tail.mp4
+(frames 145-192, preloaded, hidden). At 100% the render loop only
+OBSERVES the loop boundary (no seeking) and swaps the tail element in
+exactly there - a single-frame continuation of the same bake, so the
+zoom-off still plays as one continuous shot.

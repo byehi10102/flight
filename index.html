@@ -51,7 +51,11 @@
          at ~12s. A resident destination (queue never grew) still climbs. -->
     <div id="preparingFlight" class="loading-container hidden">
       <div class="loading-bg"></div>
-      <video id="preparingFlightVideo" class="loading-bg-video" muted playsinline preload="none">
+      <!-- Pure ORIGINAL fly-through, native loop (no JS seeking = no
+           stutter). At 100% a CSS dash surges the frame toward the corner
+           the plane is flying at and it exits the screen — no view change,
+           no crossfade — then the screen fades into the game. -->
+      <video id="preparingFlightVideo" class="loading-bg-video" muted loop playsinline preload="none">
         <source src="/spawn-dive.mp4" type="video/mp4" />
       </video>
       <div class="loading-content">
@@ -70,11 +74,15 @@
          100%, the menu takes over. -->
     <div id="loadingIndicator" class="loading-container">
       <div class="loading-bg"></div>
-      <!-- No poster: a static still of the jet paints first and the fly-through
-           looks like it "starts late". preload + fetchpriority make the video
-           itself the first thing on the wire, so frame 0 plays right away. -->
-      <video class="loading-bg-video" autoplay muted playsinline preload="auto" fetchpriority="high">
+      <!-- Native loop (no JS seeking = no stutter). The zoom-off tail lives in
+           its own preloaded element: at 100% the tail element swaps in exactly
+           at the loop boundary — a single-frame continuation, no seek, no
+           crossfade. -->
+      <video class="loading-bg-video" autoplay muted loop playsinline preload="auto" fetchpriority="high">
         <source src="/boot-flight.mp4" type="video/mp4" />
+      </video>
+      <video id="bootFilmTail" class="loading-bg-video hidden" muted playsinline preload="auto">
+        <source src="/boot-flight-tail.mp4" type="video/mp4" />
       </video>
       <div class="loading-content">
         <div class="loading-title">SKYWARD</div>

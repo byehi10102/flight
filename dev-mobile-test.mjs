@@ -350,20 +350,21 @@ const browserDesk = await puppeteer.launch(LAUNCH);
     const boot = await page.evaluate(() => {
       const li = document.getElementById("loadingIndicator");
       const bg = li ? li.querySelector(".loading-bg") : null;
-      const vid = li ? li.querySelector(".loading-bg-video") : null;
+      const vid = li ? li.querySelector("video.loading-bg-video:not(#bootFilmTail)") : null;
+      const tail = document.getElementById("bootFilmTail");
       return {
         hasRenderBackdrop: !!(bg && /boot-flight\.png/.test(getComputedStyle(bg).backgroundImage || "none")),
         hasFlythroughVideo: !!(vid && /boot-flight\.mp4/.test(vid.querySelector("source")?.src || vid.src || "none")),
-        // JS owns the loop now (the element must NOT loop natively, or the
-        // 2s zoom-off tail at 100% could never play).
-        jsOwnsLoop: vid ? !vid.loop : false,
-        hasZoomTail: vid && Number.isFinite(vid.duration) ? vid.duration >= 7.9 : false,
+        // NATIVE loop (no JS seeking — seeks were the "laggy"); the zoom-off
+        // tail is its own preloaded element that swaps in at the boundary.
+        nativeLoop: vid ? vid.loop : false,
+        hasTailElement: !!(tail && /boot-flight-tail\.mp4/.test(tail.querySelector("source")?.src || tail.src || "none")),
         pct: document.getElementById("loadingPercent")?.textContent,
       };
     });
     check("loading page faded out after boot (menu take-over)", faded, JSON.stringify(boot));
-    check("loading backdrop = Blender render + JS-managed fly-through with zoom-off tail",
-      boot.hasRenderBackdrop && boot.hasFlythroughVideo && boot.jsOwnsLoop && boot.hasZoomTail,
+    check("loading backdrop = native-loop fly-through + preloaded zoom-off tail element",
+      boot.hasRenderBackdrop && boot.hasFlythroughVideo && boot.nativeLoop && boot.hasTailElement,
       JSON.stringify(boot));
   }
   check("speed box on the LEFT third (ref-flight HUD)", r.speedCX < r.vw * 0.45,
@@ -535,19 +536,20 @@ const browserMob = await puppeteer.launch(LAUNCH);
   });
   check("touch overlay VISIBLE once flying (landscape)", flying.vis);
 
-  // The spawn-dive film: JS-owned loop + zoom-off tail, like the boot film.
+  // The spawn-dive film: the PURE original fly-through with a native loop
+  // (no JS seeking = no stutter); at 100% a CSS dash (.film-dash) surges it.
   {
     const dive = await page.evaluate(() => {
       const v = document.getElementById("preparingFlightVideo");
       return {
         src: v?.querySelector("source")?.src || v?.src || "",
-        jsOwnsLoop: v ? !v.loop : false,
+        nativeLoop: v ? v.loop : false,
         duration: v && Number.isFinite(v.duration) ? v.duration : null,
       };
     });
-    check("spawn-dive film is the original fly-through with a JS-owned loop + zoom tail",
-      /spawn-dive\.mp4/.test(dive.src) && dive.jsOwnsLoop
-        && (dive.duration === null || dive.duration >= 3.5),
+    check("spawn-dive film is the original fly-through, native loop (dash is CSS)",
+      /spawn-dive\.mp4/.test(dive.src) && dive.nativeLoop
+        && (dive.duration === null || Math.abs(dive.duration - 2.0) < 0.3),
       JSON.stringify(dive));
   }
 
