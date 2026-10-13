@@ -244,54 +244,28 @@ function startBootOutro() {
   }, played ? 2000 : 1100);
 }
 
-// ── The spawn-dive DASH ────────────────────────────────────────────────────
-// The ORIGINAL fly-through loops natively (public/spawn-dive.mp4 — the pure
-// 2 s loop). At 100% the outro is queued, and at the loop's next boundary
-// the preloaded DASH tail (public/spawn-dive-tail.mp4 — a rendered
-// continuation where ONLY the plane accelerates and exits toward the
-// lower-right corner; the clouds hold still) swaps in — the same
-// single-frame continuation as the boot film. Then the screen fades into
-// the game and the phase's bound completion runs.
+// ── The spawn-dive outro: just a little fade ────────────────────────────────
+// The ORIGINAL fly-through loops natively for the whole phase; when the bar
+// reaches 100 the preparing screen fades (0.7 s CSS transition) and the
+// camera dive into the game begins. No dash, no tail, no view change.
 let preparingFinish = null;
-let diveDashStarted = false;
-let diveOutroPending = false;
-const DIVE_FILM_LOOP_S = 2.0;
 const diveFilm = document.getElementById("preparingFlightVideo");
-const diveFilmTail = document.getElementById("diveFilmTail");
 
-function startDiveDash() {
-  if (diveDashStarted) return;
-  diveDashStarted = true;
-  let played = false;
-  try {
-    if (diveFilm && !diveFilm.paused) {
-      diveFilm.pause();
-      if (diveFilmTail) {
-        diveFilmTail.classList.remove("hidden");
-        const p = diveFilmTail.play();
-        if (p && p.catch) p.catch(() => {});
-        played = true;
-      }
-    }
-  } catch (e) { /* plain fade */ }
-  setTimeout(() => preparingFlight?.classList.add("fading"), played ? 450 : 0);
+function finishPreparingWithFade() {
+  // A little fade, then the bound completion (restore picker view -> dive).
+  preparingFlight?.classList.add("fading");
   setTimeout(() => {
-    try {
-      diveFilm?.pause();
-      diveFilmTail?.pause();
-      diveFilmTail?.classList.add("hidden");
-    } catch (e) { /* cosmetic */ }
     const fn = preparingFinish;
     preparingFinish = null;
     if (fn) fn();
-  }, played ? 1250 : 200);
+  }, 700);
 }
 
 // Boot safety net (s): a hung provider must never trap the player forever.
 // This is NOT a load timer — the reveal waits for real completion however
 // long that takes (the film loops as long as necessary); the cap only
 // force-finishes stages if something has truly hung.
-const MAX_BOOT_SECONDS = 45;
+const MAX_BOOT_SECONDS = 75;
 const bootStart = performance.now();
 
 function hideLoadingPage() {
@@ -395,14 +369,21 @@ viewer.scene.globe.tileLoadProgressEvent.addEventListener((queueLength) => {
     lastPreparingQueue = queueLength;
     if (queueLength > preparingQueuePeak) preparingQueuePeak = queueLength;
   }
-  // Boot phase: the queue draining IS the real progress for the globe stage.
-  // (The area stage reports REAL sub-steps from preloadSpawnRegion's camera
-  // passes + DEM grid instead — a queue-decay estimate reads 0-or-jump and
-  // left the bar looking dead.)
+  // Boot phase: the queue draining IS the real progress for the globe stage,
+  // and inside the current warm pass it fills the area slice continuously
+  // (milestone floor per completed pass + live drain ratio within it).
   if (!loadingPageHidden && !loadingStatus.failed) {
     if (!loadingStatus.globe) {
       if (queueLength > maxGlobeQueue) maxGlobeQueue = queueLength;
       loadingSub.globe = maxGlobeQueue > 0 ? 1 - queueLength / maxGlobeQueue : 0;
+    }
+    if (bootAreaActive && !loadingStatus.area) {
+      if (queueLength > bootAreaPeak) bootAreaPeak = queueLength;
+      const frac = bootAreaPeak > 0 ? 1 - queueLength / bootAreaPeak : 0;
+      loadingSub.area = Math.max(
+        loadingSub.area,
+        Math.min(0.999, bootAreaMilestone + 0.2 * frac),
+      );
     }
     if (currentState === States.MENU) updateLoadingUI();
   }
@@ -459,10 +440,61 @@ async function preloadTerrain() {
   try {
     // Not a timer cut: generous bound so the big Anaheim preload (passes +
     // DEM grid + queue drain) genuinely completes on slow connections. The
-    // boot film loops as long as this takes.
-    await withTimeout(preloadSpawnRegion(), 35000);
+    // boot film loops as long as this takes. 60 s bound; the 75 s hard cap
+    // below remains the pure hang safety.
+    await withTimeout(preloadSpawnRegion(), 60000);
   } catch (e) { /* bounded above */ }
+  bootAreaActive = false;
   loadingStatus.area = true;
+  updateLoadingUI();
+}
+
+// Boot area-preload bookkeeping: the bar's area slice moves on REAL work —
+// a milestone floor per completed pass, plus the live tile-queue drain
+// ratio inside the current pass's slice (continuous, never a timer).
+let bootAreaMilestone = 0;
+let bootAreaPeak = 0;
+let bootAreaActive = false;
+
+/** Wait for the tile queue to genuinely drain and stay drained. The hang
+ *  guard is the ONLY timer: progress is never cut short to hit a clock. */
+function waitForGenuineDrain(sustainMs = 600, hangMs = 9000) {
+  return new Promise((resolve) => {
+    const started = performance.now();
+    let drainedSince = 0;
+    const check = () => {
+      const now = performance.now();
+      let drained = false;
+      try {
+        drained = !!viewer.scene.globe.tilesLoaded
+          && viewer.scene.globe._surface?._tilesToRender?.length > 0;
+      } catch (e) { /* fall through to the hang guard */ }
+      if (drained) {
+        if (!drainedSince) drainedSince = now;
+        if (now - drainedSince >= sustainMs) { resolve(); return; }
+      } else {
+        drainedSince = 0;
+      }
+      if (now - started > hangMs) { resolve(); return; }
+      setTimeout(check, 150);
+    };
+    check();
+  });
+}
+
+/** One imagery warm pass: park the camera, track the pass's queue from its
+ *  own peak, and return once the tiles have genuinely settled. */
+async function bootWarmPass(altitude, milestone) {
+  viewer.camera.setView({
+    destination: Cesium.Cartesian3.fromDegrees(state.lon, state.lat, altitude),
+    orientation: { heading: 0, pitch: Cesium.Math.toRadians(-90), roll: 0 },
+  });
+  // Fill THIS pass's slice as its queue drains; the milestone lands when
+  // the tiles have genuinely settled.
+  bootAreaMilestone = milestone - 0.2;
+  bootAreaPeak = 0;
+  await waitForGenuineDrain(600, 9000);
+  loadingSub.area = milestone;
   updateLoadingUI();
 }
 
@@ -475,40 +507,21 @@ async function preloadSpawnRegion() {
       roll: viewer.camera.roll,
     },
   };
+  bootAreaActive = true;
   try {
     // Pass 1: wide 160 km top-down look warms imagery tiles for a ~300 km
-    // area around the default region. Each step releases a real fifth of
-    // the area slice on the boot bar.
-    viewer.camera.setView({
-      destination: Cesium.Cartesian3.fromDegrees(state.lon, state.lat, 160000),
-      orientation: { heading: 0, pitch: Cesium.Math.toRadians(-90), roll: 0 },
-    });
-    await waitForGlobeTiles(3000);
-    loadingSub.area = 0.2; updateLoadingUI();
+    // area around the default region. Each pass completes only when its
+    // tiles have GENUINELY settled - never on a timer.
+    await bootWarmPass(160000, 0.2);
     // Pass 2: closer 35 km pass - city-level detail imagery + terrain the
     // picker's first zoom would otherwise stream on demand.
-    viewer.camera.setView({
-      destination: Cesium.Cartesian3.fromDegrees(state.lon, state.lat, 35000),
-      orientation: { heading: 0, pitch: Cesium.Math.toRadians(-90), roll: 0 },
-    });
-    await waitForGlobeTiles(3000);
-    loadingSub.area = 0.4; updateLoadingUI();
+    await bootWarmPass(35000, 0.4);
     // Pass 3: low 8 km pass - street-level imagery around the default spawn
     // point, so the picker's opening view is already sharp.
-    viewer.camera.setView({
-      destination: Cesium.Cartesian3.fromDegrees(state.lon, state.lat, 8000),
-      orientation: { heading: 0, pitch: Cesium.Math.toRadians(-90), roll: 0 },
-    });
-    await waitForGlobeTiles(2500);
-    loadingSub.area = 0.6; updateLoadingUI();
+    await bootWarmPass(8000, 0.6);
     // Pass 4: 3 km pass - the sharpest imagery the picker's closest zoom
     // uses, so even a deep zoom-in over Anaheim starts warm.
-    viewer.camera.setView({
-      destination: Cesium.Cartesian3.fromDegrees(state.lon, state.lat, 3000),
-      orientation: { heading: 0, pitch: Cesium.Math.toRadians(-90), roll: 0 },
-    });
-    await waitForGlobeTiles(2500);
-    loadingSub.area = 0.8; updateLoadingUI();
+    await bootWarmPass(3000, 0.8);
   } catch (e) { /* best effort */ }
   // 3D terrain across the region: ~100 miles in EACH direction of the spawn
   // map (~160 km): +/-1.45 deg lat x +/-1.75 deg lon, 9x9. Deliberately
@@ -525,22 +538,14 @@ async function preloadSpawnRegion() {
   }
   try { await groundSampler.seed(pts); } catch (e) { /* best effort */ }
   // "Area done" = the big load actually STREAMED, not just requested: wait
-  // for the globe's tile queue to drain (bounded) before completing the
-  // stage — the outro never plays while tiles are still visibly loading.
-  await waitForGlobeTiles(8000);
+  // for a genuine, sustained full drain (longer certainty than the passes;
+  // hang guard only - never a progress timer).
+  bootAreaMilestone = 0.8;
+  bootAreaPeak = 0;
+  await waitForGenuineDrain(1200, 12000);
+  bootAreaActive = false;
   loadingSub.area = 1; updateLoadingUI();
   viewer.camera.setView(saved);
-}
-
-function waitForGlobeTiles(timeoutMs) {
-  return new Promise((resolve) => {
-    const started = performance.now();
-    const check = () => {
-      if (viewer.scene.globe.tilesLoaded || performance.now() - started > timeoutMs) { resolve(); return; }
-      setTimeout(check, 250);
-    };
-    check();
-  });
 }
 
 function withTimeout(promise, ms) {
@@ -846,20 +851,12 @@ function exitSpawnPicking() {
   // If a preparing-flight phase is mid-warm-up or mid-outro (its interval
   // parks the main camera at the spawn pose behind the opaque screen), stop
   // it now and put the picker view back so this exit path stays clean.
-  if (preparingActive || diveDashStarted) {
+  if (preparingActive) {
     clearInterval(preparingTimer);
     preparingTimer = null;
     preparingActive = false;
     preparingFinish = null;
-    diveDashStarted = false;
-    diveOutroPending = false;
     endDetailLod();
-    try {
-      if (diveFilmTail) {
-        diveFilmTail.classList.add("hidden");
-        diveFilmTail.pause();
-      }
-    } catch (e) { /* cosmetic */ }
     try {
       if (preparingSavedView) viewer.camera.setView(preparingSavedView);
     } catch (e) { /* best-effort */ }
@@ -1399,7 +1396,7 @@ function getSpawnPinImage() {
 // camera-dive transition flies in.
 const PREPARING_MIN_MS = 3000;
 const PREPARING_MAX_MS = 25000;
-const PREPARING_DRAIN_MS = 1200;   // queue must stay empty this long
+const PREPARING_DRAIN_MS = 2000;   // queue must stay empty this long
 const PREPARING_GRACE_MS = 1500;   // requests need time to even register
 
 let preparingSavedView = null;
@@ -1442,17 +1439,6 @@ function runPreparingFlight(onReady) {
   preparingActive = true;
   preparingBarShown.reset();
   preparingDrainedAt = 0;
-  diveDashStarted = false;
-  diveOutroPending = false;
-  // Start fetching the DASH tail now (its element is preload="none", so it
-  // never touches boot); the phase gives it plenty of time to buffer
-  // before the bar reaches 100%.
-  try {
-    if (diveFilmTail) {
-      diveFilmTail.classList.add("hidden");
-      diveFilmTail.load();
-    }
-  } catch (e) { /* cosmetic */ }
 
   // Warm exactly what the spawned view needs, behind the opaque screen:
   // park the MAIN camera at the destination's final pose. The dive flies
@@ -1562,16 +1548,9 @@ function runPreparingFlight(onReady) {
         try { diveFilm?.pause(); } catch (e) { /* cosmetic */ }
         onReady();
       };
-      diveOutroPending = true;
-      // Safety net: a stalled loop film that never reaches its boundary
-      // must not hang the phase — run the dash handler anyway (it degrades
-      // to a plain fade when the films aren't playing).
-      setTimeout(() => {
-        if (diveOutroPending && !diveDashStarted) {
-          diveOutroPending = false;
-          startDiveDash();
-        }
-      }, 8000);
+      // 100%: a little fade of the preparing screen, then the bound
+      // completion restores the picker view and the spawning dive begins.
+      finishPreparingWithFade();
     }
   }, 100);
 }
@@ -2226,13 +2205,6 @@ function animate() {
     bootOutroPending = false;
     startBootOutro();
   }
-  // Dive film: same observation — the dash tail swaps in at the loop's
-  // boundary once the bar has reached 100%.
-  if (diveOutroPending && !diveDashStarted && diveFilm
-      && diveFilm.currentTime >= DIVE_FILM_LOOP_S) {
-    diveOutroPending = false;
-    startDiveDash();
-  }
 
   if (currentState === States.FLYING || currentState === States.PAUSED || currentState === States.TRANSITIONING) {
     if (currentState === States.FLYING) {
@@ -2361,13 +2333,14 @@ function animate() {
   }
 
   // Cesium render is driven from HERE (its internal loop is disabled - it
-  // duplicated every frame). While the boot page (or its outro) is up the
-  // globe is THROTTLED hard (~6 renders/s: tile streaming needs only a few
-  // passes a second, and the extra headroom is what lets the films decode
-  // smoothly). Full rate resumes only once the page is fully gone - kicking
-  // to full rate at 100% made the whole app choppy right at the tail.
-  if (bootPageGone || now - lastThrottledRender > 150) {
-    if (!bootPageGone) lastThrottledRender = now;
+  // duplicated every frame). While EITHER loading page owns the moment
+  // (boot page + outro, or the preparing phase) the globe is THROTTLED hard
+  // (~6 renders/s: tile streaming needs only a few passes a second, and the
+  // headroom is what lets the films decode smoothly - full-rate rendering
+  // during the preparing phase is what made the second film choppy).
+  const filmsOwnTheScreen = !bootPageGone || preparingActive;
+  if (!filmsOwnTheScreen || now - lastThrottledRender > 150) {
+    if (filmsOwnTheScreen) lastThrottledRender = now;
     try { viewer.render(); } catch (e) { /* one bad frame never kills the loop */ }
   }
 }

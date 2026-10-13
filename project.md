@@ -1519,3 +1519,35 @@ widened boot DEM grid (700x440 km, 165 samples) hammered the main thread
 during the film. Right-sized to the request: ~100 miles in EACH
 direction (+/-1.45 deg lat x +/-1.75 deg lon, 9x9) - the four imagery
 passes and queue-drain stay.
+
+## 27. Recent changes (dash removed - fade-only dive outro; genuinely-loaded bars)
+
+### The dash is gone; the outro is just a fade
+
+By request: the spawn screen keeps the ORIGINAL fly-through looping for
+the whole phase, and when the bar reaches 100 the preparing screen does
+its little 0.7 s CSS fade and the spawning dive begins. The rendered dash
+tail (public/spawn-dive-tail.mp4 + build_dive_tail.py) is removed, along
+with the tail element, the boundary swap, and the CSS surge.
+
+### The second film's choppiness: full-rate rendering during the phase
+
+While the preparing phase owned the screen, the Cesium render loop was at
+FULL rate with the camera parked and full-detail LOD - maximum main-thread
+pressure, and the film stuttered. The throttle now holds (~6 renders/s)
+whenever EITHER loading page owns the moment (boot page/outro or the
+preparing phase); full rate only for menu, picker, and flight.
+
+### The bars now reach 100 only when genuinely loaded - no progress timers
+
+The boot bar hit 100 while tiles were still streaming because every warm
+pass was cut by a set timer (waitForGlobeTiles 2.5-3 s). The area stage is
+now fully load-driven: each imagery pass completes only when the tile
+queue has GENUINELY drained and stayed drained 0.6 s (hang guard 9 s -
+the only timer left, and it never cuts real progress short), the final
+seed+drain needs a sustained 1.2 s drain, and WITHIN each pass the bar
+fills continuously from the live queue-drain ratio (milestone floor per
+pass + fraction of the current slice). Bounds: preload 60 s, hard cap
+75 s (hang safety only). The spawn bar's drain certainty rose to a
+sustained 2 s. The DEM grid keeps the requested ~100 miles in each
+direction and the four imagery passes stay.

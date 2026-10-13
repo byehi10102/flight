@@ -346,7 +346,7 @@ const browserDesk = await puppeteer.launch(LAUNCH);
     const faded = await page.waitForFunction(() => {
       const li = document.getElementById("loadingIndicator");
       return li && li.classList.contains("hidden");
-    }, { timeout: 40000, polling: 150 }).then(() => true).catch(() => false);
+    }, { timeout: 60000, polling: 150 }).then(() => true).catch(() => false);
     const boot = await page.evaluate(() => {
       const li = document.getElementById("loadingIndicator");
       const bg = li ? li.querySelector(".loading-bg") : null;
@@ -537,24 +537,22 @@ const browserMob = await puppeteer.launch(LAUNCH);
   check("touch overlay VISIBLE once flying (landscape)", flying.vis);
 
   // The spawn-dive film: the PURE original fly-through with a native loop
-  // (no JS seeking = no stutter); at 100% a rendered DASH tail element
-  // (only the plane moves, exits toward the corner) swaps in at the boundary.
+  // (no JS seeking = no stutter); at 100% the screen just fades into the
+  // spawning dive - no dash, no tail element.
   {
     const dive = await page.evaluate(() => {
       const v = document.getElementById("preparingFlightVideo");
-      const tail = document.getElementById("diveFilmTail");
       return {
         src: v?.querySelector("source")?.src || v?.src || "",
         nativeLoop: v ? v.loop : false,
         duration: v && Number.isFinite(v.duration) ? v.duration : null,
-        tailSrc: tail?.querySelector("source")?.src || tail?.src || "",
-        tailHidden: tail ? tail.classList.contains("hidden") : false,
+        tailGone: !document.getElementById("diveFilmTail"),
       };
     });
-    check("spawn-dive film is the original fly-through, native loop + dash tail element",
+    check("spawn-dive film is the original fly-through, native loop, fade-only outro",
       /spawn-dive\.mp4/.test(dive.src) && dive.nativeLoop
         && (dive.duration === null || Math.abs(dive.duration - 2.0) < 0.3)
-        && /spawn-dive-tail\.mp4/.test(dive.tailSrc) && dive.tailHidden,
+        && dive.tailGone,
       JSON.stringify(dive));
   }
 
