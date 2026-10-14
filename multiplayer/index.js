@@ -16,6 +16,7 @@
  */
 import { ManualLink, looksLikeCode } from "./manual.js";
 import { Net, generateRoomCode, normalizeRoomCode } from "./net.js";
+import { createRemoteBullets } from "./remoteBullets.js";
 import { createRemotePlanes } from "./remotePlanes.js";
 import { createSpawnPresence } from "./spawnPresence.js";
 import { buildMpUi } from "./ui.js";
@@ -59,6 +60,10 @@ export function initMp(ctx) {
     Cesium: ctx.Cesium,
     viewer: ctx.viewer,
     worldSpeedScale: ctx.worldSpeedScale,
+  });
+  const remoteBullets = createRemoteBullets({
+    Cesium: ctx.Cesium,
+    viewer: ctx.viewer,
   });
   const spawnPresence = createSpawnPresence({
     Cesium: ctx.Cesium,
@@ -237,6 +242,18 @@ export function initMp(ctx) {
       // HOST pressed START: the whole party moves into the spawn map.
       .on("onGo", () => {
         if (active && (phase === "waiting" || phase === "lobby")) beginSpawnPhase();
+      })
+      // Either player pressed SPAWN: the whole party launches together.
+      .on("onLaunch", () => {
+        if (!active || phase !== "spawn") return;
+        if (!ctx.isPickSpawn()) return;
+        if (!spawnPlaced) return; // cannot launch someone who has no point
+        try { ctx.launchNow(); } catch (e) { /* never break the flow */ }
+      })
+      // A round was fired on the other device: simulate it in MY world.
+      .on("onBullet", (peerId, data) => {
+        if (!active || phase !== "flying") return;
+        try { remoteBullets.spawn(data); } catch (e) { /* tracers are cosmetic */ }
       });
   }
 
@@ -422,6 +439,7 @@ export function initMp(ctx) {
     partnerLeft = false;
     knownPeers = new Set();
     remotePlanes.clear();
+    remoteBullets.clear();
     spawnPresence.clear();
     net.leave();
     roomCode = null;
@@ -445,6 +463,7 @@ export function initMp(ctx) {
     spawnPlaced = false;
     partnerLeft = false;
     remotePlanes.clear();
+    remoteBullets.clear();
     phase = "spawn";
     ctx.enterSpawnPicking(true);
     broadcastSpawn();
@@ -531,6 +550,9 @@ export function initMp(ctx) {
       // local clock so it can place each plane on the sender's timeline.
       remotePlanes.update(dt, performance.now());
     } catch (e) { /* multiplayer is best-effort; never break flight */ }
+    try {
+      remoteBullets.update(dt);
+    } catch (e) { /* tracers are best-effort; never break flight */ }
   }
 
   // ── Presence + gate run in EVERY state (the picker is not a flying one) ──
@@ -624,6 +646,26 @@ export function initMp(ctx) {
     isHost: () => isHost,
     roomCode: () => roomCode,
     remoteCount: () => remotePlanes.planes.size,
+    remoteBulletCount: () => remoteBullets.count,
+    /** Local round fired: broadcast its frozen path to the party. */
+    noteBulletFired(bullet) {
+      if (!active || phase !== "flying" || !bullet) return;
+      try {
+        net.broadcastBullet({
+          lon: bullet.lon,
+          lat: bullet.lat,
+          alt: bullet.alt,
+          h: bullet.heading,
+          p: bullet.pitch,
+          v: bullet.speed,
+        });
+      } catch (e) { /* tracers are best-effort */ }
+    },
+    /** I pressed SPAWN: launch the whole party together. */
+    noteLaunching() {
+      if (!active) return;
+      try { net.broadcastLaunch(); } catch (e) { /* best effort */ }
+    },
     /** Devtest: first remote plane's live (interpolated) pose, or null. */
     remoteLiveSample() {
       const p = remotePlanes.planes.values().next().value;
@@ -641,8 +683,7 @@ export function initMp(ctx) {
       spawnPresence.clear();
       applyPerformance(ctx, true);
       refreshBadge();
-    },
-    tick,
+    },    tick,
     drawMinimap,
   };
 }

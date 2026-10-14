@@ -197,14 +197,14 @@ try {
   check("SPAWN arms for BOTH players once both placed a point", hSpawnReady && jSpawnReady,
     `host=${hSpawnReady} joiner=${jSpawnReady}`);
 
-  // Both launch: each gets the loading + spawning animation, then flight.
+  // LAUNCH IS SYNCHRONIZED: only the HOST clicks SPAWN — the joiner must
+  // follow into the loading screen + spawning animation automatically.
   await host.click("#confirmSpawnBtn");
-  await joiner.click("#confirmSpawnBtn");
   const bothFlying = await Promise.all([
     host.waitForFunction(() => window.SKY_DEV?.currentState === "FLYING", { timeout: 120000, polling: 500 }).then(() => true).catch(() => false),
     joiner.waitForFunction(() => window.SKY_DEV?.currentState === "FLYING", { timeout: 120000, polling: 500 }).then(() => true).catch(() => false),
   ]);
-  check("both players are flying after the spawn animation", bothFlying.every(Boolean),
+  check("ONE SPAWN click launches BOTH players together", bothFlying.every(Boolean),
     `host=${bothFlying[0]} joiner=${bothFlying[1]}`);
 
   // Each sees the other's plane in their own 3D world.
@@ -213,6 +213,17 @@ try {
   const jRemote = await joiner.evaluate(() => window.SKY_DEV.mp.remoteCount());
   check("each player sees the other's airplane rendered", hRemote >= 1 && jRemote >= 1,
     `host sees ${hRemote}, joiner sees ${jRemote}`);
+
+  // NETWORKED GUNFIRE: the host fires through the REAL trigger path (hold
+  // F); the joiner sees the tracer streaks appear in THEIR 3D world.
+  await host.evaluate(() => window.dispatchEvent(new KeyboardEvent("keydown", { key: "f" })));
+  const jTracers = await joiner.waitForFunction(
+    () => window.SKY_DEV?.mp?.remoteBulletCount?.() > 0,
+    { timeout: 20000, polling: 250 },
+  ).then(() => true).catch(() => false);
+  await host.evaluate(() => window.dispatchEvent(new KeyboardEvent("keyup", { key: "f" })));
+  check("host's bullets appear in the joiner's 3D world in real time", jTracers,
+    `joiner tracers: ${await joiner.evaluate(() => window.SKY_DEV.mp.remoteBulletCount())}`);
 
   // Real-time relative motion: the remote plane actually moves in my world.
   const sample1 = await host.evaluate(() => window.SKY_DEV.mp.remoteLiveSample());

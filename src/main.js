@@ -311,6 +311,10 @@ function startPickerFilm() {
   }
   try {
     if (bootFilmLoop) {
+      // Restart the loop cleanly so the film always shows from its opening
+      // frame (a resume from an arbitrary paused point sometimes read as
+      // "the animation didn't appear").
+      if (bootFilmLoop.currentTime > 0) bootFilmLoop.currentTime = 0;
       const p = bootFilmLoop.play();
       if (p && p.catch) p.catch(() => {});
     }
@@ -748,6 +752,9 @@ function initThree() {
           },
           enterSpawnPicking: (useVignette) => enterSpawnPicking(useVignette),
           isPickSpawn: () => currentState === States.PICK_SPAWN,
+          // Multiplayer: the follower runs the same launch (loading film +
+          // spawning animation) when the initiator presses SPAWN.
+          launchNow: () => confirmSpawn(),
         });
       } catch (e) {
         console.error("[mp] initMp failed:", e);
@@ -2098,7 +2105,10 @@ function update(dt) {
     !!controller.keys["f"] || !!controller.keys["enter"] || !!(touchControls && touchControls.isFiringHeld && touchControls.isFiringHeld())
   );
   if (triggerHeld) {
-    bullets.fire(state, state.heading, state.pitch, MPH_TO_MPS * WORLD_SPEED_SCALE);
+    const round = bullets.fire(state, state.heading, state.pitch, MPH_TO_MPS * WORLD_SPEED_SCALE);
+    // Multiplayer: broadcast the round's frozen path so the other player
+    // sees (and can dodge) the same tracer in their world.
+    if (round) mp?.noteBulletFired?.(round);
   }
   // Blue boost stick: while held, request the boost every frame - the physics
   // re-fires whenever the charge refills, exactly like holding space.
@@ -2156,7 +2166,8 @@ function fireBulletAtScreen(x, y) {
     const aimHeading = Cesium.Math.toDegrees(Math.atan2(dE, dN));
     const aimPitch = Cesium.Math.toDegrees(Math.asin(Math.max(-1, Math.min(1, dU))));
 
-    bullets.fire(state, aimHeading, aimPitch, MPH_TO_MPS * WORLD_SPEED_SCALE);
+    const round = bullets.fire(state, aimHeading, aimPitch, MPH_TO_MPS * WORLD_SPEED_SCALE);
+    if (round) mp?.noteBulletFired?.(round);
   } catch (e) { /* gunfire must never break the frame */ }
 }
 
@@ -2454,6 +2465,9 @@ startBtn.addEventListener("click", () => {
 confirmSpawnBtn.addEventListener("click", () => {
   // Multiplayer gate: a greyed button must not launch early.
   if (mp?.isActive() && !mp.bothSpawnPlaced()) return;
+  // Multiplayer: launching is a PARTY event — both devices go to the
+  // loading screen + spawning animation together.
+  if (mp?.isActive()) mp.noteLaunching();
   confirmSpawn();
 });
 

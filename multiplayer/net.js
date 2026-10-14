@@ -140,6 +140,8 @@ export class Net {
       onSpawn: [],
       onHello: [],
       onGo: [],
+      onLaunch: [],
+      onBullet: [],
     };
 
     this._sendState = null;
@@ -147,6 +149,8 @@ export class Net {
     this._sendHello = null;
     this._sendBack = null;
     this._sendGo = null;
+    this._sendLaunch = null;
+    this._sendBullet = null;
     this._sendHeartbeat = null;
     this._sweepTimer = null;
     this._heartbeatTimer = null;
@@ -236,6 +240,8 @@ export class Net {
     this._sendHello = null;
     this._sendBack = null;
     this._sendGo = null;
+    this._sendLaunch = null;
+    this._sendBullet = null;
     this._sendHeartbeat = null;
     if (room) {
       try { room.leave(); } catch (e) { /* already gone */ }
@@ -306,6 +312,15 @@ export class Net {
       const goAction = room.makeAction("go");
       goAction.onMessage = (data, ctx) => this._emit("onGo", ctx.peerId, data);
 
+      // "Launch" — one player pressed SPAWN: the whole party launches.
+      const launchAction = room.makeAction("ln");
+      launchAction.onMessage = (data, ctx) => this._emit("onLaunch", ctx.peerId, data);
+
+      // "Bullet fired" — one event per round: the frozen path only; every
+      // client simulates the deterministic trajectory locally.
+      const bulletAction = room.makeAction("bl");
+      bulletAction.onMessage = (data, ctx) => this._emit("onBullet", ctx.peerId, data);
+
       this._sendState = (payload) =>
         stateAction.send(payload).catch((e) => console.warn("[mp] state send failed:", e));
       this._sendSpawn = (payload) =>
@@ -314,6 +329,8 @@ export class Net {
         helloAction.send(payload).catch((e) => console.warn("[mp] hello send failed:", e));
       this._sendBack = () => backAction.send({ t: 1 }).catch((e) => console.warn("[mp] back send failed:", e));
       this._sendGo = (payload) => goAction.send(payload).catch((e) => console.warn("[mp] go send failed:", e));
+      this._sendLaunch = (payload) => launchAction.send(payload).catch((e) => console.warn("[mp] launch send failed:", e));
+      this._sendBullet = (payload) => bulletAction.send(payload).catch((e) => console.warn("[mp] bullet send failed:", e));
       this._sendHeartbeat = () => hbAction.send({ t: 1 }).catch(() => { /* liveness is best-effort */ });
 
       // Liveness ping well inside the sweep window (3 missed beats tolerated).
@@ -454,6 +471,18 @@ export class Net {
   broadcastGo(payload) {
     if (!this.active || !this._sendGo) return;
     this._sendGo(payload || { t: 1 });
+  }
+
+  /** One player pressed SPAWN: the whole party launches together. */
+  broadcastLaunch(payload) {
+    if (!this.active || !this._sendLaunch) return;
+    this._sendLaunch(payload || { t: 1 });
+  }
+
+  /** One round fired: broadcast its frozen path (~60 bytes). */
+  broadcastBullet(payload) {
+    if (!this.active || !this._sendBullet) return;
+    this._sendBullet(payload);
   }
 
   async leave() {

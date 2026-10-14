@@ -1606,3 +1606,50 @@ joiner connects, both lists update, START host-only, both reach spawn,
 gate arms for both, both flying, each sees the other rendered, remote
 position demonstrably moves over 3 s, single player untouched) and the
 single-player probe 85/85.
+
+## 31. Recent changes (real-time multiplayer: clock-creep fix, turn-aware dead reckoning, networked gunfire, synchronized launch)
+
+### Why the other plane did not read as real-time: a clock-offset creep bug
+
+The remote-plane pipeline was already the researched standard (sender-clock
+snapshots, minimum-offset clock estimation, fixed 100 ms interpolation
+delay, dead reckoning) - but the offset estimator crept upward
++0.5 ms PER PACKET to "follow clock drift". At 30 packets/s that is ~0.9 s
+of phantom clock skew PER MINUTE of flight: the render point slid seconds
+into the past, so the other plane flew a stale path. Real clock drift is
+under 1 ms/min; the creep is now +0.005/packet (9 ms/min worst case).
+
+### Turn-aware dead reckoning (standard vehicle netcode)
+
+The coast extrapolated along a FROZEN heading, so a banking plane rendered
+off its true arc between packets. Heading and pitch rates are now taken
+from the last two snapshots and rotated during the coast - a turning fight
+reads correctly in the gaps.
+
+### Networked gunfire
+
+Fire is an EVENT, not a simulation on the wire (standard event-driven
+projectile netcode): each round broadcasts its frozen path once
+(~60 bytes: muzzle lon/lat/alt + heading + pitch + speed), and every
+receiving client simulates the identical deterministic trajectory locally
+in THEIR real 3D terrain - movePosition along the frozen heading/pitch at
+the frozen speed, 3 s life, terrain impact on the receiver's own globe.
+Rendered as thin elongated tracer boxes in the main Cesium viewer
+(remoteBullets.js), fired through the game's real trigger path (hold F /
+aimed shot) on both desktop and mobile. Capped at 80 live tracers.
+
+### Synchronized launch
+
+Pressing SPAWN is now a PARTY event: one player's click broadcasts
+"launch" and BOTH devices enter the loading film + spawning animation
+together (no more sitting on the map alone while your partner flies).
+The follower is guarded - it must be in the picker with its own point
+placed before it follows. The picker-entry film also restarts cleanly
+from its opening frame every time (a resume from an arbitrary paused
+point is what made the film "sometimes not appear").
+
+Verified with the two-browser e2e through the real flow (17/17: party
+code, lobby lists, host START, both-placed gate, ONE SPAWN click ->
+BOTH flying, each sees the other rendered, host gunfire -> joiner sees
+tracers, remote position demonstrably moves, single player untouched)
+and the single-player probe 85/85.

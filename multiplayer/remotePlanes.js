@@ -211,10 +211,13 @@ export class RemotePlanes {
     const hasTs = typeof data.ts === "number" && Number.isFinite(data.ts);
     if (hasTs) {
       // Track the minimum observed offset: latency only ever adds, so the
-      // minimum is the closest estimate of the true clock difference. Let it
-      // creep upward slowly so slow drift is followed.
+      // minimum is the closest estimate of the true clock difference. Real
+      // clock drift is well under 1 ms/min, so the upward creep is tiny —
+      // the old +0.5/packet added ~0.9 s of phantom skew PER MINUTE and
+      // slowly pushed the render point seconds into the past ("the other
+      // plane is not really moving").
       const inst = recvMs - data.ts;
-      plane.offset = plane.offset == null ? inst : (inst < plane.offset ? inst : plane.offset + 0.5);
+      plane.offset = plane.offset == null ? inst : (inst < plane.offset ? inst : plane.offset + 0.005);
       plane.clocked = true;
     }
     const t = hasTs ? data.ts : recvMs;
@@ -274,20 +277,39 @@ export class RemotePlanes {
   }
 
   /**
-   * Coast along a snapshot's last known velocity. Used when the render time
-   * has run past the newest sample — INCLUDING the very first one, which is
-   * what keeps a plane moving from the moment it appears. Freezing on a lone
-   * snapshot until the second packet lands is precisely the hover-then-
-   * teleport symptom: the plane sits still, then jumps the whole accumulated
-   * gap in one frame.
+   * Coast along a snapshot's last known velocity AND turn rates. Used when
+   * the render time has run past the newest sample — INCLUDING the very
+   * first one, which is what keeps a plane moving from the moment it
+   * appears. Freezing on a lone snapshot until the second packet lands is
+   * precisely the hover-then-teleport symptom: the plane sits still, then
+   * jumps the whole accumulated gap in one frame.
+   *
+   * Turn-aware (standard vehicle dead reckoning): the heading/pitch rates
+   * are taken from the last two snapshots, so a BANKING plane extrapolates
+   * along its curved path instead of flying straight off the arc it was
+   * actually flying — a turning fight reads correctly between packets.
    */
-  _coast(snap, aheadMs) {
+  _coast(snap, aheadMs, plane) {
     const ahead = Math.min(aheadMs, MAX_EXTRAP_MS);
     if (ahead <= 0 || !snap.fly) return snap;
     const mps = snap.v * MPH_TO_MPS * this.worldSpeedScale;
     if (mps <= 0.01) return snap;
-    const np = movePosition(snap.lon, snap.lat, snap.alt, snap.h, snap.p, mps * (ahead / 1000));
-    return { t: snap.t + ahead, lon: np.lon, lat: np.lat, alt: np.alt, h: snap.h, p: snap.p, r: snap.r, v: snap.v, fly: snap.fly };
+    let h = snap.h;
+    let p = snap.p;
+    if (plane && plane.snaps.length >= 2) {
+      const s = plane.snaps;
+      const a = s[s.length - 2];
+      const b = s[s.length - 1];
+      const span = b.t - a.t;
+      if (span > 0) {
+        const hRate = wrapDeg(b.h - a.h) / span;   // deg per ms
+        const pRate = (b.p - a.p) / span;
+        h = snap.h + hRate * ahead;
+        p = snap.p + pRate * ahead;
+      }
+    }
+    const np = movePosition(snap.lon, snap.lat, snap.alt, h, p, mps * (ahead / 1000));
+    return { t: snap.t + ahead, lon: np.lon, lat: np.lat, alt: np.alt, h, p, r: snap.r, v: snap.v, fly: snap.fly };
   }
 
   /**
@@ -303,7 +325,7 @@ export class RemotePlanes {
     if (t <= s[0].t) return s[0];
 
     const last = s[s.length - 1];
-    if (t >= last.t) return this._coast(last, t - last.t);
+    if (t >= last.t) return this._coast(last, t - last.t, plane);
 
     for (let i = s.length - 2; i >= 0; i--) {
       if (s[i].t <= t) {
