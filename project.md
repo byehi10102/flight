@@ -1747,3 +1747,13 @@ preload were already inside the box, so loading got strictly cheaper.
 Verified: 87/87 mobile+desktop probe (new checks: the Earth is loaded,
 visible and demonstrably rotating; a foreign spawn point is refused), 77/77
 unit tests.
+
+## 34. Recent changes (menu backdrop: Earth only, no jet)
+
+The jet sat parked in camera space on the same render layer, so the menu
+branch was drawing it in front of the spinning Earth. The menu now hides
+the whole jet group per frame (flames are children of it, so they hide
+too) - the backdrop is ONLY the Earth and Moon. Flight states restore the
+jet via PlaneModel.reset() at every spawn, so the crash/respawn visibility
+flow is untouched. Probe asserts both sides: the Earth spins AND the jet
+is hidden behind the buttons. 87/87.

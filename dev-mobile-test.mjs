@@ -382,6 +382,14 @@ const browserDesk = await puppeteer.launch(LAUNCH);
   check("menu Earth model is loaded, visible and slowly spinning",
     earthSamples[0].loaded && earthSamples[0].visible && spread > 0.05,
     `rotYs=${rotYs.join(",")}`);
+  // The menu shows ONLY the Earth: the jet (parked in camera space on the
+  // same render layer) must be hidden behind the buttons.
+  const jetHidden = await page.evaluate(() => ({
+    loaded: !!window.SKY_DEV.planeModel?.model,
+    visible: window.SKY_DEV.planeModel?.model?.visible,
+  }));
+  check("menu shows only the Earth — the airplane is hidden",
+    jetHidden.loaded && jetHidden.visible === false, JSON.stringify(jetHidden));
   }
   check("speed box on the LEFT third (ref-flight HUD)", r.speedCX < r.vw * 0.45,
     `centerX=${r.speedCX} of ${r.vw}`);

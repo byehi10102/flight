@@ -2387,7 +2387,11 @@ function animate() {
 
   // MENU: the public Earth+Moon model slowly spins behind the buttons.
   // The overlay canvas is transparent, so the real globe stays behind it.
+  // The jet (parked in camera space on the same render layer) is HIDDEN
+  // here — the menu shows only the Earth. Flight states restore it via
+  // PlaneModel.reset() at every spawn.
   if (currentState === States.MENU) {
+    if (planeModel?.model) planeModel.model.visible = false;
     if (menuEarth) {
       menuEarth.rotation.y += dt * MENU_EARTH_SPIN;
       menuEarth.visible = true;
