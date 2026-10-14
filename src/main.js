@@ -2583,6 +2583,8 @@ if (new URLSearchParams(location.search).has("devtest")) {
     get threeScene() { return scene; },
     // Fire + aim exactly like a real click at the given screen point.
     fireBulletAtScreen,
+    // Multiplayer handle (devtest: lobby flow, remote-plane checks).
+    get mp() { return mp; },
     // Deterministic spawn placement for integration tests — the game's own
     // placement path, skipping the raster-tap that headless WebGL can't hit.
     placeSpawn: (lon, lat, name) => selectSpawnPoint(lon, lat, 0, name, name, null),

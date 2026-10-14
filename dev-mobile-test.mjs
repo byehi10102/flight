@@ -41,7 +41,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // ── dist/ static server (integration phases exercise the BUILT bundle) ─────
 const here = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"));
 const MIME = {
-  ".html": "text/html", ".js": "text/javascript", ".css": "text/css",
+  ".html": "text/html", ".js": "text/javascript", ".mjs": "text/javascript", ".css": "text/css",
   ".json": "application/json", ".svg": "image/svg+xml", ".glb": "model/gltf-binary",
   ".mp3": "audio/mpeg", ".png": "image/png", ".wasm": "application/wasm",
 };

@@ -42,16 +42,20 @@ export function buildMpUi(ctx) {
             <span class="logo-main">MULTIPLAYER</span>
             <span class="logo-sub">BETA</span>
           </div>
-          <p class="menu-desc">Serverless — you and your partner swap two short codes by any means (Discord, SMS, email). No accounts, no server of ours in the middle.</p>
+          <p class="menu-desc">Serverless — one short party code connects two devices. No accounts, no server of ours in the middle.</p>
           <label class="mp-field">
             <span class="mp-field-label">CALLSIGN</span>
             <input id="mpCallsign" type="text" maxlength="14" placeholder="PILOT" autocomplete="off" />
           </label>
           <div class="mp-actions">
+            <label class="mp-field">
+              <span class="mp-field-label">PARTY NAME</span>
+              <input id="mpPartyName" type="text" maxlength="24" placeholder="SUNDAY SQUADRON" autocomplete="off" />
+            </label>
             <button id="mpCreateBtn" class="menu-btn">CREATE PARTY</button>
-            <div class="mp-or"><span>OR JOIN WITH A CODE</span></div>
-            <textarea id="mpCodeInput" class="mp-code" placeholder="paste the invite code you were sent"></textarea>
-            <button id="mpJoinBtn" class="menu-btn">JOIN</button>
+            <div class="mp-or"><span>OR JOIN WITH A PARTY CODE</span></div>
+            <input id="mpCodeInput" class="mp-code-input" maxlength="4" placeholder="A1B2" autocomplete="off" autocapitalize="characters" />
+            <button id="mpJoinBtn" class="menu-btn">JOIN PARTY</button>
           </div>
           <div id="mpStatus" class="mp-status"></div>
           <button id="mpBackBtn" class="menu-btn menu-btn-ghost">BACK</button>
@@ -71,9 +75,21 @@ export function buildMpUi(ctx) {
         <div class="menu-content">
           <div class="menu-header">
             <span class="logo-main">PARTY</span>
-            <span class="logo-sub">WAITING ROOM</span>
+            <span class="logo-sub" id="wrPartyNameEl">LOBBY</span>
           </div>
           <div id="wrRole" class="wr-role"></div>
+
+          <div class="wr-code-block">
+            <div class="wr-step" id="wrCodeLabel">PARTY CODE — share this with your friend</div>
+            <div id="wrCodeEl" class="wr-code">····</div>
+          </div>
+
+          <div class="wr-players">
+            <div id="wrSelf" class="wr-player">PLAYER 1 (YOU)</div>
+            <div id="wrPeer" class="wr-player wr-peer-empty">PLAYER 2 — WAITING…</div>
+          </div>
+          <button id="wrStartBtn" class="menu-btn hidden">START</button>
+          <div id="wrDiag" class="wr-diag"></div>
 
           <div id="wrHostBlock" class="wr-block hidden">
             <div class="wr-step">1 · Send this invite to your partner (Discord, SMS, email)</div>
@@ -90,11 +106,6 @@ export function buildMpUi(ctx) {
             <button id="wrCopyReply" class="wr-copy">COPY REPLY</button>
           </div>
 
-          <div class="wr-players">
-            <div id="wrSelf" class="wr-player">YOU</div>
-            <div id="wrPeer" class="wr-player wr-peer-empty">WAITING FOR PLAYER…</div>
-          </div>
-          <div id="wrDiag" class="wr-diag"></div>
           <div id="wrStatus" class="mp-status"></div>
           <button id="wrLeaveBtn" class="menu-btn menu-btn-ghost">LEAVE PARTY</button>
         </div>
@@ -118,12 +129,17 @@ export function buildMpUi(ctx) {
     waitingRoom,
     badge,
     mpCallsign: document.getElementById("mpCallsign"),
+    mpPartyName: document.getElementById("mpPartyName"),
     mpCreateBtn: document.getElementById("mpCreateBtn"),
     mpJoinBtn: document.getElementById("mpJoinBtn"),
     mpCodeInput: document.getElementById("mpCodeInput"),
     mpStatusEl: document.getElementById("mpStatus"),
     mpBackBtn: document.getElementById("mpBackBtn"),
     wrRoleEl: document.getElementById("wrRole"),
+    wrCodeEl: document.getElementById("wrCodeEl"),
+    wrCodeLabel: document.getElementById("wrCodeLabel"),
+    wrPartyNameEl: document.getElementById("wrPartyNameEl"),
+    wrStartBtn: document.getElementById("wrStartBtn"),
     wrHostBlock: document.getElementById("wrHostBlock"),
     wrJoinBlock: document.getElementById("wrJoinBlock"),
     wrInviteOut: document.getElementById("wrInviteOut"),

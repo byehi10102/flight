@@ -75,7 +75,7 @@ const RELAY_URLS = [
 // working TURN server to this list — the code already passes it through.
 /** Unambiguous alphabet: no I/O/0/1 to keep codes easy to read aloud. */
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-const CODE_LENGTH = 5;
+const CODE_LENGTH = 4;
 /**
  * Flight-state send rate. A steady stream is what lets the peer interpolate
  * smoothly, so this is decoupled from the (variable) render rate.
@@ -139,12 +139,14 @@ export class Net {
       onState: [],
       onSpawn: [],
       onHello: [],
+      onGo: [],
     };
 
     this._sendState = null;
     this._sendSpawn = null;
     this._sendHello = null;
     this._sendBack = null;
+    this._sendGo = null;
     this._sendHeartbeat = null;
     this._sweepTimer = null;
     this._heartbeatTimer = null;
@@ -233,6 +235,7 @@ export class Net {
     this._sendSpawn = null;
     this._sendHello = null;
     this._sendBack = null;
+    this._sendGo = null;
     this._sendHeartbeat = null;
     if (room) {
       try { room.leave(); } catch (e) { /* already gone */ }
@@ -299,6 +302,10 @@ export class Net {
       const backAction = room.makeAction("bk");
       backAction.onMessage = () => this._emit("onBack");
 
+      // "Party start" — the HOST moves the whole party into the spawn map.
+      const goAction = room.makeAction("go");
+      goAction.onMessage = (data, ctx) => this._emit("onGo", ctx.peerId, data);
+
       this._sendState = (payload) =>
         stateAction.send(payload).catch((e) => console.warn("[mp] state send failed:", e));
       this._sendSpawn = (payload) =>
@@ -306,6 +313,7 @@ export class Net {
       this._sendHello = (payload) =>
         helloAction.send(payload).catch((e) => console.warn("[mp] hello send failed:", e));
       this._sendBack = () => backAction.send({ t: 1 }).catch((e) => console.warn("[mp] back send failed:", e));
+      this._sendGo = (payload) => goAction.send(payload).catch((e) => console.warn("[mp] go send failed:", e));
       this._sendHeartbeat = () => hbAction.send({ t: 1 }).catch(() => { /* liveness is best-effort */ });
 
       // Liveness ping well inside the sweep window (3 missed beats tolerated).
@@ -440,6 +448,12 @@ export class Net {
   broadcastBack() {
     if (!this.active || !this._sendBack) return;
     this._sendBack();
+  }
+
+  /** HOST: move the whole party into the spawn map. */
+  broadcastGo(payload) {
+    if (!this.active || !this._sendGo) return;
+    this._sendGo(payload || { t: 1 });
   }
 
   async leave() {

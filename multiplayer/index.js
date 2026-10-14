@@ -15,6 +15,7 @@
  * game state by reference, DOM handles, and the spawn-flow hooks.
  */
 import { ManualLink, looksLikeCode } from "./manual.js";
+import { Net, generateRoomCode, normalizeRoomCode } from "./net.js";
 import { createRemotePlanes } from "./remotePlanes.js";
 import { createSpawnPresence } from "./spawnPresence.js";
 import { buildMpUi } from "./ui.js";
@@ -51,7 +52,9 @@ export function initMp(ctx) {
   const ui = buildMpUi(ctx);
   const { state, dom } = ctx;
 
-  let net = new ManualLink();
+  let net = new Net();
+  let isHost = false;
+  let partyName = "";
   const remotePlanes = createRemotePlanes({
     Cesium: ctx.Cesium,
     viewer: ctx.viewer,
@@ -103,15 +106,26 @@ export function initMp(ctx) {
 
   function updateWaitingRoom() {
     const peers = net.activePeers();
-    if (ui.wrSelfEl) ui.wrSelfEl.textContent = `YOU — ${net.callsign}`;
+    if (ui.wrSelfEl) {
+      ui.wrSelfEl.textContent = `PLAYER 1 (YOU) — ${myCallsign()}`;
+    }
     if (ui.wrPeerEl) {
       if (peers.length) {
         ui.wrPeerEl.classList.remove("wr-peer-empty");
-        ui.wrPeerEl.textContent = peers.map((p) => p.callsign || "PILOT").join(", ");
+        ui.wrPeerEl.textContent = `PLAYER 2 — ${peers.map((p) => p.callsign || "PILOT").join(", ")}`;
       } else {
         ui.wrPeerEl.classList.add("wr-peer-empty");
-        ui.wrPeerEl.textContent = "WAITING FOR PLAYER…";
+        ui.wrPeerEl.textContent = "PLAYER 2 — WAITING…";
       }
+    }
+    // The START button exists only for the host, and only with a partner.
+    if (ui.wrStartBtn) {
+      ui.wrStartBtn.classList.toggle("hidden", !(isHost && peers.length > 0));
+    }
+    if (ui.wrRoleEl) {
+      ui.wrRoleEl.textContent = isHost
+        ? "HOST — PRESS START WHEN YOUR PARTY IS READY"
+        : "WAITING FOR THE HOST TO START";
     }
     updateDiag();
     refreshBadge();
@@ -184,10 +198,7 @@ export function initMp(ctx) {
         partnerLeft = false;
         knownPeers.add(peerId);
         updateWaitingRoom();
-        setStatus(ui.wrStatusEl, "Player joined — starting spawn selection…", "ok");
-        setTimeout(() => {
-          if (active && phase === "waiting") beginSpawnPhase();
-        }, 600);
+        setStatus(ui.wrStatusEl, "Player 2 connected — party is ready.", "ok");
       })
       .on("onPeerLeave", (peerId) => {
         knownPeers.delete(peerId);
@@ -222,23 +233,26 @@ export function initMp(ctx) {
         spawnPresence.setCallsign(peerId, callsign);
         updateWaitingRoom();
       })
-      .on("onBack", () => goBackToPicking());
+      .on("onBack", () => goBackToPicking())
+      // HOST pressed START: the whole party moves into the spawn map.
+      .on("onGo", () => {
+        if (active && (phase === "waiting" || phase === "lobby")) beginSpawnPhase();
+      });
   }
 
-  // ── Party start: no server, no relays — two codes exchanged by hand ─────
-  /**
-   * Because "join by code" is the manual WebRTC exchange, CREATE PARTY and
-   * JOIN lead into the same waiting room with different roles: the host shows
-   * an invite and pastes a reply, the joiner pastes an invite and shows a
-   * reply. Both end at the identical spawn flow.
-   */
+  // ── Party flow: create (get a code) or join (type the code) ──────────────
+  // Both sides end in the SAME party room: the code is the only shared
+  // secret, and the connection (handshake over public relays, then direct
+  // WebRTC) happens by itself — nothing is exchanged by hand.
   function beginManualParty() {
     active = true;
     phase = "waiting";
     spawnPlaced = false;
     partnerLeft = false;
     knownPeers = new Set();
-    roomCode = "MANUAL";
+    // The manual invite/reply blocks stay hidden — the code IS the flow now.
+    if (ui.wrHostBlock) ui.wrHostBlock.classList.add("hidden");
+    if (ui.wrJoinBlock) ui.wrJoinBlock.classList.add("hidden");
     showScreen("waiting");
     setStatus(ui.wrStatusEl, "");
     updateWaitingRoom();
@@ -256,42 +270,47 @@ export function initMp(ctx) {
     return (ui.mpCallsign?.value || "PILOT").trim().slice(0, 14) || "PILOT";
   }
 
-  /** CREATE PARTY — build an invite code, then wait for the reply. */
+  /** CREATE PARTY — name it, get a 4-character code, wait in the lobby. */
   async function hostParty() {
+    partyName = (ui.mpPartyName?.value || "").trim().slice(0, 24);
+    isHost = true;
+    roomCode = generateRoomCode();
     beginManualParty();
-    setWaitingRole("host");
-    if (ui.wrInviteOut) ui.wrInviteOut.value = "";
-    if (ui.wrReplyIn) ui.wrReplyIn.value = "";
-    net = new ManualLink();
+    if (ui.wrCodeLabel) ui.wrCodeLabel.textContent = "PARTY CODE — share this with your friend";
+    if (ui.wrCodeEl) ui.wrCodeEl.textContent = roomCode;
+    if (ui.wrPartyNameEl) ui.wrPartyNameEl.textContent = (partyName || "PARTY").toUpperCase();
+    net = new Net();
     attachHandlers(net);
-    setStatus(ui.wrStatusEl, "Building your invite code…", "busy");
+    setStatus(ui.wrStatusEl, `Party “${partyName || "PARTY"}” created — code ${roomCode}. Waiting for Player 2…`, "ok");
     try {
-      const code = await net.createInvite(myCallsign());
-      if (ui.wrInviteOut) ui.wrInviteOut.value = code;
-      setStatus(ui.wrStatusEl, "Send your invite, then paste the reply you get back.", "ok");
+      await net.connect(roomCode, myCallsign());
     } catch (e) {
-      setStatus(ui.wrStatusEl, "Could not build an invite: " + e.message, "error");
+      setStatus(ui.wrStatusEl, "Could not open the party: " + e.message, "error");
     }
   }
 
-  /** JOIN — read the host's invite and produce the reply to send back. */
-  async function joinParty(inviteCode) {
-    if (!looksLikeCode(inviteCode)) {
-      setStatus(ui.mpStatusEl, "That does not look like a Skyward invite code.", "error");
+  /** JOIN PARTY — type the 4-character code, land in the same lobby. */
+  async function joinParty(rawCode) {
+    const code = normalizeRoomCode(rawCode);
+    if (code.length !== 4) {
+      setStatus(ui.mpStatusEl, "Enter the 4-character party code.", "error");
       return;
     }
+    partyName = "";
+    isHost = false;
+    roomCode = code;
     beginManualParty();
-    setWaitingRole("joiner");
-    if (ui.wrReplyOut) ui.wrReplyOut.value = "";
-    net = new ManualLink();
+    if (ui.wrCodeLabel) ui.wrCodeLabel.textContent = `PARTY CODE — ${code}`;
+    if (ui.wrCodeEl) ui.wrCodeEl.textContent = code;
+    if (ui.wrPartyNameEl) ui.wrPartyNameEl.textContent = "PARTY";
+    net = new Net();
     attachHandlers(net);
-    setStatus(ui.wrStatusEl, "Reading the invite…", "busy");
+    setStatus(ui.wrStatusEl, "Connecting to the party…", "busy");
     try {
-      const reply = await net.acceptInvite(inviteCode, myCallsign());
-      if (ui.wrReplyOut) ui.wrReplyOut.value = reply;
-      setStatus(ui.wrStatusEl, "Send this reply back to the host — you connect as soon as they paste it.", "ok");
+      const ok = await net.connect(code, myCallsign());
+      if (ok) setStatus(ui.wrStatusEl, "Connected — waiting for the host to start.", "ok");
     } catch (e) {
-      setStatus(ui.wrStatusEl, "Could not read that invite: " + e.message, "error");
+      setStatus(ui.wrStatusEl, "Could not join that party: " + e.message, "error");
     }
   }
 
@@ -398,6 +417,7 @@ export function initMp(ctx) {
     const had = active;
     active = false;
     phase = "idle";
+    isHost = false;
     spawnPlaced = false;
     partnerLeft = false;
     knownPeers = new Set();
@@ -547,20 +567,32 @@ export function initMp(ctx) {
   });
   ui.mpBackBtn?.addEventListener("click", () => showScreen("menu"));
 
-  // Lobby → the two halves of the manual (no-server) handshake.
+  // Lobby → create (name + code) or join (the code).
   ui.mpCreateBtn?.addEventListener("click", () => hostParty());
   ui.mpJoinBtn?.addEventListener("click", () => {
     const code = (ui.mpCodeInput?.value || "").trim();
     if (!code) {
-      setStatus(ui.mpStatusEl, "Paste the invite code you were sent first.", "error");
+      setStatus(ui.mpStatusEl, "Enter the party code first.", "error");
       return;
     }
     joinParty(code);
   });
   ui.mpCodeInput?.addEventListener("keydown", (e) => {
+    e.stopPropagation();
     if (e.key !== "Enter") return;
     const code = (ui.mpCodeInput.value || "").trim();
     if (code) joinParty(code);
+  });
+  ui.mpPartyName?.addEventListener("keydown", (e) => e.stopPropagation());
+  // HOST START: move the whole party into the spawn map.
+  ui.wrStartBtn?.addEventListener("click", () => {
+    if (!active || !isHost) return;
+    if (net.peerCount() === 0) {
+      setStatus(ui.wrStatusEl, "Waiting for Player 2 to join first.", "error");
+      return;
+    }
+    try { net.broadcastGo(); } catch (e) { /* best effort */ }
+    beginSpawnPhase();
   });
 
   const copyFrom = async (el, btn, doneLabel) => {
@@ -589,6 +621,14 @@ export function initMp(ctx) {
 
   return {
     isActive: () => active,
+    isHost: () => isHost,
+    roomCode: () => roomCode,
+    remoteCount: () => remotePlanes.planes.size,
+    /** Devtest: first remote plane's live (interpolated) pose, or null. */
+    remoteLiveSample() {
+      const p = remotePlanes.planes.values().next().value;
+      return p && p.live ? { lon: p.live.lon, lat: p.live.lat, alt: p.live.alt } : null;
+    },
     bothSpawnPlaced,
     noteSpawnPlaced,
     goBackToPicking,

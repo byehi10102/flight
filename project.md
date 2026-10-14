@@ -1575,3 +1575,34 @@ into the already-open picker. The globe stays THROTTLED while the film
 is up (smooth decode), the in-picker chip stays for pan-around loading
 after the film, Escape stops the film cleanly, and the boot-only reveal
 machinery (outro, bootPageGone) is untouched.
+
+## 30. Recent changes (multiplayer reworked: party by code)
+
+The manual invite/reply exchange (paste a long code, send it away, paste a
+longer reply back) is replaced by the party-code flow, and the flow is the
+abstraction now: a 4-character code (letters+digits, no I/O/0/1) IS the
+party. CREATE PARTY names the party and generates the code; JOIN PARTY
+types it on the other device. Both land in the same lobby, which shows the
+big code and the player list - "PLAYER 1 (YOU)" over "PLAYER 2 - WAITING…"
+until the partner connects, then their callsign - so both players KNOW
+they are connected. The connection itself is the existing keyless
+transport (Trystero over public relays, then direct WebRTC): nothing is
+exchanged by hand any more.
+
+The HOST alone gets a START button (once the party is full); pressing it
+moves the WHOLE party into the shared spawn map (a new "go" room action -
+the joiner enters picking without touching anything). Both players pick
+their own spawn points; the SPAWN button stays greyed for both until BOTH
+have placed (the existing gate, unchanged). Each player then runs the
+loading film + spawning animation on their own machine and enters flight.
+
+Seeing each other and REAL relative motion were already engineered and are
+now verified end to end: 20 Hz state stream + snapshot-buffered
+interpolation (100 ms behind, velocity extrapolation through gaps) means
+a plane flying at you closes at the true rate - it does not hang. The
+manual link code and its UI blocks remain on disk, unused (hidden), per
+the no-delete rule. Verified with the two-browser e2e (16/16: code created,
+joiner connects, both lists update, START host-only, both reach spawn,
+gate arms for both, both flying, each sees the other rendered, remote
+position demonstrably moves over 3 s, single player untouched) and the
+single-player probe 85/85.

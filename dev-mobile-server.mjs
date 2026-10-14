@@ -11,7 +11,7 @@ const FILES = {
   "/touch": path.join(here, "dev-touch-page.html"),
   "/": path.join(here, "dev-touch-page.html"),
 };
-const MIME = { ".js": "text/javascript", ".html": "text/html", ".css": "text/css" };
+const MIME = { ".js": "text/javascript", ".mjs": "text/javascript", ".html": "text/html", ".css": "text/css" };
 
 export function startMobileTestServer(port = 4242) {
   const server = http.createServer((req, res) => {

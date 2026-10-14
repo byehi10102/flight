@@ -17,7 +17,7 @@
  */
 import puppeteer from "puppeteer";
 
-const GAME = process.env.GAME_URL || "http://127.0.0.1:5173/";
+const GAME = process.env.GAME_URL || "http://127.0.0.1:5173/?devtest=1";
 const HEADLESS = process.env.HEADFUL !== "1";
 
 let pass = 0;
@@ -127,8 +127,8 @@ async function waitForBothInSpawn(a, b, timeoutMs = 60000) {
 }
 
 try {
-  // ══ A. LOBBY = MANUAL CREATE/JOIN (the only no-server path) ════════════
-  console.log("\n=== A. create/join by code, in the lobby (real game) ===\n");
+  // ══ A. PARTY BY CODE: create → code → join → lobby → host START ══════
+  console.log("\n=== A. create/join party by 4-char code, lobby, host start (real game) ===\n");
   const host = await openGame(browserA, "host");
   const joiner = await openGame(browserB, "joiner");
 
@@ -136,42 +136,95 @@ try {
     await p.click("#mpBtn");
     await p.waitForSelector("#mpCreateBtn", { visible: true, timeout: 20000 });
   }
-  check("lobby shows CREATE PARTY / JOIN directly (no separate manual screen)", true);
+  check("lobby shows CREATE PARTY (name) / JOIN PARTY (code)", true);
 
-  // Host creates a party → the waiting room shows the invite.
+  // Host names the party and creates it → a 4-character code appears.
+  await host.type("#mpPartyName", "TEST SQUADRON");
   await host.click("#mpCreateBtn");
   await host.waitForFunction(() => {
-    const el = document.getElementById("wrInviteOut");
-    return el && el.value.startsWith("SKW1:");
+    const el = document.getElementById("wrCodeEl");
+    return el && /^[A-Z2-9]{4}$/.test(el.textContent.trim());
   }, { timeout: 30000 });
-  const invite = await host.$eval("#wrInviteOut", (el) => el.value);
-  check("CREATE PARTY produced an invite code in the waiting room",
-    invite.startsWith("SKW1:") && invite.length > 100, `len ${invite.length}`);
-  check("host sees the share-invite step",
-    await host.$eval("#wrHostBlock", (el) => !el.classList.contains("hidden")));
-  check("host does not see the joiner step",
-    await host.$eval("#wrJoinBlock", (el) => el.classList.contains("hidden")));
+  const code = await host.$eval("#wrCodeEl", (el) => el.textContent.trim());
+  check("CREATE PARTY produced a 4-character code", /^[A-Z2-9]{4}$/.test(code), code);
 
-  // Joiner pastes the invite and joins → the waiting room shows the reply.
-  await joiner.$eval("#mpCodeInput", (el, v) => { el.value = v; }, invite);
+  // Joiner types the code on the OTHER DEVICE and joins the same party.
+  await joiner.type("#mpCodeInput", code);
   await joiner.click("#mpJoinBtn");
   await joiner.waitForFunction(() => {
-    const el = document.getElementById("wrReplyOut");
-    return el && el.value.startsWith("SKW1:");
+    const el = document.getElementById("wrPeer");
+    return el && !el.classList.contains("wr-peer-empty");
+  }, { timeout: 60000 });
+  check("joiner sees PLAYER 2 connected in the list",
+    /PLAYER 2/.test(await joiner.$eval("#wrPeer", (el) => el.textContent)));
+
+  // Host sees the joiner too (both know they are connected).
+  await host.waitForFunction(() => {
+    const el = document.getElementById("wrPeer");
+    return el && !el.classList.contains("wr-peer-empty");
   }, { timeout: 30000 });
-  const reply = await joiner.$eval("#wrReplyOut", (el) => el.value);
-  check("JOIN accepted the code and produced a reply",
-    reply.startsWith("SKW1:") && reply.length > 100, `len ${reply.length}`);
-  check("joiner sees the send-reply step",
-    await joiner.$eval("#wrJoinBlock", (el) => !el.classList.contains("hidden")));
+  check("host sees PLAYER 2 connected in the list",
+    /PLAYER 2/.test(await host.$eval("#wrPeer", (el) => el.textContent)));
 
-  // Host pastes the reply → the direct link establishes.
-  await host.$eval("#wrReplyIn", (el, v) => { el.value = v; }, reply);
-  await host.click("#wrConnectBtn");
+  // START exists only for the host, and only once a partner is in.
+  const jStartHidden = await joiner.$eval("#wrStartBtn", (el) => el.classList.contains("hidden"));
+  check("joiner has no START button", jStartHidden);
+  await host.waitForFunction(() => {
+    const el = document.getElementById("wrStartBtn");
+    return el && !el.classList.contains("hidden");
+  }, { timeout: 20000 });
+  check("host has a START button once the party is full", true);
 
-  const bothInSpawn = await waitForBothInSpawn(host, joiner, 60000);
-  check("both players reached the shared spawn phase (party merged, not two lobbies)",
+  // Host presses START → BOTH move into the shared spawn map.
+  await host.click("#wrStartBtn");
+  const bothInSpawn = await waitForBothInSpawn(host, joiner, 90000);
+  check("host START moved BOTH players into the shared spawn phase",
     bothInSpawn, `host=${await badge(host)} joiner=${await badge(joiner)}`);
+
+  // The picker-entry film (enterSpawnPicking(true) now shows the full boot
+  // film page) must fade out on BOTH pages before the map is clickable.
+  await Promise.all([
+    host.waitForFunction(() => document.getElementById("loadingIndicator")?.classList.contains("hidden"), { timeout: 60000, polling: 500 }).then(() => true).catch(() => false),
+    joiner.waitForFunction(() => document.getElementById("loadingIndicator")?.classList.contains("hidden"), { timeout: 60000, polling: 500 }).then(() => true).catch(() => false),
+  ]);
+
+  // Both place their own spawn point via the game's placement path.
+  await host.evaluate(() => window.SKY_DEV.placeSpawn(-117.90, 33.85, "HOST"));
+  await joiner.evaluate(() => window.SKY_DEV.placeSpawn(-117.80, 33.80, "JOINER"));
+  await sleep(1000);
+  const hSpawnReady = await host.$eval("#confirmSpawnBtn", (el) => !el.disabled && !el.classList.contains("hidden"));
+  const jSpawnReady = await joiner.$eval("#confirmSpawnBtn", (el) => !el.disabled && !el.classList.contains("hidden"));
+  check("SPAWN arms for BOTH players once both placed a point", hSpawnReady && jSpawnReady,
+    `host=${hSpawnReady} joiner=${jSpawnReady}`);
+
+  // Both launch: each gets the loading + spawning animation, then flight.
+  await host.click("#confirmSpawnBtn");
+  await joiner.click("#confirmSpawnBtn");
+  const bothFlying = await Promise.all([
+    host.waitForFunction(() => window.SKY_DEV?.currentState === "FLYING", { timeout: 120000, polling: 500 }).then(() => true).catch(() => false),
+    joiner.waitForFunction(() => window.SKY_DEV?.currentState === "FLYING", { timeout: 120000, polling: 500 }).then(() => true).catch(() => false),
+  ]);
+  check("both players are flying after the spawn animation", bothFlying.every(Boolean),
+    `host=${bothFlying[0]} joiner=${bothFlying[1]}`);
+
+  // Each sees the other's plane in their own 3D world.
+  await sleep(4000);
+  const hRemote = await host.evaluate(() => window.SKY_DEV.mp.remoteCount());
+  const jRemote = await joiner.evaluate(() => window.SKY_DEV.mp.remoteCount());
+  check("each player sees the other's airplane rendered", hRemote >= 1 && jRemote >= 1,
+    `host sees ${hRemote}, joiner sees ${jRemote}`);
+
+  // Real-time relative motion: the remote plane actually moves in my world.
+  const sample1 = await host.evaluate(() => window.SKY_DEV.mp.remoteLiveSample());
+  await sleep(3000);
+  const sample2 = await host.evaluate(() => window.SKY_DEV.mp.remoteLiveSample());
+  const moved = sample1 && sample2 && (
+    Math.abs(sample2.lon - sample1.lon) > 1e-5
+    || Math.abs(sample2.lat - sample1.lat) > 1e-5
+    || Math.abs(sample2.alt - sample1.alt) > 1
+  );
+  check("the remote airplane moves in real time in my 3D world", !!moved,
+    JSON.stringify({ sample1, sample2 }));
 
   const hBadge = await badge(host);
   const jBadge = await badge(joiner);

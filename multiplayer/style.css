@@ -283,3 +283,36 @@
   border-color: rgba(255, 204, 102, 0.55);
   color: #fc6;
 }
+
+/* -- Party-code flow ------------------------------------------------------ */
+/* The big 4-character party code shown in the lobby. */
+#wrCodeEl {
+  font-family: Consolas, monospace;
+  font-size: 48px;
+  font-weight: 700;
+  letter-spacing: 14px;
+  padding-left: 14px; /* balance the trailing letter-spacing */
+  color: #0fe;
+  text-shadow: 0 0 16px rgba(0, 255, 230, 0.5);
+  user-select: all;
+}
+
+/* The 4-character JOIN code input in the multiplayer lobby. */
+.mp-code-input {
+  width: 180px;
+  padding: 10px 14px;
+  text-align: center;
+  font-family: Consolas, monospace;
+  font-size: 26px;
+  letter-spacing: 8px;
+  text-transform: uppercase;
+  color: #0f0;
+  background: rgba(0, 30, 10, 0.6);
+  border: 1px solid rgba(0, 255, 0, 0.4);
+  border-radius: 6px;
+  outline: none;
+}
+.mp-code-input:focus {
+  border-color: rgba(0, 255, 0, 0.8);
+  box-shadow: 0 0 12px rgba(0, 255, 0, 0.25);
+}
