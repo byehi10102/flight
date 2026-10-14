@@ -225,6 +225,86 @@ try {
   check("host's bullets appear in the joiner's 3D world in real time", jTracers,
     `joiner tracers: ${await joiner.evaluate(() => window.SKY_DEV.mp.remoteBulletCount())}`);
 
+  // MANEUVER RESPONSE (run FIRST — the joiner is 500 mph over terrain, and a
+  // crash into the San Gabriels would legitimately freeze its state). This
+  // flight model turns via YAW (A/D): ArrowRight rolls visually but the
+  // heading only moves with the yaw keys — press D, the game's real turn
+  // input, and the remote heading on the host's side visibly changes.
+  // Angular distance is wrap-aware (spawns sit near due north).
+  {
+    const jState = await joiner.evaluate(() => window.SKY_DEV.currentState);
+    const jH0 = await joiner.evaluate(() => window.SKY_DEV.state.heading);
+    const h0 = (await host.evaluate(() => window.SKY_DEV.mp.remoteLiveSample()))?.h ?? 0;
+    await joiner.evaluate(() => window.dispatchEvent(new KeyboardEvent("keydown", { key: "d" })));
+    let dH = 0;
+    let crashed = jState !== "FLYING";
+    const t0 = Date.now();
+    while (Date.now() - t0 < 15000) {
+      await sleep(500);
+      const st = await joiner.evaluate(() => window.SKY_DEV.currentState);
+      if (st !== "FLYING") { crashed = true; break; }
+      const h = (await host.evaluate(() => window.SKY_DEV.mp.remoteLiveSample()))?.h ?? 0;
+      let dh = h - h0;
+      while (dh > 180) dh -= 360;
+      while (dh < -180) dh += 360;
+      dH = Math.abs(dh);
+      if (dH >= 2.5) break;
+    }
+    await joiner.evaluate(() => window.dispatchEvent(new KeyboardEvent("keyup", { key: "d" })));
+    const jH1 = await joiner.evaluate(() => window.SKY_DEV.state.heading);
+    let jDH = jH1 - jH0;
+    while (jDH > 180) jDH -= 360;
+    while (jDH < -180) jDH += 360;
+    check("a turn on one device shows up as a heading change on the other",
+      dH >= 2.5,
+      `remoteDH=${dH.toFixed(1)}deg, localDH=${jDH.toFixed(1)}deg over ${((Date.now() - t0) / 1000).toFixed(1)}s${crashed ? " — JOINER CRASHED (terrain, not netcode)" : ""}`);
+  }
+
+  // SMOOTHNESS METRIC (cadence-aware): this harness throttles rAF to 150ms
+  // to survive software WebGL, so raw 100ms deltas are 0,0,60... by design
+  // of the TEST, not the game. The honest metric is dead-reckoning
+  // FIDELITY: between consecutive samples, the rendered pose must sit close
+  // to where the last pose + velocity + heading say it should be — a
+  // stall-then-jump that FAKES motion deviates hugely from this. Also
+  // asserts no multi-second freeze (max gap between changed samples).
+  const smooth = await host.evaluate(async () => {
+    const samples = [];
+    for (let i = 0; i < 60; i++) {
+      const s = window.SKY_DEV.mp.remoteLiveSample();
+      if (s) samples.push({ t: performance.now(), ...s });
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    const v = window.SKY_DEV.mp.remoteLiveSample()?.v ?? 500;
+    const mps = v * 0.44704 * 1.8;
+    const errs = [];
+    let maxGapMs = 0;
+    for (let i = 1; i < samples.length; i++) {
+      const a = samples[i - 1], b = samples[i];
+      const dt = (b.t - a.t) / 1000;
+      const expDx = Math.sin(a.h * Math.PI / 180) * mps * dt;
+      const expDy = Math.cos(a.h * Math.PI / 180) * mps * dt;
+      const mdx = (b.lon - a.lon) * 111320 * Math.cos(a.lat * Math.PI / 180);
+      const mdy = (b.lat - a.lat) * 111320;
+      const moved = Math.hypot(mdx, mdy);
+      if (moved < 1) continue; // same rendered frame (harness rAF cadence)
+      maxGapMs = Math.max(maxGapMs, b.t - a.t);
+      errs.push(Math.hypot(mdx - expDx, mdy - expDy));
+    }
+    errs.sort((a, b) => a - b);
+    return {
+      n: samples.length,
+      changes: errs.length,
+      medianErr: errs[Math.floor(errs.length / 2)] ?? 0,
+      maxErr: errs[errs.length - 1] ?? 0,
+      maxGapMs,
+    };
+  });
+  const jStillFlying = await joiner.evaluate(() => window.SKY_DEV.currentState === "FLYING");
+  const smoothOk = jStillFlying && smooth.changes >= 8
+    && smooth.medianErr < 120 && smooth.maxErr < 400 && smooth.maxGapMs < 1500;
+  check("remote motion tracks its dead-reckoned path (no stall-then-jump faking)",
+    smoothOk, JSON.stringify(smooth) + (jStillFlying ? "" : " — joiner crashed"));
+
   // Real-time relative motion: the remote plane actually moves in my world.
   const sample1 = await host.evaluate(() => window.SKY_DEV.mp.remoteLiveSample());
   await sleep(3000);
@@ -236,6 +316,16 @@ try {
   );
   check("the remote airplane moves in real time in my 3D world", !!moved,
     JSON.stringify({ sample1, sample2 }));
+
+  // SENDER-SIDE THRESHOLD SENDING works: in level flight the sender skips
+  // beats (DR is accurate) — proof the DIS mirror matches the receiver.
+  const jStats = await joiner.evaluate(() => ({
+    ...window.SKY_DEV.mp.stateStats(),
+    remote: window.SKY_DEV.mp.remoteStats(),
+  }));
+  const skipped = jStats.skipped || 0;
+  check("DIS threshold sending skips redundant beats in level flight", skipped > 10,
+    `sent=${jStats.sent} skipped=${skipped} forced=${jStats.forcedByThreshold}`);
 
   const hBadge = await badge(host);
   const jBadge = await badge(joiner);

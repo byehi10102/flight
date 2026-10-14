@@ -29,16 +29,13 @@
  */
 
 const MPH_TO_MPS = 0.44704;
-/** Render remote planes this far behind the newest packet. */
-const INTERP_DELAY_MS = 100;
-/**
- * Keep pushing along the last known velocity through a gap this long, then
- * hold. Generous on purpose: a throttled or backgrounded tab can drop to
- * ~1 packet per second, and a short window would leave the other plane
- * hovering between packets instead of flying. With a steady velocity the
- * extrapolation and the next interpolation agree, so extending it costs no
- * rubber-banding — it only means a crashed peer coasts a moment longer
- * before the presence sweep removes it.
+/** Keep pushing along the last known velocity through a gap this long, then
+ *  hold. Generous on purpose: a throttled or backgrounded tab can drop to
+ *  ~1 packet per second, and a short window would leave the other plane
+ *  hovering between packets instead of flying. With a steady velocity the
+ *  extrapolation and the next interpolation agree, so extending it costs no
+ *  rubber-banding — it only means a crashed peer coasts a moment longer
+ *  before the presence sweep removes it.
  */
 const MAX_EXTRAP_MS = 2000;
 /** Snapshots older than this (relative to the newest) are dropped. */
@@ -47,6 +44,23 @@ const MODEL_URI = "models/f-15.glb";
 const LABEL_NEAR_M = 3000;
 const LABEL_FAR_M = 20000000;
 const FADE_OUT_S = 3;
+/**
+ * Smooth-correction engagement (DIS "lie gently"): sampled poses within
+ * SMOOTH_EPS_M of what is already displayed apply instantly (normal
+ * interpolation gains ZERO added latency); a larger discontinuity — a
+ * post-stall catch-up or a threshold-triggered burst correction — converges
+ * at SMOOTH_RATE_PER_S so the fix reads as flight, never a teleport.
+ */
+const SMOOTH_EPS_M = 30;
+const SMOOTH_RATE_PER_S = 6;
+
+import {
+  drStep,
+  estimateRates,
+  convergeStep,
+  adaptiveDelay,
+  wrapDeg as netmathWrapDeg,
+} from "./netmath.js";
 
 let Cesium = null;
 
@@ -114,6 +128,15 @@ export class RemotePlanes {
     return this.planes.has(peerId);
   }
 
+  /** Diagnostics (?devtest): per-peer netcode counters. */
+  stats() {
+    const out = {};
+    for (const [peerId, p] of this.planes.entries()) {
+      out[peerId] = { ...p.stats };
+    }
+    return out;
+  }
+
   /** Last rendered (interpolated) position, for the minimap / distance readouts. */
   getLive(peerId) {
     const p = this.planes.get(peerId);
@@ -137,9 +160,16 @@ export class RemotePlanes {
       colour,
       snaps: [],
       live: null,
+      shown: null,
       /** localTime - senderTime for this peer (clock skew + min latency). */
       offset: null,
       clocked: false,
+      /** Adaptive interp window inputs: EWMA packet interval + jitter. */
+      intervalEwma: null,
+      jitterEwma: null,
+      interpDelayMs: 100,
+      /** Diagnostics (?devtest): what the netcode is actually doing. */
+      stats: { packets: 0, underruns: 0, lastCorrectionM: 0, jitterMs: 0, delayMs: 100 },
       leaving: false,
       fadeT: 0,
       entity: null,
@@ -219,6 +249,26 @@ export class RemotePlanes {
       const inst = recvMs - data.ts;
       plane.offset = plane.offset == null ? inst : (inst < plane.offset ? inst : plane.offset + 0.005);
       plane.clocked = true;
+
+      // Adaptive interpolation window (Source cl_interp behaviour): size
+      // the render delay from the sender's actual packet interval plus the
+      // measured network jitter, so a maneuver burst tightens the buffer
+      // while a jittery link deepens it instead of stuttering.
+      const prevSnap = plane.snaps[plane.snaps.length - 1];
+      if (prevSnap) {
+        const interval = data.ts - prevSnap.t;
+        if (interval > 0 && interval < 5000) {
+          plane.intervalEwma = plane.intervalEwma == null
+            ? interval
+            : plane.intervalEwma * 0.8 + interval * 0.2;
+        }
+        const jitter = Math.max(0, inst - plane.offset);
+        plane.jitterEwma = plane.jitterEwma == null
+          ? jitter
+          : plane.jitterEwma * 0.8 + jitter * 0.2;
+        plane.interpDelayMs = adaptiveDelay(plane.intervalEwma, plane.jitterEwma);
+      }
+      plane.stats.packets++;
     }
     const t = hasTs ? data.ts : recvMs;
     const snap = {
@@ -277,39 +327,22 @@ export class RemotePlanes {
   }
 
   /**
-   * Coast along a snapshot's last known velocity AND turn rates. Used when
-   * the render time has run past the newest sample — INCLUDING the very
-   * first one, which is what keeps a plane moving from the moment it
-   * appears. Freezing on a lone snapshot until the second packet lands is
-   * precisely the hover-then-teleport symptom: the plane sits still, then
-   * jumps the whole accumulated gap in one frame.
-   *
-   * Turn-aware (standard vehicle dead reckoning): the heading/pitch rates
-   * are taken from the last two snapshots, so a BANKING plane extrapolates
-   * along its curved path instead of flying straight off the arc it was
-   * actually flying — a turning fight reads correctly between packets.
+   * Coast along a snapshot's last known velocity AND turn rates — the
+   * shared netmath drStep (full airframe: heading, pitch, roll and speed
+   * rates), so a banking plane extrapolates along its curved path and a
+   * rolling/diving one keeps accelerating between packets. Used when the
+   * render time has run past the newest sample — INCLUDING the very first
+   * one, which is what keeps a plane moving from the moment it appears.
    */
   _coast(snap, aheadMs, plane) {
     const ahead = Math.min(aheadMs, MAX_EXTRAP_MS);
     if (ahead <= 0 || !snap.fly) return snap;
-    const mps = snap.v * MPH_TO_MPS * this.worldSpeedScale;
-    if (mps <= 0.01) return snap;
-    let h = snap.h;
-    let p = snap.p;
+    let rates = { hr: 0, pr: 0, rr: 0, vr: 0 };
     if (plane && plane.snaps.length >= 2) {
       const s = plane.snaps;
-      const a = s[s.length - 2];
-      const b = s[s.length - 1];
-      const span = b.t - a.t;
-      if (span > 0) {
-        const hRate = wrapDeg(b.h - a.h) / span;   // deg per ms
-        const pRate = (b.p - a.p) / span;
-        h = snap.h + hRate * ahead;
-        p = snap.p + pRate * ahead;
-      }
+      rates = estimateRates(s[s.length - 2], s[s.length - 1]);
     }
-    const np = movePosition(snap.lon, snap.lat, snap.alt, h, p, mps * (ahead / 1000));
-    return { t: snap.t + ahead, lon: np.lon, lat: np.lat, alt: np.alt, h, p, r: snap.r, v: snap.v, fly: snap.fly };
+    return drStep(snap, rates, ahead, this.worldSpeedScale);
   }
 
   /**
@@ -366,13 +399,36 @@ export class RemotePlanes {
       }
 
       if (!plane.snaps.length) continue;
-      // Render a fixed delay behind the newest data. Clocked peers are on the
-      // sender's timeline (so network jitter cannot distort the path); peers
-      // without a timestamp fall back to the local arrival timeline.
+      // Render the ADAPTIVE delay behind the newest data (sized from the
+      // sender's packet interval + measured jitter). Clocked peers are on
+      // the sender's timeline (so network jitter cannot distort the path);
+      // peers without a timestamp fall back to the local arrival timeline.
       const base = plane.clocked && plane.offset != null ? atMs - plane.offset : atMs;
-      const pose = this._sample(plane, base - INTERP_DELAY_MS);
+      const sampleT = base - (plane.interpDelayMs || 100);
+      const lastSnap = plane.snaps[plane.snaps.length - 1];
+      if (sampleT >= lastSnap.t) plane.stats.underruns++; // coasting past the data
+      const pose = this._sample(plane, sampleT);
       if (!pose) continue;
-      plane.live = pose;
+      // Smooth corrections (DIS "lie gently"): tiny per-frame steps apply
+      // instantly; a post-stall discontinuity converges over ~0.5 s so the
+      // catch-up reads as flight, never a teleport.
+      const shown = plane.shown || pose;
+      const displayed = convergeStep(shown, pose, dt * 1000, {
+        epsM: SMOOTH_EPS_M,
+        ratePerS: SMOOTH_RATE_PER_S,
+      });
+      const corrM = displayed === pose
+        ? 0
+        : Math.hypot(
+            (displayed.lon - pose.lon) * 111320 * Math.cos(pose.lat * Math.PI / 180),
+            (displayed.lat - pose.lat) * 111320,
+            (displayed.alt ?? 0) - (pose.alt ?? 0),
+          );
+      if (corrM > plane.stats.lastCorrectionM) plane.stats.lastCorrectionM = corrM;
+      plane.shown = displayed;
+      plane.live = displayed;
+      plane.stats.jitterMs = plane.jitterEwma ?? 0;
+      plane.stats.delayMs = plane.interpDelayMs ?? 100;
 
       try {
         if (plane.entity) {

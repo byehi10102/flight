@@ -297,6 +297,7 @@ export function initMp(ctx) {
     if (ui.wrCodeEl) ui.wrCodeEl.textContent = roomCode;
     if (ui.wrPartyNameEl) ui.wrPartyNameEl.textContent = (partyName || "PARTY").toUpperCase();
     net = new Net();
+    net.worldSpeedScale = ctx.worldSpeedScale;
     attachHandlers(net);
     setStatus(ui.wrStatusEl, `Party “${partyName || "PARTY"}” created — code ${roomCode}. Waiting for Player 2…`, "ok");
     try {
@@ -321,6 +322,7 @@ export function initMp(ctx) {
     if (ui.wrCodeEl) ui.wrCodeEl.textContent = code;
     if (ui.wrPartyNameEl) ui.wrPartyNameEl.textContent = "PARTY";
     net = new Net();
+    net.worldSpeedScale = ctx.worldSpeedScale;
     attachHandlers(net);
     setStatus(ui.wrStatusEl, "Connecting to the party…", "busy");
     try {
@@ -647,6 +649,10 @@ export function initMp(ctx) {
     roomCode: () => roomCode,
     remoteCount: () => remotePlanes.planes.size,
     remoteBulletCount: () => remoteBullets.count,
+    /** Diagnostics (?devtest/e2e): receiver-side netcode counters. */
+    remoteStats: () => remotePlanes.stats(),
+    /** Diagnostics (?devtest/e2e): sender-side threshold-sending counters. */
+    stateStats: () => ({ ...(net.stateStats || {}) }),
     /** Local round fired: broadcast its frozen path to the party. */
     noteBulletFired(bullet) {
       if (!active || phase !== "flying" || !bullet) return;
@@ -669,7 +675,9 @@ export function initMp(ctx) {
     /** Devtest: first remote plane's live (interpolated) pose, or null. */
     remoteLiveSample() {
       const p = remotePlanes.planes.values().next().value;
-      return p && p.live ? { lon: p.live.lon, lat: p.live.lat, alt: p.live.alt } : null;
+      return p && p.live
+        ? { lon: p.live.lon, lat: p.live.lat, alt: p.live.alt, h: p.live.h, v: p.live.v }
+        : null;
     },
     bothSpawnPlaced,
     noteSpawnPlaced,

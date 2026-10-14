@@ -17,6 +17,7 @@
  *  - Every send is wrapped: a network hiccup can never break the sim loop.
  */
 import { joinRoom, selfId, getRelaySockets } from "./vendor/trystero.mjs";
+import { drStep, estimateRates, divergence } from "./netmath.js";
 
 const APP_ID = "skyward-flight-sim-v1";
 /**
@@ -85,6 +86,16 @@ export const STATE_HZ = 20;
 const HEARTBEAT_MS = 2000;
 /** A peer silent this long is considered gone (leave event not required). */
 const PEER_TIMEOUT_MS = 6000;
+/**
+ * DIS sender-side threshold sending (IEEE 1278): the owner runs the SAME
+ * dead reckoning the receivers run and transmits only when they would
+ * diverge from the truth — so a maneuver triggers an immediate burst while
+ * straight-and-level flight stays quiet. The heartbeat floor below keeps
+ * the receiver's interpolation window fed no matter what.
+ */
+const DR_THRESHOLD_M = 15;      // positional divergence that forces a send
+const DR_THRESHOLD_DEG = 3;     // heading divergence that forces a send
+const STATE_HEARTBEAT_MS = 150; // max silence between state packets
 /** Automatic reconnect: attempts per connect() call, with a short delay. */
 const MAX_CONNECT_ATTEMPTS = 4;
 const RETRY_DELAY_MS = 1000;
@@ -154,6 +165,12 @@ export class Net {
     this._sendHeartbeat = null;
     this._sweepTimer = null;
     this._heartbeatTimer = null;
+    /** DIS threshold sending: the last two state packets actually sent. */
+    this._sentLog = [];
+    /** Arcade world speed scale — set by index.js so sender DR == receiver DR. */
+    this.worldSpeedScale = 1.8;
+    /** Diagnostics for ?devtest: what the threshold sender is doing. */
+    this.stateStats = { sent: 0, skipped: 0, forcedByThreshold: 0 };
   }
 
   on(event, fn) {
@@ -426,18 +443,42 @@ export class Net {
   }
 
   /**
-   * Broadcast own flight state.
+   * Broadcast own flight state — DIS sender-side threshold sending.
    *
-   * Sent on a steady caller-driven cadence (the game runs a 20 Hz timer) with
-   * no delta gate: a constant stream of small packets is what lets the peer
-   * interpolate smoothly. Gaps and bursts are precisely what cause remote
-   * planes to stutter, so "skip when barely moved" is the wrong trade here —
-   * a state packet is ~90 bytes.
+   * index.js calls this on a 30 Hz timer. Every call runs the SAME dead
+   * reckoning the receiver would (drStep over the last two SENT packets)
+   * and compares it with the true state: a divergence beyond
+   * DR_THRESHOLD_M / DR_THRESHOLD_DEG transmits immediately, so maneuver
+   * ONSET reaches the other player within one network trip, not one
+   * heartbeat. Straight-and-level flight is predicted exactly and stays
+   * quiet until the STATE_HEARTBEAT_MS floor fires, so a steady cruise
+   * costs ~7 packets/s instead of 30 with zero loss of fidelity.
    */
   broadcastState(state) {
     if (!this.active || !this._sendState) return;
-    this._sendState({
-      ts: performance.now(),
+    const now = performance.now();
+    const last = this._sentLog[this._sentLog.length - 1];
+    let transmit = true;
+    if (last) {
+      const elapsed = now - last.ts;
+      if (elapsed >= STATE_HEARTBEAT_MS) {
+        transmit = true; // heartbeat floor keeps the interp window fed
+      } else {
+        const prev = this._sentLog[this._sentLog.length - 2];
+        const predicted = drStep(
+          last, estimateRates(prev || last, last), elapsed, this.worldSpeedScale
+        );
+        const div = divergence(state, predicted);
+        transmit = div.m > DR_THRESHOLD_M || div.hDeg > DR_THRESHOLD_DEG;
+        if (transmit) this.stateStats.forcedByThreshold++;
+      }
+    }
+    if (!transmit) {
+      this.stateStats.skipped++;
+      return;
+    }
+    const payload = {
+      ts: now,
       lon: +state.lon.toFixed(5),
       lat: +state.lat.toFixed(5),
       alt: Math.round(state.alt),
@@ -446,7 +487,11 @@ export class Net {
       r: +state.roll.toFixed(1),
       v: Math.round(state.speed),
       fly: state.isFlying ? 1 : 0,
-    });
+    };
+    this._sendState(payload);
+    this.stateStats.sent++;
+    this._sentLog.push(payload);
+    if (this._sentLog.length > 2) this._sentLog.shift();
   }
 
   /** Broadcast own spawn-map presence (cursor + placed point). */

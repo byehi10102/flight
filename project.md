@@ -1653,3 +1653,60 @@ code, lobby lists, host START, both-placed gate, ONE SPAWN click ->
 BOTH flying, each sees the other rendered, host gunfire -> joiner sees
 tracers, remote position demonstrably moves, single player untouched)
 and the single-player probe 85/85.
+
+## 32. Recent changes (researched netcode: DIS threshold sending, smooth corrections, adaptive window)
+
+Researched how real 3D flight multiplayer stays smooth (DIS/IEEE 1278 - the
+military flight-sim standard; Quake/Source entity interpolation; Gabriel
+Gambetta's Fast-Paced Multiplayer) and closed the remaining gaps. All of
+it lives in multiplayer/netmath.js - ONE pure, unit-tested module that both
+sides import, so the sender's prediction of the receiver can never drift
+from what the receiver actually does.
+
+### Sender-side threshold sending (DIS)
+
+The sender runs the SAME dead reckoning the receiver would (drStep over the
+last two SENT packets) and transmits only when the receiver's extrapolated
+pose would diverge from the truth by >15 m or >3 deg, with a 150 ms
+heartbeat floor. Maneuver ONSET now reaches the other player within one
+network trip (not one heartbeat); straight-and-level flight costs ~7
+packets/s instead of 30 with zero fidelity loss. Verified live: the e2e
+counts skipped beats in level flight.
+
+### Smooth corrections ("lie gently", DIS)
+
+Post-stall catch-ups no longer teleport: when the freshly sampled pose is
+within 30 m of what is displayed it applies instantly (zero added latency
+in normal flight); a larger discontinuity converges at 6/s (~0.5 s
+ease-out), so every correction reads as flight.
+
+### Adaptive interpolation window (Source cl_interp)
+
+The render delay is no longer fixed at 100 ms: it is sized per peer from
+the measured packet interval + network jitter (EWMA), clamped to 66-250
+ms. A maneuver burst tightens the buffer; a jittery link deepens it
+instead of stuttering.
+
+### Full-airframe dead reckoning
+
+The coast extrapolates heading, pitch, ROLL and SPEED rates (netmath
+drStep), so rolls and accelerating dives read correctly in packet gaps.
+
+### Diagnostics + honest e2e metrics
+
+mp.remoteStats()/stateStats expose per-peer packets, jitter, interp delay,
+underruns and correction magnitudes (?devtest). The two-browser e2e gained
+a cadence-aware smoothness metric (dead-reckoning fidelity between
+samples, not naive uniform deltas - the harness throttles rAF, which
+would fake choppiness) and a maneuver-response check driving the REAL turn
+input (D/yaw - this flight model turns via yaw; arrows only roll). 20/20
+two-browser e2e, 85/85 single-player probe, 71/71 unit tests (11 new
+netmath).
+
+Not done, deliberately: an unreliable/unordered WebRTC channel for the
+state stream. The vendored trystero multiplexes every action over one
+reliable ordered channel; making it unreliable would scramble event
+ordering (bullets, launch), and per-action channels mean deep surgery on
+a 3000-line vendored file. The adaptive window + DR + smooth corrections
+are the standard mitigation for exactly this transport, and the jitter
+diagnostics will show if the channel ever becomes the bottleneck.
