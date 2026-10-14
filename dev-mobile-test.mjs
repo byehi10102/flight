@@ -366,6 +366,22 @@ const browserDesk = await puppeteer.launch(LAUNCH);
     check("loading backdrop = native-loop fly-through + preloaded zoom-off tail element",
       boot.hasRenderBackdrop && boot.hasFlythroughVideo && boot.nativeLoop && boot.hasTailElement,
       JSON.stringify(boot));
+
+  // Menu backdrop: the public Earth+Moon model loads and spins slowly
+  // behind the SINGLE PLAYER / MULTIPLAYER buttons. Sample repeatedly over
+  // ~6 s — headless compositors can stall rAF for a beat between back-to-back
+  // evaluates, so a single 1.2 s window can read frozen.
+  await sleep(2500); // model load is async
+  const earthSamples = [];
+  for (let i = 0; i < 5; i++) {
+    earthSamples.push(await page.evaluate(() => window.SKY_DEV.menuEarth()));
+    await sleep(1200);
+  }
+  const rotYs = earthSamples.map((s) => s.rotY);
+  const spread = Math.max(...rotYs) - Math.min(...rotYs);
+  check("menu Earth model is loaded, visible and slowly spinning",
+    earthSamples[0].loaded && earthSamples[0].visible && spread > 0.05,
+    `rotYs=${rotYs.join(",")}`);
   }
   check("speed box on the LEFT third (ref-flight HUD)", r.speedCX < r.vw * 0.45,
     `centerX=${r.speedCX} of ${r.vw}`);
@@ -459,12 +475,14 @@ const browserMob = await puppeteer.launch(LAUNCH);
       i.value = q;
       i.dispatchEvent(new Event("input", { bubbles: true }));
     }, q);
-    const resultShown = await typeQuery("Berlin").then(() =>
+    // USA-only flying: search must return a place INSIDE the bounds (the
+    // old Berlin/Paris probes are now refused by design).
+    const resultShown = await typeQuery("Seattle").then(() =>
       page.waitForFunction(() => {
         const items = document.querySelectorAll("#search-results .search-result-item:not(.search-status)");
         return items.length > 0;
       }, { timeout: 20000, polling: 300 }).then(() => true).catch(() => false));
-    const resultShown2 = resultShown ? true : await typeQuery("Paris").then(() =>
+    const resultShown2 = resultShown ? true : await typeQuery("Denver").then(() =>
       page.waitForFunction(() => {
         const items = document.querySelectorAll("#search-results .search-result-item:not(.search-status)");
         return items.length > 0;
@@ -523,7 +541,29 @@ const browserMob = await puppeteer.launch(LAUNCH);
     const b = document.getElementById("confirmSpawnBtn");
     return b && !b.classList.contains("hidden");
   }, { timeout: 10000, polling: 250 });
-  check("spawn placed (devtest placement path — same call the tap makes)", true);
+  check("spawn placed (devtest placement path - same call the tap makes)", true);
+
+  // USA-ONLY: a foreign point must be refused — no marker, no armed SPAWN.
+  {
+    const refused = await page.evaluate(() => {
+      const D = window.SKY_DEV;
+      document.getElementById("confirmSpawnBtn").classList.add("hidden");
+      D.placeSpawn(2.2945, 48.8584, "PARIS"); // Eiffel Tower - outside bounds
+      const armedAfter = !document.getElementById("confirmSpawnBtn").classList.contains("hidden");
+      return {
+        armedAfter,
+        msg: document.getElementById("instruction-text").textContent,
+      };
+    });
+    check("USA-only: a foreign spawn point is refused",
+      !refused.armedAfter && /USA/.test(refused.msg), JSON.stringify(refused));
+    // Re-place the US point for the rest of the flow.
+    await page.evaluate(() => window.SKY_DEV.placeSpawn(-117.9143, 33.8366, "TEST"));
+    await page.waitForFunction(() => {
+      const b = document.getElementById("confirmSpawnBtn");
+      return b && !b.classList.contains("hidden");
+    }, { timeout: 10000, polling: 250 });
+  }
   await page.click("#confirmSpawnBtn");
 
   // The dive takes several seconds; the sim pauses until it lands.

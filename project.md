@@ -700,6 +700,8 @@ world streams as you fly.
 
 - **Aircraft** — Bombardier CRJ-900 CityJet, supplied by the project owner as
   `airplane_crj-900_cityjet.glb`.
+- **Menu backdrop** — "Earth and Moon" by Jarlan Perez (Google Poly archive,
+  served by poly.pizza), CC-BY 3.0: `public/models/menu-earth.glb`.
 - **Terrain** — Re:Earth quantized-mesh, keyless.
 - **Imagery** — Esri World Imagery and OpenStreetMap, keyless.
 - **Buildings** — OpenFreeMap / OpenMapTiles vector tiles, ODbL.
@@ -1583,7 +1585,7 @@ longer reply back) is replaced by the party-code flow, and the flow is the
 abstraction now: a 4-character code (letters+digits, no I/O/0/1) IS the
 party. CREATE PARTY names the party and generates the code; JOIN PARTY
 types it on the other device. Both land in the same lobby, which shows the
-big code and the player list - "PLAYER 1 (YOU)" over "PLAYER 2 - WAITING�"
+big code and the player list - "PLAYER 1 (YOU)" over "PLAYER 2 - WAITING�"
 until the partner connects, then their callsign - so both players KNOW
 they are connected. The connection itself is the existing keyless
 transport (Trystero over public relays, then direct WebRTC): nothing is
@@ -1710,3 +1712,38 @@ ordering (bullets, launch), and per-action channels mean deep surgery on
 a 3000-line vendored file. The adaptive window + DR + smooth corrections
 are the standard mitigation for exactly this transport, and the jitter
 diagnostics will show if the channel ever becomes the bottleneck.
+
+## 33. Recent changes (spinning Earth menu backdrop; flying limited to the USA)
+
+### The menu background: a public 3D Earth, slowly spinning
+
+The multiplayer/single-player menu now has a 3D model turning slowly behind
+the buttons: "Earth and Moon" by Jarlan Perez (Google Poly archive via
+poly.pizza, CC-BY 3.0 - attribution added to section 10), 1,524 tris, 119 KB,
+vertex-coloured low-poly on purpose to match the loading films' look. It
+renders through the existing Three.js overlay on layer 1 (the same path as
+the jet), centred a touch low, one slow turn per ~52 s; the offset moon
+reads as a little orbit as it goes. Shown only while the menu is up -
+hidden in the picker and hard-hidden in every flight state; the wide base
+FOV is restored when returning to the menu after a session (the flight
+FOV-sync leaves the camera narrow). The CC0 alternative (Quaternius
+"Planet", 10,688 tris) was downloaded and inspected too, in case a denser
+or textured planet is preferred later.
+
+### Flying is USA-only
+
+Less map to load, by design: the spawn picker is bounded to the continental
+US (west -125.5, east -66.9, south 24, north 49.5 - a little coastal
+water so shore spawns work; Alaska/Hawaii excluded to keep the streamable
+area tight). Enforced everywhere a spawn can come from: map taps and
+landmark pins are refused with an on-screen explanation, search results
+are filtered to the bounds (with a dedicated "no matching places inside"
+message), the picker draws the bounds as a green box so the limit is
+visible, the landmark list keeps only US places, and the instruction line
+says to pick inside the USA. insideUSA()/USA_BOUNDS are pure + unit-tested
+(test/usa-bounds.test.mjs). The default Anaheim spawn and the whole boot
+preload were already inside the box, so loading got strictly cheaper.
+
+Verified: 87/87 mobile+desktop probe (new checks: the Earth is loaded,
+visible and demonstrably rotating; a foreign spawn point is refused), 77/77
+unit tests.

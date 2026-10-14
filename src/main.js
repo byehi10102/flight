@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import * as Cesium from "cesium";
 import "cesium/Build/Cesium/Widgets/widgets.css";
 import { CONFIG, computeMinimapZoomAltitude } from "./core/config.js";
@@ -15,7 +16,7 @@ import { TouchControls } from "./ui/touchControls.js";
 import { Bullets } from "./weapon/bullet.js";
 import { particles } from "./utils/particles.js";
 import { soundManager } from "./utils/soundManager.js";
-import { reverseGeocode, reverseGeocodeDetailed, calculateDistance, movePosition } from "./utils/geo.js";
+import { reverseGeocode, reverseGeocodeDetailed, calculateDistance, movePosition, insideUSA, USA_BOUNDS } from "./utils/geo.js";
 
 const States = {
   MENU: "MENU",
@@ -64,6 +65,11 @@ const state = {
 // ── Three.js overlay ─────────────────────────────────────────────────────────
 let scene, camera, renderer, threeContainer;
 let planeModel;
+// Menu backdrop: the CC-BY low-poly Earth + Moon (Jarlan Perez / Google
+// Poly archive via poly.pizza), slowly spinning behind the menu buttons.
+// Loaded onto render layer 1 like the jet so the menu camera draws it.
+let menuEarth = null;
+const MENU_EARTH_SPIN = 0.12; // rad/s — one slow turn per ~52 s
 // Multiplayer handle (set by the dynamic import above; null = single player).
 let mp = null;
 let physics = new PlanePhysics();
@@ -663,6 +669,31 @@ function withTimeout(promise, ms) {
 // elevation is already refined before SPAWN HERE. The imagery tiles warm
 // themselves just by being on screen; this covers the terrain half.
 let pickerWarmTimer = 0;
+// USA-only flying: draw the bounds so players SEE the limit (a green box on
+// the map). Created with the picker, cleared with it.
+let usaBoundsEntity = null;
+function showUsaBounds() {
+  clearUsaBounds();
+  try {
+    usaBoundsEntity = viewer.entities.add({
+      rectangle: {
+        coordinates: Cesium.Rectangle.fromDegrees(
+          USA_BOUNDS.west, USA_BOUNDS.south, USA_BOUNDS.east, USA_BOUNDS.north
+        ),
+        material: Cesium.Color.fromCssColorString("#0f0").withAlpha(0.03),
+        outline: true,
+        outlineColor: Cesium.Color.fromCssColorString("#0f0").withAlpha(0.55),
+        outlineWidth: 2,
+      },
+    });
+  } catch (e) { /* the box is cosmetic */ }
+}
+function clearUsaBounds() {
+  if (usaBoundsEntity) {
+    try { viewer.entities.remove(usaBoundsEntity); } catch (e) { /* gone */ }
+    usaBoundsEntity = null;
+  }
+}
 viewer.camera.moveEnd.addEventListener(() => {
   if (currentState !== States.PICK_SPAWN) return;
   const now = performance.now();
@@ -704,7 +735,30 @@ function initThree() {
   renderer.autoClear = false;
   threeContainer = document.getElementById("threeContainer");
   threeContainer.appendChild(renderer.domElement);
-  threeContainer.classList.add("hidden");
+  // Menu backdrop: show the overlay canvas while the menu is up (the flight
+  // states manage it from here on). The Earth model pops in when loaded.
+  threeContainer.classList.toggle("hidden", currentState !== States.MENU);
+
+  // The slowly spinning menu Earth (public CC-BY model, 1.5k tris — a
+  // deliberate low-poly look to match the loading films).
+  try {
+    const menuLoader = new GLTFLoader();
+    menuLoader.load(
+      "/models/menu-earth.glb",
+      (gltf) => {
+        menuEarth = gltf.scene;
+        menuEarth.traverse((o) => { if (o.isMesh) o.layers.enable(1); });
+        // Unit-radius model; camera sits at the origin with the menu's
+        // base FOV — centre it a touch low so the logo line stays clean.
+        menuEarth.scale.setScalar(2.6);
+        menuEarth.position.set(0, -0.55, -4.5);
+        menuEarth.visible = currentState === States.MENU;
+        scene.add(menuEarth);
+      },
+      undefined,
+      (e) => console.warn("[menu] Earth model failed to load (menu still works):", e)
+    );
+  } catch (e) { /* menu backdrop is cosmetic */ }
 
   const ambientLight = new THREE.AmbientLight(0xffffff, 1.0);
   ambientLight.layers.enable(1);
@@ -901,10 +955,12 @@ function enterSpawnPicking(useVignette = true) {
     if (gen !== transitionGen) return;
     if (spawnInstruction) spawnInstruction.classList.remove("hidden");
     if (threeContainer) threeContainer.classList.add("hidden");
+    if (menuEarth) menuEarth.visible = false; // the picker shows the real map
     if (uiContainer) uiContainer.classList.add("hidden");
     currentState = States.PICK_SPAWN;
     setStreetsVisible(true);
     showNotablePlaces();
+    showUsaBounds();
     // Coming back from a crash (NEW LOCATION): show the full-screen film
     // page - the same one from boot - while the picker's view genuinely
     // loads, then fade straight into the picker.
@@ -915,7 +971,7 @@ function enterSpawnPicking(useVignette = true) {
 
     if (instructionText) {
       instructionText.style.display = "block";
-      instructionText.textContent = "CLICK ANYWHERE ON THE MAP OR SEARCH FOR A LOCATION";
+      instructionText.textContent = "PICK A SPAWN POINT INSIDE THE USA — OR SEARCH FOR A LOCATION";
     }
 
     const ctrl = viewer.scene.screenSpaceCameraController;
@@ -987,10 +1043,14 @@ function exitSpawnPicking() {
   } catch (e) { /* no flight in progress */ }
   setStreetsVisible(false);
   clearNotablePlaces();
+  clearUsaBounds();
   if (spawnInstruction) spawnInstruction.classList.add("hidden");
   if (confirmSpawnBtn) confirmSpawnBtn.classList.add("hidden");
   if (mainMenu) mainMenu.classList.remove("hidden");
   currentState = States.MENU;
+  // Back at the menu: the spinning Earth backdrop returns with it.
+  if (threeContainer) threeContainer.classList.remove("hidden");
+  if (menuEarth) menuEarth.visible = true;
   loadingIndicator.classList.add("hidden");
 
   const ctrl = viewer.scene.screenSpaceCameraController;
@@ -1108,18 +1168,25 @@ async function performSearch(query) {
   };
   const renderItems = (items) => {
     if (!stillCurrent()) return;
-    searchResults.innerHTML = "";
-    if (!items.length) {
-      searchResults.innerHTML = '<div class="search-result-item search-status">No results found — try a bigger nearby city</div>';
-      return;
+    // USA-only flying: keep results inside the bounds so the list never
+    // offers a place you cannot fly to.
+    const usaItems = items.filter((it) => insideUSA(parseFloat(it.lon), parseFloat(it.lat)));
+    if (!usaItems.length) {
+      if (!items.length) {
+        searchResults.innerHTML = '<div class="search-result-item search-status">No results found — try a bigger nearby city</div>';
+      } else {
+        searchResults.innerHTML = '<div class="search-result-item search-status">FLYING IS LIMITED TO THE USA — NO MATCHING PLACES INSIDE THE BOUNDS</div>';
+      }
+    } else {
+      searchResults.innerHTML = "";
+      usaItems.forEach((item) => {
+        const div = document.createElement("div");
+        div.className = "search-result-item";
+        div.textContent = item.display_name;
+        div.addEventListener("click", () => selectSearchResult(parseFloat(item.lon), parseFloat(item.lat), item.display_name));
+        searchResults.appendChild(div);
+      });
     }
-    items.forEach((item) => {
-      const div = document.createElement("div");
-      div.className = "search-result-item";
-      div.textContent = item.display_name;
-      div.addEventListener("click", () => selectSearchResult(parseFloat(item.lon), parseFloat(item.lat), item.display_name));
-      searchResults.appendChild(div);
-    });
     searchResults.style.display = "block";
   };
 
@@ -1191,6 +1258,15 @@ async function performSearch(query) {
 }
 
 function selectSearchResult(lon, lat, name) {
+  // USA-only flying: refuse picks outside the bounds (results are already
+  // filtered, this is the backstop for stale lists).
+  if (!insideUSA(lon, lat)) {
+    if (searchResults) searchResults.style.display = "none";
+    if (instructionText) {
+      instructionText.textContent = "FLYING IS LIMITED TO THE USA — THAT PLACE IS OUTSIDE THE BOUNDS";
+    }
+    return;
+  }
   state.lon = lon;
   state.lat = lat;
   state.alt = 1500;
@@ -1278,6 +1354,15 @@ function setupSpawnPicker() {
 
 // ── Spawn selection shared by map clicks, landmark pins and search ──────────
 function selectSpawnPoint(lon, lat, baseHeight, label, shortName, cartesian) {
+  // USA-only flying: one bounded area, far less map to load. Points outside
+  // the bounds are refused — the instruction line explains instead of
+  // placing a marker.
+  if (!insideUSA(lon, lat)) {
+    if (instructionText) {
+      instructionText.textContent = "FLYING IS LIMITED TO THE USA — PICK A POINT INSIDE THE GREEN BOUNDS";
+    }
+    return;
+  }
   state.lon = lon;
   state.lat = lat;
   state.alt = Math.max(0, baseHeight) + 1500;
@@ -1336,13 +1421,6 @@ const NOTABLE_PLACES = [
   { name: "SPACE NEEDLE", lat: 47.6205, lon: -122.3493 },
   { name: "GRAND CANYON", lat: 36.1069, lon: -112.1129 },
   { name: "MOUNT RUSHMORE", lat: 43.8791, lon: -103.4591 },
-  { name: "EIFFEL TOWER", lat: 48.8584, lon: 2.2945 },
-  { name: "BIG BEN", lat: 51.5007, lon: -0.1246 },
-  { name: "COLOSSEUM", lat: 41.8902, lon: 12.4922 },
-  { name: "TAJ MAHAL", lat: 27.1751, lon: 78.0421 },
-  { name: "SYDNEY OPERA HOUSE", lat: -33.8568, lon: 151.2153 },
-  { name: "GREAT WALL", lat: 40.4319, lon: 116.5704 },
-  { name: "MOUNT FUJI", lat: 35.3606, lon: 138.7274 },
 ];
 let notableEntities = [];
 
@@ -1674,6 +1752,7 @@ function confirmSpawn() {
   } catch (e) { /* no flight in progress */ }
   setStreetsVisible(false);
   clearNotablePlaces();
+  clearUsaBounds();
   soundManager.play("spawn");
   if (vignette) {
     vignette.classList.remove("solid");
@@ -2306,6 +2385,29 @@ function animate() {
   dt = Math.min(dt, 0.25);
   const now = performance.now();
 
+  // MENU: the public Earth+Moon model slowly spins behind the buttons.
+  // The overlay canvas is transparent, so the real globe stays behind it.
+  if (currentState === States.MENU) {
+    if (menuEarth) {
+      menuEarth.rotation.y += dt * MENU_EARTH_SPIN;
+      menuEarth.visible = true;
+    }
+    try {
+      // The flight FOV-sync leaves the camera narrow after a session —
+      // the menu backdrop wants the wide base FOV.
+      if (Math.abs(camera.fov - CONFIG.camera.fov) > 0.01) {
+        camera.fov = CONFIG.camera.fov;
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+      }
+      camera.layers.set(1);
+      renderer.autoClear = false;
+      renderer.clear();
+      renderer.render(scene, camera);
+      renderer.clearDepth();
+    } catch (e) { /* one bad frame never kills the loop */ }
+  }
+
   // Boot film: OBSERVE the native loop's boundary (no seeking — the loop
   // runs itself, zero decoder hiccups). When the outro is queued, the
   // preloaded tail element swaps in exactly at the boundary — a single-
@@ -2417,6 +2519,9 @@ function animate() {
     // or world-space objects placed through the view matrix (bullets) land at
     // the wrong screen position/scale - this is what makes ref-flight's
     // projectiles line up with the world.
+    // Render the plane overlay. The menu Earth is NOT part of the flight
+    // view — hard-hide it for every non-menu state.
+    if (menuEarth && menuEarth.visible) menuEarth.visible = false;
     renderer.autoClear = false;
     renderer.clear();
     try {
@@ -2574,7 +2679,8 @@ preloadTerrain();
 setSunForTime(viewer, 12, state.lat, state.lon);
 
 if (uiContainer) uiContainer.classList.add("hidden");
-if (threeContainer) threeContainer.classList.add("hidden");
+// NOTE: threeContainer stays VISIBLE here — the menu is up (currentState is
+// MENU), and the spinning Earth backdrop renders through it.
 
 updateLoadingUI();
 
@@ -2595,6 +2701,10 @@ if (new URLSearchParams(location.search).has("devtest")) {
     planeModel,
     get threeCamera() { return camera; },
     get threeScene() { return scene; },
+    // Devtest: menu Earth backdrop state (loaded, visible, spinning).
+    menuEarth: () => menuEarth
+      ? { loaded: true, visible: menuEarth.visible, rotY: +menuEarth.rotation.y.toFixed(3) }
+      : { loaded: false },
     // Fire + aim exactly like a real click at the given screen point.
     fireBulletAtScreen,
     // Multiplayer handle (devtest: lobby flow, remote-plane checks).

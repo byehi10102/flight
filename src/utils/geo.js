@@ -139,3 +139,25 @@ export function movePosition(lon, lat, alt, heading, pitch, distance) {
     alt: alt + dAlt,
   };
 }
+
+// ── USA-only flying ────────────────────────────────────────────────────────
+// Flying is limited to the continental United States: one bounded area means
+// far less map to load. The box below is the CONUS extent (plus a little
+// coastal water so shore spawns work); Alaska/Hawaii are intentionally
+// excluded to keep the streamable area tight.
+export const USA_BOUNDS = {
+  west: -125.5,
+  east: -66.9,
+  south: 24.0,
+  north: 49.5,
+};
+
+/** True when a lon/lat falls inside the USA flying bounds. Pure; garbage
+ *  coordinates count as outside (never throw, never NaN). */
+export function insideUSA(lon, lat, bounds = USA_BOUNDS) {
+  const lo = Number(lon);
+  const la = Number(lat);
+  if (!Number.isFinite(lo) || !Number.isFinite(la)) return false;
+  return lo >= bounds.west && lo <= bounds.east
+    && la >= bounds.south && la <= bounds.north;
+}
