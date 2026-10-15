@@ -310,6 +310,12 @@ async function openApp(browser, opts) {
     const b = document.getElementById("startBtn");
     return b && !b.disabled;
   }, { timeout: 120000, polling: 500 });
+  // The boot page plays its ~2s zoom-off tail after the button enables —
+  // wait for it to be fully gone so later checks don't race the fade.
+  await page.waitForFunction(() => {
+    const li = document.getElementById("loadingIndicator");
+    return li && li.classList.contains("hidden");
+  }, { timeout: 60000, polling: 250 });
   return { page, errors };
 }
 
@@ -460,6 +466,18 @@ const browserMob = await puppeteer.launch(LAUNCH);
     check("picker's +/- zoom buttons REMOVED", picker.zoomGone);
     check("picker zoom disabled on ALL inputs (wheel/pinch/dblclick/keys)", picker.zoomDisabled);
     check("picker PAN still enabled", picker.panKept);
+    // The mid-map "Loading Terrain..." chip is gone: while tiles stream
+    // during browsing, the loading indicator must never appear.
+    {
+      const chipGone = await page.evaluate(() => {
+        const li = document.getElementById("loadingIndicator");
+        return li
+          ? { hidden: li.classList.contains("hidden"), cls: li.className, text: document.getElementById("loadingText")?.textContent }
+          : { hidden: true, cls: "(no element)" };
+      });
+      check("no 'Loading Terrain...' chip while browsing the picker", chipGone.hidden,
+        JSON.stringify(chipGone));
+    }
     const onScreen = (r) => r && r[0] >= 0 && r[1] >= 0 && r[2] <= picker.vw && r[3] <= picker.vh;
     check("instruction chip fully on-screen", onScreen(picker.chipRect), JSON.stringify(picker));
     check("search pill visible on-screen", onScreen(picker.inputRect), JSON.stringify(picker));

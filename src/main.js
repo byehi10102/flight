@@ -488,15 +488,16 @@ viewer.scene.globe.tileLoadProgressEvent.addEventListener((queueLength) => {
     pickerFilmLast = queueLength;
     if (queueLength > pickerFilmPeak) pickerFilmPeak = queueLength;
   }
-  if (loadingIndicator && loadingText && currentState === States.PICK_SPAWN
-      && !spawnPending && !pickerFilmActive) {
-    if (queueLength > 0) {
-      loadingText.textContent = "Loading Terrain...";
-      // Compact chip over the map, never the full-screen boot page.
-      loadingIndicator.classList.add("picker");
-      loadingIndicator.classList.remove("hidden");
-    } else {
+  // USA-only flying: track where the picker camera is looking so the
+  // picker-film bar and spawn warm-up follow the map.
+  // (The old mid-map "Loading Terrain..." chip is GONE — loading feedback
+  // is the film screens: boot film, picker-entry film, spawn film. Tiles
+  // streaming while you pan are visible on the map itself, like any map
+  // app; no bubble.)
+  if (currentState === States.PICK_SPAWN && !spawnPending && !pickerFilmActive) {
+    if (loadingIndicator && !loadingIndicator.classList.contains("hidden")) {
       loadingIndicator.classList.add("hidden");
+      loadingIndicator.classList.remove("picker");
     }
   }
 });

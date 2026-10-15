@@ -1770,3 +1770,16 @@ plays right away, then the fade - the menu with the spinning Earth appears
 within ~3 s of the bar filling, and the film page is gone. The boundary
 observation (and its dead state) is removed; the plain-fade path stays for
 stalled films. Probe asserts menu-enabled -> page-hidden < 6 s. 89/89.
+
+## 36. Recent changes (the "Loading Terrain..." chip is gone)
+
+The small mid-map "Loading Terrain..." pill that appeared while browsing
+the spawn picker is removed. Loading feedback is now ONLY the film
+screens: the boot film (app open), the picker-entry film (NEW LOCATION),
+and the spawn film (SPAWN HERE). Tiles streaming while you pan the picker
+are simply visible arriving on the map, like any map app - no bubble.
+The tile-queue handler now actively re-hides the loading page during
+picking (defensive, in case any path left it visible), and the probe
+asserts the indicator stays hidden while browsing, plus openApp now waits
+for the boot zoom-off tail to finish before driving the picker (which
+caught a probe race, not a game bug). 90/90.
