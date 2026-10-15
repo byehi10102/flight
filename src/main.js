@@ -212,7 +212,6 @@ let preparingTimer = null;
 const BOOT_FILM_LOOP_S = 6.0;
 const bootFilmLoop = document.querySelector("#loadingIndicator .loading-bg-video:not(#bootFilmTail)");
 const bootFilmTail = document.getElementById("bootFilmTail");
-let bootOutroPending = false;
 let bootOutroStarted = false;
 
 // Boot loading page state: hidden = the reveal chain has STARTED (100%,
@@ -376,21 +375,13 @@ const bootStart = performance.now();
 
 function hideLoadingPage() {
   if (!loadingIndicator || loadingPageHidden) return;
-  // The bar is at 100 and everything has REALLY loaded: queue the outro.
-  // The film finishes its current lap, and at the loop's next natural
-  // boundary the render loop hands over to the outro - the tail
-  // plays as the literal next frame of the loop, one continuous shot.
-  // (Not on a timer: the loop repeats as long as the load took.)
+  // 100%: go to the menu NOW. The zoom-off tail plays immediately (its own
+  // preloaded element — no waiting for the loop's boundary, which is
+  // unobservable on real hardware: the video wraps at exactly 6.0 s
+  // between frames, so waiting left the F-15 film looping OVER the
+  // clickable menu for up to ~9 s — "that airplane when I'm choosing").
   loadingPageHidden = true;
-  bootOutroPending = true;
-  // Safety net: if the film is stalled and never crosses the loop boundary,
-  // do the plain fade so boot can never hang on the reveal.
-  setTimeout(() => {
-    if (bootOutroPending && !bootOutroStarted) {
-      bootOutroPending = false;
-      startBootOutro();
-    }
-  }, 8000);
+  startBootOutro();
 }
 
 function updateLoadingUI() {
@@ -2410,16 +2401,6 @@ function animate() {
       renderer.render(scene, camera);
       renderer.clearDepth();
     } catch (e) { /* one bad frame never kills the loop */ }
-  }
-
-  // Boot film: OBSERVE the native loop's boundary (no seeking — the loop
-  // runs itself, zero decoder hiccups). When the outro is queued, the
-  // preloaded tail element swaps in exactly at the boundary — a single-
-  // frame continuation.
-  if (bootOutroPending && !bootOutroStarted && bootFilmLoop
-      && bootFilmLoop.currentTime >= BOOT_FILM_LOOP_S) {
-    bootOutroPending = false;
-    startBootOutro();
   }
 
   if (currentState === States.FLYING || currentState === States.PAUSED || currentState === States.TRANSITIONING) {

@@ -1757,3 +1757,16 @@ too) - the backdrop is ONLY the Earth and Moon. Flight states restore the
 jet via PlaneModel.reset() at every spawn, so the crash/respawn visibility
 flow is untouched. Probe asserts both sides: the Earth spins AND the jet
 is hidden behind the buttons. 87/87.
+
+## 35. Recent changes (no more airplane film over the menu)
+
+The airplane at the menu was the BOOT FILM PAGE lingering: at 100% the
+zoom-off waited for the loop video boundary (currentTime >= 6.0 s), which
+real hardware can never observe - the video wraps at exactly 6.0 between
+frames - so the F-15-over-clouds film kept looping OVER the clickable menu
+(pointer-events: none on the page) for up to ~9 s until the safety fade.
+The outro now fires IMMEDIATELY at 100%: the preloaded 2 s zoom-off tail
+plays right away, then the fade - the menu with the spinning Earth appears
+within ~3 s of the bar filling, and the film page is gone. The boundary
+observation (and its dead state) is removed; the plain-fade path stays for
+stalled films. Probe asserts menu-enabled -> page-hidden < 6 s. 89/89.

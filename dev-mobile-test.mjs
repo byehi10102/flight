@@ -343,10 +343,14 @@ const browserDesk = await puppeteer.launch(LAUNCH);
   check("rotate overlay hidden on desktop", r.overlayHidden);
   check("body has NO mobile classes on desktop", !r.bodyMobile && !r.bodyLand);
   {
+    const tEnabled = Date.now();
     const faded = await page.waitForFunction(() => {
       const li = document.getElementById("loadingIndicator");
       return li && li.classList.contains("hidden");
     }, { timeout: 60000, polling: 150 }).then(() => true).catch(() => false);
+    const fadeMs = Date.now() - tEnabled;
+    check("loading page fades out promptly at 100% (no airplane film lingering over the menu)",
+      faded && fadeMs < 6000, `${fadeMs}ms from menu-enabled to page hidden`);
     const boot = await page.evaluate(() => {
       const li = document.getElementById("loadingIndicator");
       const bg = li ? li.querySelector(".loading-bg") : null;
