@@ -141,10 +141,17 @@ export function applyBaseWorld(viewer) {
   // realism floor on every device.
   const profile = getQualityProfile();
   viewer.scene.globe.maximumScreenSpaceError = profile.maximumScreenSpaceError;
+  // ── Skip-LOD streaming profile (ref-flight's tile-tuning block) ──────────
+  // These four numbers are the ones flight.tarmizi.id ships (their `ls`
+  // object in the deployed bundle): coarse ancestors are drawn immediately
+  // and refined in place, instead of an area staying empty until the detail
+  // tiles land. baseScreenSpaceError 2048 + skipScreenSpaceErrorFactor 32
+  // (double Cesium's default) lets the skip pass reach much coarser tiles,
+  // and skipLevels 2 covers two levels of descent at once.
   viewer.scene.globe.skipLevelOfDetail = true;
-  viewer.scene.globe.baseScreenSpaceError = 1024;
-  viewer.scene.globe.skipScreenSpaceErrorFactor = 16;
-  viewer.scene.globe.skipLevels = 1;
+  viewer.scene.globe.baseScreenSpaceError = 2048;
+  viewer.scene.globe.skipScreenSpaceErrorFactor = 32;
+  viewer.scene.globe.skipLevels = 2;
 
   viewer.scene.globe.tileCacheSize = profile.tileCacheSize;
   viewer.scene.globe.preloadAncestors = true;
@@ -170,8 +177,16 @@ export function applyBaseWorld(viewer) {
   viewer.scene.skyAtmosphere.hueShift = -0.02;
   viewer.scene.skyAtmosphere.saturationShift = -0.08;
 
+  // Aerial haze, at the density flight.tarmizi.id ships (0.001, with the fog
+  // colour pinned bright). Cesium scales the density down with camera height
+  // (Fog.update: density * heightScalar * (h/maxHeight)^-heightFalloff), so
+  // this is ~1.7x Cesium's own default in practice - not a white-out - and it
+  // is what swallows the horizon, where freshly streamed tile levels would
+  // otherwise pop in over the crisp distance.
   viewer.scene.fog.enabled = true;
-  viewer.scene.fog.density = 0.0001;
+  viewer.scene.fog.density = 0.001;
+  viewer.scene.fog.minimumBrightness = 1;
+  viewer.scene.fog.screenSpaceErrorFactor = 2;
 
   // A visible sun keeps the aircraft lit and gives terrain real shading.
   // Intensity is driven per-frame-of-day by setSunForTime().
