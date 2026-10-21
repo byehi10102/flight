@@ -6,7 +6,9 @@ import { CONFIG, computeMinimapZoomAltitude } from "./core/config.js";
 import { computeBootProgress, preparingFlightProgress, bootDisplayFloor, MonotonicPercent, PercentRamp } from "./core/bootProgress.js";
 import { getQualityProfile } from "./core/quality.js";
 import { AdaptivePerformance } from "./core/performance.js";
-import { createViewer, attachTerrain, setSunForTime, initMiniViewer, getMiniViewer, setMinimapCamera, setStreetsVisible } from "./core/viewer.js";
+import { createLoadTrace, installRequestCounter } from "./core/loadTrace.js";
+import { createViewer, attachTerrain, setSunForTime, initMiniViewer, getMiniViewer, setMinimapCamera, setStreetsVisible, setImageryLevelCap } from "./core/viewer.js";
+import { imageryLevelForSpeed } from "./core/detailPolicy.js";
 import { GroundSampler } from "./core/ground.js";
 import { PlanePhysics } from "./plane/planePhysics.js";
 import { PlaneController } from "./plane/planeController.js";
@@ -141,6 +143,8 @@ let preloadTimer = 0;
 let minimapUpdateTimer = 0;
 let sunUpdateTimer = 0;
 let transitionGen = 0;
+// Current imagery LOD cap in force (see the speed-driven cap in animate()).
+let imageryLevel = CONFIG.imagery.maximumLevel;
 
 /**
  * Camera smoothing. The sim advances in fixed 1/60 s steps, but the camera is
@@ -392,7 +396,20 @@ function startPickerFilm() {
 // long that takes (the film loops as long as necessary); the cap only
 // force-finishes stages if something has truly hung.
 const MAX_BOOT_SECONDS = 75;
+// Region warm-up budget (ms): see preloadTerrain.
+const PRELOAD_BUDGET_MS = 12000;
 const bootStart = performance.now();
+
+// ── Load instrumentation (devtest only) ──────────────────────────────────────
+// The two loading phases are gated by real work, so "it takes a while" had no
+// breakdown. Marks cost a few property reads and tile counting is two wrapped
+// calls; production sees neither.
+const DEVTEST = new URLSearchParams(location.search).has("devtest");
+const loadTrace = DEVTEST ? createLoadTrace() : null;
+if (loadTrace) {
+  installRequestCounter(loadTrace);
+  loadTrace.mark("bootStart");
+}
 
 // The boot bar walks (ramp + display floor) rather than snapping, so it needs
 // a clock of its own: the tile-progress events that normally drive it can go
@@ -477,6 +494,7 @@ function updateLoadingUI() {
 // ── Initialisation ───────────────────────────────────────────────────────────
 const viewer = createViewer("cesiumContainer");
 loadingStatus.cesium = true;
+loadTrace?.mark("cesium");
 updateLoadingUI();
 
 groundSampler = new GroundSampler(viewer);
@@ -490,6 +508,7 @@ const unregisterGlobeTracker = viewer.scene.postRender.addEventListener(() => {
     const hasTiles = surface && surface._tilesToRender && surface._tilesToRender.length > 0;
     if (hasTiles) {
       loadingStatus.globe = true;
+      loadTrace?.mark("globe");
       updateLoadingUI();
       unregisterGlobeTracker();
     }
@@ -576,15 +595,18 @@ async function preloadTerrain() {
     console.warn("[terrain] Preload failed, will retry on spawn:", error);
   } finally {
     loadingStatus.terrain = true;
+    loadTrace?.mark("terrain");
     updateLoadingUI();
   }
   try {
-    // Not a timer cut: generous bound so the big Anaheim preload (passes +
-    // DEM grid + queue drain) genuinely completes on slow connections. The
-    // boot film loops as long as this takes. 60 s bound; the 75 s hard cap
-    // below remains the pure hang safety.
-    await withTimeout(preloadSpawnRegion(), 60000);
+    // A real BUDGET, not a hang guard: the region warm-up is a head start, and
+    // past ~12 s the honest move is to hand the remaining stream to the picker
+    // and the flight itself (which is what streams it anyway) instead of
+    // holding the player on the loading bar. The 75 s hard cap below is still
+    // the pure hang safety.
+    await withTimeout(preloadSpawnRegion(), PRELOAD_BUDGET_MS);
   } catch (e) { /* bounded above */ }
+  loadTrace?.mark("areaDone");
   bootAreaActive = false;
   loadingStatus.area = true;
   updateLoadingUI();
@@ -624,7 +646,13 @@ function waitForGenuineDrain(sustainMs = 600, hangMs = 9000) {
 }
 
 /** One imagery warm pass: park the camera, track the pass's queue from its
- *  own peak, and return once the tiles have genuinely settled. */
+ *  own peak, and return once the tiles have genuinely settled. The sustain
+ *  window is short (300 ms): a pass is one of several, and each one's extra
+ *  half-second of "is it really settled" was pure waiting between the bars. */
+const WARM_PASS_DRAIN_MS = 300;
+/** Finish drain: longer than a pass (it is the last look before the picker
+ *  opens) but not the 1.2 s it used to be. */
+const FINAL_DRAIN_MS = 600;
 async function bootWarmPass(altitude, milestone) {
   viewer.camera.setView({
     destination: Cesium.Cartesian3.fromDegrees(state.lon, state.lat, altitude),
@@ -634,7 +662,8 @@ async function bootWarmPass(altitude, milestone) {
   // the tiles have genuinely settled.
   bootAreaMilestone = milestone - 0.2;
   bootAreaPeak = 0;
-  await waitForGenuineDrain(600, 9000);
+  await waitForGenuineDrain(WARM_PASS_DRAIN_MS, 9000);
+  loadTrace?.mark(`pass:${milestone}`);
   loadingSub.area = milestone;
   updateLoadingUI();
 }
@@ -649,44 +678,58 @@ async function preloadSpawnRegion() {
     },
   };
   bootAreaActive = true;
+  let seedPromise = null;
   try {
     // Pass 1: wide 160 km top-down look warms imagery tiles for a ~300 km
-    // area around the default region. Each pass completes only when its
-    // tiles have GENUINELY settled - never on a timer.
-    await bootWarmPass(160000, 0.2);
-    // Pass 2: closer 35 km pass - city-level detail imagery + terrain the
-    // picker's first zoom would otherwise stream on demand.
-    await bootWarmPass(35000, 0.4);
-    // Pass 3: low 8 km pass - street-level imagery around the default spawn
-    // point, so the picker's opening view is already sharp.
-    await bootWarmPass(8000, 0.6);
-    // Pass 4: 3 km pass - the sharpest imagery the picker's closest zoom
-    // uses, so even a deep zoom-in over Anaheim starts warm.
-    await bootWarmPass(3000, 0.8);
-  } catch (e) { /* best effort */ }
-  // 3D terrain across the region: ~100 miles in EACH direction of the spawn
-  // map (~160 km): +/-1.45 deg lat x +/-1.75 deg lon, 9x9. Deliberately
-  // right-sized: the earlier much-wider grid hammered the main thread
-  // during the film and the video stuttered.
+    // area around the default region — the view the spawn picker opens on.
+    await bootWarmPass(160000, 0.25);
+    // 3D terrain across the region: ~100 miles in EACH direction of the spawn
+    // map (~160 km): +/-1.45 deg lat x +/-1.75 deg lon, 5x5. Started HERE, in
+    // parallel with pass 2: the DEM sampler does not move the camera, so its
+    // requests ride the second pass's waiting instead of adding a stage of
+    // their own. The grid is deliberately 25 points, not 81 — every point
+    // forces the FINEST terrain level the provider has, so 81 of them were
+    // the single biggest terrain demand in boot (the sampler refines itself
+    // cell by cell as you fly, so this is a head start, not coverage).
+    seedPromise = withTimeout(groundSampler.seed(regionSeedPoints()), 6000)
+      .catch(() => { /* the fallback path covers it */ });
+    // Pass 2 (last): the city-level zoom the picker's first look uses. The
+    // deeper 8 km / 3 km passes are GONE: they warm a deliberate deep zoom-in
+    // that any map app streams on demand, and the spawn phase re-requests
+    // those tiles at the destination anyway. That was ~6 s of the bar.
+    await bootWarmPass(35000, 0.55);
+    await seedPromise;
+    loadTrace?.mark("terrainSeed");
+  } catch (e) { /* best effort */ } finally {
+    // "Area done" = the big load actually STREAMED, not just requested: wait
+    // for a genuine, sustained full drain (longer certainty than the passes;
+    // hang guard only - never a progress timer). Runs even when the budget
+    // cut in above, so the camera is never left parked in the warm-up view.
+    bootAreaMilestone = 0.8;
+    bootAreaPeak = 0;
+    try { await waitForGenuineDrain(FINAL_DRAIN_MS, 9000); } catch (e) { /* budget */ }
+    loadTrace?.mark("areaDrain");
+    bootAreaActive = false;
+    loadingSub.area = 1;
+    updateLoadingUI();
+    try { viewer.camera.setView(saved); } catch (e) { /* cosmetic */ }
+  }
+}
+
+/** The boot DEM head start: a 5x5 grid (25 points) over +/-1.45 deg lat x
+ *  +/-1.75 deg lon around the spawn region — same extent the 9x9 grid covered,
+ *  a third of the requests. */
+function regionSeedPoints() {
   const pts = [];
-  for (let i = 0; i < 9; i++) {
-    for (let j = 0; j < 9; j++) {
+  for (let i = 0; i < 5; i++) {
+    for (let j = 0; j < 5; j++) {
       pts.push([
-        state.lat + (j / 8 - 0.5) * 2.9,
-        state.lon + (i / 8 - 0.5) * 3.5,
+        state.lat + (j / 4 - 0.5) * 2.9,
+        state.lon + (i / 4 - 0.5) * 3.5,
       ]);
     }
   }
-  try { await groundSampler.seed(pts); } catch (e) { /* best effort */ }
-  // "Area done" = the big load actually STREAMED, not just requested: wait
-  // for a genuine, sustained full drain (longer certainty than the passes;
-  // hang guard only - never a progress timer).
-  bootAreaMilestone = 0.8;
-  bootAreaPeak = 0;
-  await waitForGenuineDrain(1200, 12000);
-  bootAreaActive = false;
-  loadingSub.area = 1; updateLoadingUI();
-  viewer.camera.setView(saved);
+  return pts;
 }
 
 function withTimeout(promise, ms) {
@@ -858,6 +901,7 @@ function initThree() {
     } catch (e) { /* cosmetic */ }
   }).then(() => {
     loadingStatus.model = true;
+    loadTrace?.mark("model");
     updateLoadingUI();
     // Aerodynamic effects attach to the loaded model (the vapor pads are
     // children of the jet group; the wingtip vortices live in world space).
@@ -918,6 +962,7 @@ async function initSounds() {
     updateLoadingUI();
   })));
   loadingStatus.audio = true;
+  loadTrace?.mark("audio");
   updateLoadingUI();
   setupButtonSounds();
 }
@@ -1637,26 +1682,44 @@ function getSpawnPinImage() {
 // seeded in confirmSpawn never shows up in the globe's queue on its own), and
 // the minimap is created and warmed at the destination so it is fully
 // rendered by spawn. The bar tracks that real queue; "done" requires the
-// queue to STAY empty for ~1.2s (LOD refinement idles between passes — a
-// single empty tick let the dive start with tiles still incoming). Min ~3s
-// so the moment never flashes by; hard cap so a stalled network can never
-// trap the player; then the picker view is restored and the unchanged
-// camera-dive transition flies in.
-const PREPARING_MIN_MS = 3000;
-const PREPARING_MAX_MS = 25000;
-const PREPARING_DRAIN_MS = 2000;   // queue must stay empty this long
-const PREPARING_GRACE_MS = 1500;   // requests need time to even register
+// queue to STAY empty briefly (LOD refinement idles between passes — a single
+// empty tick let the dive start with tiles still incoming). Then the picker
+// view is restored and the unchanged camera-dive transition flies in.
+//
+// The windows were 3 s / 1.5 s / 2 s: a ~6.5 s floor under every spawn before
+// any tile work counted, and the measured phase ran 6.6 s. They are now
+// 2 s / 0.6 s / 0.8 s — a ~3.4 s floor — still long enough that the dive
+// never flashes by and a stalled queue cannot fake completion. The bar is the
+// film's timer here; the real queue still gates it.
+const PREPARING_MIN_MS = 2000;
+// 12 s was a hang guard so generous it doubled as a load timer: with a wide
+// request pipe the queue can stay busy for 10 s at the destination, and the
+// player pays all of it on a bar. 6 s is the ceiling; whatever is still
+// streaming keeps streaming — behind the opaque film, then alongside the jet,
+// which is where it was going to arrive anyway.
+const PREPARING_MAX_MS = 6000;
+const PREPARING_DRAIN_MS = 800;    // queue must stay empty this long
+const PREPARING_GRACE_MS = 600;    // requests need time to even register
 
 let preparingSavedView = null;
 let preparingSavedLod = null;
 let preparingDrainedAt = 0;
 
-/** Full-detail warm-up: the flight-tuned LOD skipping (baseScreenSpaceError
- *  1024 + skipLevelOfDetail) loads COARSE tiles fast and refines lazily —
- *  which is exactly the "green first, detail appears later" look at spawn.
- *  During the preparing window the globe loads the TRUE detail pyramid
- *  instead (every visible level, no skipping); the flight values come back
- *  when the phase ends. */
+/** Warm-up LOD.
+ *
+ *  This used to flip the globe to the TRUE detail pyramid (skipLevelOfDetail
+ *  off, baseScreenSpaceError 1 = every visible level, no skipping) so the
+ *  spawn opened on fully-refined tiles. Measured cost of that: the spawn bar
+ *  sat at 6.6 s and the phase generated ~1350 level-14 terrain requests — the
+ *  single biggest tile burst in the whole app — to load detail FINER than
+ *  flight ever displays, at a destination the jet leaves within seconds.
+ *
+ *  The warm-up now runs the flight profile verbatim (skip-LOD coarse-first),
+ *  which still issues every request for the parked view but lets the coarse
+ *  parents satisfy the queue immediately: the phase ends when the tiles the
+ *  jet will ACTUALLY use have arrived, instead of when a deeper pyramid has.
+ *  The detail flip is one line each way if a sharper spawn is ever wanted
+ *  back at the cost of the wait. */
 function beginDetailLod() {
   try {
     const g = viewer.scene.globe;
@@ -1664,8 +1727,7 @@ function beginDetailLod() {
       baseScreenSpaceError: g.baseScreenSpaceError,
       skipLevelOfDetail: g.skipLevelOfDetail,
     };
-    g.baseScreenSpaceError = 1;
-    g.skipLevelOfDetail = false;
+    // No LOD flip: keep skipLevelOfDetail (coarse-first streaming).
   } catch (e) { /* best-effort; defaults still load */ }
 }
 
@@ -1682,6 +1744,7 @@ function endDetailLod() {
 
 function runPreparingFlight(onReady) {
   const start = performance.now();
+  loadTrace?.mark("preparingStart");
   preparingQueuePeak = 0;
   lastPreparingQueue = 0;
   preparingActive = true;
@@ -1773,6 +1836,7 @@ function runPreparingFlight(onReady) {
     if (preparingBarFill) preparingBarFill.style.width = `${pct}%`;
     if (preparingPercent) preparingPercent.textContent = `${pct}%`;
     if (pct >= 100) {
+      loadTrace?.mark("preparing100");
       // 100%: the bar stops here and the film takes over — it finishes its
       // current lap, then (at the loop boundary) plays the zoom-off tail
       // while the screen fades; the bound completion then restores the
@@ -1800,6 +1864,7 @@ function confirmSpawn() {
   // Radial (see-through center) fade, NOT solid black — the spawn flight
   // itself must stay visible while the camera dives onto the city.
   transitionGen++;
+  loadTrace?.mark("spawnClick");
   const gen = transitionGen;
   soundManager.resumeAll();
   stopAllFlyingSounds(0.3);
@@ -1816,15 +1881,21 @@ function confirmSpawn() {
   }
 
   // Pre-spawn beat: the preparing screen owns this moment (no second loading
-  // chip over it - just the one bar). Seeds a HUGE DEM area around the chosen
-  // point - +/-0.25 deg (~28 km) grid + the forward flight path - so the dive
-  // window streams a real neighborhood and the spawn arrives without visible
-  // tile loading around the jet.
+  // chip over it - just the one bar). Seeds the DEM around the chosen point so
+  // the spawn arrives with sampled elevation under it.
+  //
+  // The grid is 9x9 = 81 points over the same +/-0.25 deg (~28 km) extent; it
+  // was 33x33 = 1089. Measured: that grid was ~1300 most-detailed (level 14)
+  // terrain requests fired the instant the bar started, which is why the spawn
+  // phase sat on a busy queue for 6.6 s while the tiles it was waiting for were
+  // mostly 1.7 km apart duplicates of the same 144 tiles. The sampler keeps
+  // refining the cells the jet actually flies through every frame
+  // (groundSampler.request), so this is a head start, not coverage.
   try {
     const pre = [];
-    for (let dy = -16; dy <= 16; dy++) {
-      for (let dx = -16; dx <= 16; dx++) {
-        pre.push([state.lat + dy * 0.015625, state.lon + dx * 0.015625]);
+    for (let dy = -4; dy <= 4; dy++) {
+      for (let dx = -4; dx <= 4; dx++) {
+        pre.push([state.lat + dy * 0.0625, state.lon + dx * 0.0625]);
       }
     }
     groundSampler.seed(pre).catch(() => {});
@@ -2006,6 +2077,7 @@ function confirmSpawn() {
         flightStartTime = Date.now();
         if (uiContainer) uiContainer.classList.remove("hidden");
         currentState = States.FLYING;
+        loadTrace?.mark("flying");
         resetCameraSmoothing();
         hud.resetTime();
         hud.resetScore();
@@ -2034,6 +2106,7 @@ function confirmSpawn() {
       if (uiContainer) uiContainer.classList.remove("hidden");
       if (threeContainer) threeContainer.classList.remove("hidden");
       currentState = States.FLYING;
+      loadTrace?.mark("flying");
       resetCameraSmoothing();
       hud.resetTime();
       hud.resetScore();
@@ -2120,15 +2193,25 @@ function update(dt) {
     state.agl = state.alt;
   }
 
-  // Forward tile preload: twice a second, prime the terrain cache in a fan
+  // Forward tile preload: once a second, prime the terrain cache in a fan
   // ahead of the nose. The lead scales with TRUE ground speed (~2.5 s of
   // flight, 3–20 km), so cruise doesn't waste fetches far away while boost
   // still has sampled elevation waiting. Imagery ahead streams on its own —
   // the forward-looking camera drives it every frame via setCameraToPlane
   // below; this covers the elevation side.
+  //
+  // GATED on the globe being settled: every point is a MOST-DETAILED terrain
+  // sample, i.e. a level-14 fetch plus its ancestor chain, and terrain is
+  // ~63% of this app's tile requests. Firing that fan while the queue is
+  // already deep steals the request budget from the tiles under the jet —
+  // which is the visible loading this is meant to prevent. It runs the moment
+  // there is room, with a 3 s floor so a permanently busy queue (which is
+  // what 3000 mph looks like) cannot starve the AGL/crash checks of sampled
+  // elevation. At 3000 mph 3 s is ~7 km, inside the 2.5 s lead this primes.
   try {
     preloadTimer += dt;
-    if (preloadTimer > 0.5) {
+    const fanDue = preloadTimer >= 3;
+    if (preloadTimer > 1.0 && (viewer.scene.globe.tilesLoaded || fanDue)) {
       preloadTimer = 0;
       const hRad = Cesium.Math.toRadians(state.heading || 0);
       const R = 6371000;
@@ -2525,6 +2608,18 @@ function animate() {
 
     state.isFlying = currentState === States.FLYING;
 
+    // Detail follows speed: at 3000 mph the deep imagery levels cannot arrive
+    // in time (see core/detailPolicy.js), and asking for them is exactly what
+    // makes detail pop in late under the jet. Cruising still gets every tile.
+    // Only assigned when the level actually changes.
+    try {
+      const level = imageryLevelForSpeed(state.speed);
+      if (level !== imageryLevel) {
+        imageryLevel = level;
+        setImageryLevelCap(level);
+      }
+    } catch (e) { /* streaming detail is best-effort */ }
+
     // Joysticks only while the plane is controllable and the phone is held
     // sideways; hiding force-releases any held thumb so a state change can't
     // pin an axis.
@@ -2772,7 +2867,7 @@ updateLoadingUI();
 // ── Test hook (dev-mobile-test.mjs) ─────────────────────────────────────────
 // Behind ?devtest=1 so production never exports it; the probe asserts raw
 // control state through here instead of screenshots.
-if (new URLSearchParams(location.search).has("devtest")) {
+if (DEVTEST) {
   window.SKY_DEV = {
     controller,
     // Live getter: the flight physics is re-created on every spawn, so a
@@ -2791,6 +2886,10 @@ if (new URLSearchParams(location.search).has("devtest")) {
     get aeroEffects() { return aeroEffects; },
     // Devtest: the frame-budget thermostat's current reading.
     get perf() { return adaptivePerf; },
+    // Devtest: where the loading time and the tile requests actually went.
+    loadTrace: () => (loadTrace ? loadTrace.report() : null),
+    // Devtest: the imagery LOD cap currently in force (speed-driven).
+    get imageryLevel() { return imageryLevel; },
     // Devtest: the loading bar's real state — the shown (ramped) value next to
     // the honest target it is walking toward, plus the stage flags feeding it.
     get boot() {

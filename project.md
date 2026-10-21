@@ -1841,3 +1841,69 @@ p95 36.0 ms (half the frames missing vsync) became **56 fps with p50 17.7 /
 p95 18.2** - the spikes are gone and the thermostat settled at 0.85x.
 `PERF_DEFAULTS.highMs` in performance.js is the dial if the trade should lean
 further toward resolution.
+
+## 38. Recent changes (boot 17-22 s -> 9-10 s, spawn 6.6 s -> 5.7 s, and the tile stream at speed)
+
+Two bars, two different problems, one shared cause: the app was asking for more
+tiles than the player was willing to wait for — and, in flight, more than the
+network could ever deliver.
+
+### Where the wait actually was (measured, not guessed)
+
+The bars are gated by real work, so there was no breakdown to look at. There is
+now: `src/core/loadTrace.js` (devtest only — stage marks plus a tile-request
+counter by host and by Cesium level, hooked into `fetch`/`XMLHttpRequest`), read
+back with `SKY_DEV.loadTrace()` and asserted by the headless probe. The first
+run of it said:
+
+    boot 0 -> 2 s      cesium + model + audio + terrain (parallel, fine)
+    boot 2 -> 8 s      globe surface: the initial world load, 6 s
+    boot 8 -> 12.3 s   2 warm passes + the DEM seed + the finish drain
+    spawn 6.6 s        a 33x33 = 1089-point MOST-DETAILED terrain seed, fired
+                       the moment the bar appeared
+    requests           2512 tiles: terrain 1584 vs imagery 928; level 14 = 1353
+
+Both storms were the same mistake in two places: `sampleTerrainMostDetailed`
+over a dense grid. Every point forces the FINEST DEM level (14 here) plus its
+ancestor chain, so 1089 points 1.7 km apart were re-requesting the same ~144
+tiles over and over, and the boot grid did it 81 times over 160 km.
+
+### The fix
+
+- Boot warm passes 4 -> 2 (the 160 km overview and the 35 km city level). The
+  8 km / 3 km passes warmed a deliberate deep zoom that any map app streams on
+  demand, and the spawn phase re-requests those tiles at the destination.
+- Boot DEM grid 9x9 -> 5x5, started IN PARALLEL with pass 2 instead of after the
+  passes; spawn DEM grid 33x33 -> 9x9 over the same extent.
+- Drain sustains 600/1200 ms -> 300/600 ms; spawn phase windows 3 s / 1.5 s /
+  2 s -> 2 s / 0.6 s / 0.8 s; spawn ceiling 12 s -> 6 s; boot region budget
+  60 s -> 12 s.
+- The spawn warm-up no longer flips the globe to the full detail pyramid
+  (`skipLevelOfDetail` off, `baseScreenSpaceError` 1). It warms the flight
+  profile verbatim — coarse-first — so the phase ends when the tiles the jet
+  will USE have arrived rather than when a deeper pyramid has.
+
+Result: **boot 16.7-22 s -> 9-10 s, spawn 6.6 s -> 5.7 s, flight start ~30 s ->
+~19 s**, with level-14 terrain requests down 1309 -> 300 at boot and total
+requests halved (2108 -> 1055).
+
+### Flight: the level the pipe can actually serve
+
+A 256 px tile is 76 m wide at level 19 and 610 m at level 16. At 3000 mph the
+jet crosses 17.6 level-19 tiles per second PER ROW — with ~15 rows in view that
+is ~250 requests/s against a 64-request budget. Level 19 at speed can never
+arrive, which is exactly the "tiles still loading" the player sees: a coarse
+tile, then detail popping in late underneath. `src/core/detailPolicy.js` maps
+speed to level (19 at cruise, 16 at the 3000 ceiling, 15 in boost, floor 14),
+and `setImageryLevelCap` applies it to both global imagery layers, so
+`imageryLevelForSpeed` in one pure, tested function decides what the jet asks
+for. Requests per server were also raised 28 -> 40 and the global cap 64 -> 96
+(fine now that the demand is servable), `preloadSiblings` went back off
+(~2x request volume for seam smoothness skip-LOD already covers), and the
+forward DEM fan (12 most-detailed points ahead of the nose) now yields to a
+busy queue, with a 3 s floor so the AGL/crash checks always have sampled
+elevation.
+
+Measured in flight at 3000 mph, effects engaged: **59 fps, p50 16.7 ms /
+p95 16.8 ms, the tile queue EMPTY and `tilesLoaded` true** (the pre-change
+samples sat at queue 6-148). 128/128 tests.

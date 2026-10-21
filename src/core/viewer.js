@@ -81,13 +81,16 @@ export function createViewer(container) {
   // per-server cap (18 in 1.132) is the bottleneck when the jet outruns the
   // tile stream at high speed; both services handle more in flight.
   try {
+    // 40 per server / 96 globally. The old 28/64 was tuned when the LOD asked
+    // for levels a 3000 mph jet cannot be served anyway; with the speed-driven
+    // level cap in place the demand is smaller and legitimate, so the pipe is
+    // what should be wider. Both hosts are HTTP/2, so this is Cesium's own
+    // scheduler limit, not the browser's connection count.
     const imageryHost = new URL(CONFIG.imagery.url).host + ":443";
-    RequestScheduler.requestsByServer[imageryHost] = 28;
+    RequestScheduler.requestsByServer[imageryHost] = 40;
     const terrainHost = new URL(CONFIG.terrain.url).host + ":443";
-    RequestScheduler.requestsByServer[terrainHost] = 28;
-    // Global concurrent cap (default 50) would choke the widened pipes when
-    // imagery + terrain + reference layers all burst at once.
-    RequestScheduler.maximumRequests = 64;
+    RequestScheduler.requestsByServer[terrainHost] = 40;
+    RequestScheduler.maximumRequests = 96;
   } catch (e) { /* defaults still work */ }
 
   applyBaseWorld(viewer);
@@ -114,7 +117,7 @@ export function applyBaseWorld(viewer) {
     credit: CONFIG.imagery.fallbackAttribution,
     maximumLevel: CONFIG.imagery.fallbackMaximumLevel,
   });
-  viewer.imageryLayers.addImageryProvider(base, 0);
+  baseImageryLayer = viewer.imageryLayers.addImageryProvider(base, 0);
 
   const imagery = withOceanDonor(new UrlTemplateImageryProvider({
     url: CONFIG.imagery.url,
@@ -122,6 +125,7 @@ export function applyBaseWorld(viewer) {
     maximumLevel: CONFIG.imagery.maximumLevel,
   }));
   const layer = viewer.imageryLayers.addImageryProvider(imagery, 1);
+  satelliteImageryLayer = layer;
   layer.maximumLevel = CONFIG.imagery.maximumLevel;
   try { layer.anisotropy = 16; } catch (e) { /* older Cesium */ }
 
@@ -154,8 +158,15 @@ export function applyBaseWorld(viewer) {
   viewer.scene.globe.skipLevels = 2;
 
   viewer.scene.globe.tileCacheSize = profile.tileCacheSize;
+  // Ancestors STAY on: with skip-LOD they are what draws something at every
+  // level immediately, which is the whole coarse-first strategy.
   viewer.scene.globe.preloadAncestors = true;
-  viewer.scene.globe.preloadSiblings = true;
+  // Siblings OFF: it fetches the neighbours of every visible tile — roughly
+  // doubling requests — and skip-LOD already guarantees a coarse parent is on
+  // screen while a tile's detail arrives, which is what siblings were buying.
+  // Measured context: terrain alone is ~63% of this app's tile requests, so
+  // halving the per-tile fan-out matters more here than the seam smoothness.
+  viewer.scene.globe.preloadSiblings = false;
   // Raised concurrent tile-fetch budget: at 1.8x arcade speed (up to
   // ~8 km/s in boost) the camera outruns the default fetch queue, so more
   // descendants load per frame instead of arriving soft behind the jet.
@@ -292,6 +303,25 @@ export { Cartographic, CesiumMath, CesiumViewer };
 let miniViewer = null;
 let streetsLayer = null;
 let referenceLayer = null;
+// The two global imagery layers, kept for the speed-driven detail cap.
+let baseImageryLayer = null;
+let satelliteImageryLayer = null;
+
+/**
+ * Cap how deep the imagery layers may refine. Called by the flight loop with
+ * `imageryLevelForSpeed(mph)`: at speed the deep levels cannot arrive in time
+ * anyway (see core/detailPolicy.js), so asking for them is what produces
+ * detail visibly popping in under the jet. Only assigned when the level
+ * actually changes — each assignment makes Cesium re-evaluate the whole LOD.
+ */
+export function setImageryLevelCap(level) {
+  try {
+    if (satelliteImageryLayer) satelliteImageryLayer.maximumLevel = level;
+    // The street-map base underneath follows: it fills gaps the satellite
+    // layer has no data for, so leaving it deeper only costs requests.
+    if (baseImageryLayer) baseImageryLayer.maximumLevel = level;
+  } catch (e) { /* imagery LOD is best-effort */ }
+}
 
 /** Reference-labels overlay for the spawn picker (satellite stays visible). */
 export function setStreetsVisible(show) {
