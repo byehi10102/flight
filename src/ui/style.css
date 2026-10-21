@@ -334,6 +334,12 @@ html, body {
   padding: 30px;
   color: #0f0;
   text-shadow: 0 0 8px rgba(0, 255, 0, 0.6);
+  /* The HUD writes a perspective/tilt/scale transform to this container every
+     update (hud.js) for the ref-flight sway. Without this the whole
+     full-screen layer is re-rastered at 150 % DPI on every one of those
+     writes; promoting it keeps the sway on the compositor and only re-rasterizes
+     when the text inside actually changes. */
+  will-change: transform;
 }
 
 /* Compact top cluster: little compass chip + bright location line. Replaces

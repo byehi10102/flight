@@ -191,6 +191,20 @@ export class Hud {
 
   update(state, now) {
     const t = now ?? performance.now();
+
+    // ── FPS ──
+    // Counted HERE, before the 10 Hz throttle below: this method is called once
+    // per rendered frame, so counting after the early-return counted HUD
+    // UPDATES instead of frames and pinned the readout at ~9-10 no matter how
+    // fast the game ran (a healthy 57 fps session showed "FPS 9").
+    this._fpsFrames++;
+    if (t - this._fpsLast >= 1000) {
+      const fps = (this._fpsFrames * 1000) / (t - this._fpsLast);
+      if (this.fpsEl) this.fpsEl.textContent = Math.round(fps);
+      this._fpsFrames = 0;
+      this._fpsLast = t;
+    }
+
     if (t - this._last < 100) return;
     this._last = t;
 
@@ -349,16 +363,7 @@ export class Hud {
         : stallFactor > 0.35 ? "STALL" : "AIRBORNE";
     }
 
-    // â”€â”€ FPS â”€â”€
-    this._fpsFrames++;
-    if (t - this._fpsLast >= 1000) {
-      const fps = (this._fpsFrames * 1000) / (t - this._fpsLast);
-      if (this.fpsEl) this.fpsEl.textContent = Math.round(fps);
-      this._fpsFrames = 0;
-      this._fpsLast = t;
-    }
-
-    // â”€â”€ Boost meter: drains across one boost, refills right after â”€â”€
+    // ── Boost meter: drains across one boost, refills right after ──
     const charge = Math.max(0, Math.min(1, state.boostCharge ?? 1));
     if (this.boostFill) {
       this.boostFill.style.width = `${Math.round(charge * 100)}%`;

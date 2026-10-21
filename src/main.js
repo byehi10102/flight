@@ -95,6 +95,12 @@ let controller = new PlaneController();
 let hud = new Hud();
 const bullets = new Bullets();
 let gunOverheatWarned = false;
+// Mouse trigger hold: set while the left button is down and still (see the
+// pointer handlers), cleared the moment it moves. Module scope because the
+// trigger check lives in update(). Feeds the same trigger as F and the touch
+// fire button.
+let mouseTriggerHeld = false;
+let mouseHoldTimer = null;
 
 // Mobile front-end: on a phone/tablet this adds the rotate overlay and the
 // two virtual joysticks; on a desktop the MobileMode constructor returns
@@ -598,6 +604,7 @@ async function preloadTerrain() {
     loadTrace?.mark("terrain");
     updateLoadingUI();
   }
+  bootWarmDeadline = performance.now() + PRELOAD_BUDGET_MS;
   try {
     // A real BUDGET, not a hang guard: the region warm-up is a head start, and
     // past ~12 s the honest move is to hand the remaining stream to the picker
@@ -606,6 +613,12 @@ async function preloadTerrain() {
     // the pure hang safety.
     await withTimeout(preloadSpawnRegion(), PRELOAD_BUDGET_MS);
   } catch (e) { /* bounded above */ }
+  // Put the camera back on the menu's Earth view HERE, not whenever the
+  // warm-up's remaining passes happen to finish: the menu is on screen now,
+  // and while the passes are pending the camera sits at whatever warm pose
+  // they last set (a top-down city map), which then fights the spawn picker's
+  // own fly-in when the player taps single player.
+  try { if (initialCameraView) viewer.camera.setView(initialCameraView); } catch (e) { /* cosmetic */ }
   loadTrace?.mark("areaDone");
   bootAreaActive = false;
   loadingStatus.area = true;
@@ -618,6 +631,17 @@ async function preloadTerrain() {
 let bootAreaMilestone = 0;
 let bootAreaPeak = 0;
 let bootAreaActive = false;
+// When the region warm-up must be off the camera and out of the request queue
+// (see preloadTerrain). Set before the warm-up starts; the passes check it.
+let bootWarmDeadline = 0;
+
+/** True once the warm-up budget is spent. Each pass checks this BEFORE taking
+ *  the camera: a pass that ran past the budget kept the camera parked at its
+ *  warm pose — which is what put a top-down spawn-picker map behind the menu
+ *  and yanked the picker's fly-in animation. */
+function warmBudgetSpent() {
+  return bootWarmDeadline > 0 && performance.now() >= bootWarmDeadline;
+}
 
 /** Wait for the tile queue to genuinely drain and stay drained. The hang
  *  guard is the ONLY timer: progress is never cut short to hit a clock. */
@@ -654,18 +678,24 @@ const WARM_PASS_DRAIN_MS = 300;
  *  opens) but not the 1.2 s it used to be. */
 const FINAL_DRAIN_MS = 600;
 async function bootWarmPass(altitude, milestone) {
+  // Never TAKE the camera on a spent budget: leaving it parked is worse than a
+  // colder picker (see warmBudgetSpent).
+  if (warmBudgetSpent()) return false;
   viewer.camera.setView({
     destination: Cesium.Cartesian3.fromDegrees(state.lon, state.lat, altitude),
     orientation: { heading: 0, pitch: Cesium.Math.toRadians(-90), roll: 0 },
   });
   // Fill THIS pass's slice as its queue drains; the milestone lands when
-  // the tiles have genuinely settled.
+  // the tiles have genuinely settled. The hang guard is the budget's own
+  // remainder when that is shorter, so a cut can't be overrun by 9 s.
   bootAreaMilestone = milestone - 0.2;
   bootAreaPeak = 0;
-  await waitForGenuineDrain(WARM_PASS_DRAIN_MS, 9000);
+  const remaining = bootWarmDeadline > 0 ? bootWarmDeadline - performance.now() : 9000;
+  await waitForGenuineDrain(WARM_PASS_DRAIN_MS, Math.max(400, Math.min(9000, remaining)));
   loadTrace?.mark(`pass:${milestone}`);
   loadingSub.area = milestone;
   updateLoadingUI();
+  return true;
 }
 
 async function preloadSpawnRegion() {
@@ -682,7 +712,8 @@ async function preloadSpawnRegion() {
   try {
     // Pass 1: wide 160 km top-down look warms imagery tiles for a ~300 km
     // area around the default region — the view the spawn picker opens on.
-    await bootWarmPass(160000, 0.25);
+    const warmed = await bootWarmPass(160000, 0.25);
+    if (!warmed) { bootAreaActive = false; return; }
     // 3D terrain across the region: ~100 miles in EACH direction of the spawn
     // map (~160 km): +/-1.45 deg lat x +/-1.75 deg lon, 5x5. Started HERE, in
     // parallel with pass 2: the DEM sampler does not move the camera, so its
@@ -691,8 +722,12 @@ async function preloadSpawnRegion() {
     // forces the FINEST terrain level the provider has, so 81 of them were
     // the single biggest terrain demand in boot (the sampler refines itself
     // cell by cell as you fly, so this is a head start, not coverage).
+    // NOTE: this cache feeds the AGL / GPWS / crash readouts, NOT the rendered
+    // terrain — a smaller grid makes those checks less precise on arrival, and
+    // does not change how loaded the picker's map looks.
     seedPromise = withTimeout(groundSampler.seed(regionSeedPoints()), 6000)
       .catch(() => { /* the fallback path covers it */ });
+    if (warmBudgetSpent()) { bootAreaActive = false; return; }
     // Pass 2 (last): the city-level zoom the picker's first look uses. The
     // deeper 8 km / 3 km passes are GONE: they warm a deliberate deep zoom-in
     // that any map app streams on demand, and the spawn phase re-requests
@@ -707,7 +742,10 @@ async function preloadSpawnRegion() {
     // cut in above, so the camera is never left parked in the warm-up view.
     bootAreaMilestone = 0.8;
     bootAreaPeak = 0;
-    try { await waitForGenuineDrain(FINAL_DRAIN_MS, 9000); } catch (e) { /* budget */ }
+    const drainRemaining = bootWarmDeadline > 0 ? bootWarmDeadline - performance.now() : 9000;
+    try {
+      await waitForGenuineDrain(FINAL_DRAIN_MS, Math.max(400, Math.min(9000, drainRemaining)));
+    } catch (e) { /* budget */ }
     loadTrace?.mark("areaDrain");
     bootAreaActive = false;
     loadingSub.area = 1;
@@ -2329,7 +2367,9 @@ function update(dt) {
   // moving the plane never bends an in-flight round. Desktop quick clicks
   // still fire an AIMED round via fireBulletAtScreen.
   const triggerHeld = currentState === States.FLYING && (
-    !!controller.keys["f"] || !!controller.keys["enter"] || !!(touchControls && touchControls.isFiringHeld && touchControls.isFiringHeld())
+    !!controller.keys["f"] || !!controller.keys["enter"]
+    || !!mouseTriggerHeld
+    || !!(touchControls && touchControls.isFiringHeld && touchControls.isFiringHeld())
   );
   if (triggerHeld) {
     const round = bullets.fire(state, state.heading, state.pitch, MPH_TO_MPS * WORLD_SPEED_SCALE);
@@ -2406,11 +2446,28 @@ if (!mobileMode.enabled) {
     if (e.pointerType !== "mouse" || currentState !== States.FLYING) return;
     if (e.target && e.target.closest && e.target.closest("button, input, .overlay, a")) return;
     pendingShot = { x: e.clientX, y: e.clientY, t: performance.now(), moved: 0 };
+    // A press that STAYS put is a trigger, fired straight down the nose like
+    // the F key — holding the mouse button is how a player expects a gun to
+    // work, and it used to do nothing at all (the quick-click below needed the
+    // button back within 350 ms). A press that MOVES is still the look-around
+    // drag, so the two never fight.
+    mouseTriggerHeld = false;
+    clearTimeout(mouseHoldTimer);
+    mouseHoldTimer = setTimeout(() => {
+      if (pendingShot && pendingShot.moved < 8) mouseTriggerHeld = true;
+    }, 200);
   });
   window.addEventListener("pointermove", (e) => {
-    if (pendingShot) pendingShot.moved = Math.max(pendingShot.moved, Math.hypot(e.clientX - pendingShot.x, e.clientY - pendingShot.y));
+    if (!pendingShot) return;
+    pendingShot.moved = Math.max(pendingShot.moved, Math.hypot(e.clientX - pendingShot.x, e.clientY - pendingShot.y));
+    if (pendingShot.moved >= 8) {
+      mouseTriggerHeld = false;
+      clearTimeout(mouseHoldTimer);
+    }
   });
   window.addEventListener("pointerup", (e) => {
+    mouseTriggerHeld = false;
+    clearTimeout(mouseHoldTimer);
     if (!pendingShot) return;
     const shot = pendingShot;
     pendingShot = null;
@@ -2890,6 +2947,8 @@ if (DEVTEST) {
     loadTrace: () => (loadTrace ? loadTrace.report() : null),
     // Devtest: the imagery LOD cap currently in force (speed-driven).
     get imageryLevel() { return imageryLevel; },
+    // Devtest: the tactical minimap's own viewer (its layers, queue, tiles).
+    get miniViewer() { return getMiniViewer(); },
     // Devtest: the loading bar's real state — the shown (ramped) value next to
     // the honest target it is walking toward, plus the stage flags feeding it.
     get boot() {

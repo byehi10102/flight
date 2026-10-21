@@ -329,6 +329,9 @@ export function setStreetsVisible(show) {
     if (referenceLayer) referenceLayer.show = !!show;
   } catch (e) { /* cosmetic */ }
 }
+/** The minimap never refines past this level: cheap tiles that always arrive. */
+const MINIMAP_MAX_LEVEL = 15;
+
 export function initMiniViewer(containerId) {
   if (miniViewer) return miniViewer;
   try {
@@ -384,12 +387,22 @@ export function initMiniViewer(containerId) {
       credit: CONFIG.imagery.fallbackAttribution,
       maximumLevel: CONFIG.imagery.fallbackMaximumLevel,
     });
-    miniViewer.imageryLayers.addImageryProvider(base, 0);
+    const miniBase = miniViewer.imageryLayers.addImageryProvider(base, 0);
     const imagery = withOceanDonor(new UrlTemplateImageryProvider({
       url: CONFIG.imagery.url,
       maximumLevel: CONFIG.imagery.maximumLevel,
     }));
-    miniViewer.imageryLayers.addImageryProvider(imagery, 1);
+    const miniSat = miniViewer.imageryLayers.addImageryProvider(imagery, 1);
+    // A thumbnail asks only for cheap levels. The minimap's tiles are the
+    // lowest-priority requests in the app (they share the imagery host with
+    // the main globe, and the main globe is what the player is looking at), so
+    // at level 19 the map could sit empty waiting for a fetch the jet had
+    // already outrun. Level 15 is 610 m tiles: soft at the tightest zoom,
+    // always there.
+    try {
+      miniBase.maximumLevel = MINIMAP_MAX_LEVEL;
+      miniSat.maximumLevel = MINIMAP_MAX_LEVEL;
+    } catch (e) { /* imagery LOD is best-effort */ }
 
     const ctrl = miniViewer.scene.screenSpaceCameraController;
     ctrl.enableRotate = false;
