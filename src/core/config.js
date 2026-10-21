@@ -46,8 +46,8 @@ export const CONFIG = {
     mass: 38300,               // kg (CRJ-900)
     wingArea: 104.9,           // m²
     maxThrust: 147000,         // N (2 × 73.5 kN)
-    maxSpeed: 5000,             // mph — W tops out here
-    minSpeed: 500,              // mph — fast cruise, never stagnant
+    maxSpeed: 3000,             // mph — holding W tops out here
+    minSpeed: 250,              // mph — hands-off cruise, never stagnant
     densitySeaLevel: 1.225,    // kg/m³
     temperatureSeaLevel: 288.15, // K
     gravity: 9.80665,
@@ -84,7 +84,9 @@ export const CONFIG = {
   // ── Boost (afterburner) ───────────────────────────────────────────────────
   boost: {
     duration: 3.0,
-    multiplier: 1.5,
+    // Top speed with boost = physics.maxSpeed * this = 7000 mph. The only way
+    // above the 3000 mph that holding W gives you.
+    multiplier: 7 / 3,
     rotations: 2,
   },
 

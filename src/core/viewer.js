@@ -316,6 +316,9 @@ export function initMiniViewer(containerId) {
       infoBox: false,
       selectionIndicator: false,
       baseLayer: false,
+      // A map, not a 3D scene: MSAA on a thumbnail is pure waste (it costs a
+      // full multi-sample resolve per frame for edges nobody studies).
+      msaaSamples: 0,
       // Rendered MANUALLY from setMinimapCamera (called every frame while
       // flying). With the internal loop on, this hidden-during-boot viewer
       // burned a full render every frame from page load.
@@ -378,16 +381,26 @@ export function getMiniViewer() {
   return miniViewer;
 }
 
+// A second full globe render every frame was the most expensive thing in the
+// HUD: same scene graph, same tile pyramid, same fill as the main view, spent
+// on a map 150 px wide. A map does not need 60 Hz — the cap keeps it fluid
+// while cutting that cost to a fraction, and tile streaming is unaffected.
+const MINIMAP_MIN_RENDER_MS = 100; // 10 Hz
+let minimapLastRender = 0;
+
 /** Top-down minimap camera tracking the aircraft. Renders the mini viewer
  *  manually — only called from the flying states, so the minimap costs
  *  nothing while the boot page, menu, or picker are up. */
-export function setMinimapCamera(lon, lat, altitude, heading) {
+export function setMinimapCamera(lon, lat, altitude, heading, force = false) {
   if (!miniViewer) return;
   try {
     // clientWidth (layout size) is 0 whenever the HUD is display:none -
     // boot, menu, picker, crash menu - so the render is skipped exactly
     // when the minimap can't be seen.
     if (miniViewer.canvas.clientWidth === 0 || miniViewer.canvas.clientHeight === 0) return;
+    const now = performance.now();
+    if (!force && now - minimapLastRender < MINIMAP_MIN_RENDER_MS) return;
+    minimapLastRender = now;
     miniViewer.camera.setView({
       destination: Cartesian3.fromDegrees(lon, lat, altitude),
       orientation: {

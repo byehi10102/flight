@@ -3,8 +3,9 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import * as Cesium from "cesium";
 import "cesium/Build/Cesium/Widgets/widgets.css";
 import { CONFIG, computeMinimapZoomAltitude } from "./core/config.js";
-import { computeBootProgress, preparingFlightProgress, bootDisplayFloor, MonotonicPercent } from "./core/bootProgress.js";
+import { computeBootProgress, preparingFlightProgress, bootDisplayFloor, MonotonicPercent, PercentRamp } from "./core/bootProgress.js";
 import { getQualityProfile } from "./core/quality.js";
+import { AdaptivePerformance } from "./core/performance.js";
 import { createViewer, attachTerrain, setSunForTime, initMiniViewer, getMiniViewer, setMinimapCamera, setStreetsVisible } from "./core/viewer.js";
 import { GroundSampler } from "./core/ground.js";
 import { PlanePhysics } from "./plane/planePhysics.js";
@@ -29,12 +30,24 @@ const States = {
 
 let currentState = States.MENU;
 
-// Flight speeds are MPH throughout (500 cruise, 5000 max on W, 10000 on
-// boost); world movement needs m/s. WORLD_SPEED_SCALE is the arcade lever:
-// HUD still shows true MPH, but the jet covers tiles 1.8x faster so 5k/10k
-// feel like they should.
+// Flight speeds are MPH throughout (250 hands-off cruise, 3000 with W held,
+// 7000 in boost — boost is the only way past 3000); world movement needs m/s.
+// WORLD_SPEED_SCALE is the arcade lever: HUD still shows true MPH, but the jet
+// covers tiles 1.8x faster so the top speeds feel like they should.
 const MPH_TO_MPS = 0.44704;
 const WORLD_SPEED_SCALE = 1.8;
+// The real flight envelope, DERIVED from CONFIG so the speed-driven visuals
+// (engine/wind volume, speed FOV widening) follow any retune instead of
+// drifting away from stale literals.
+const SPEED_MIN_MPH = CONFIG.physics.minSpeed;
+const SPEED_TOP_MPH = CONFIG.physics.maxSpeed * CONFIG.boost.multiplier;
+/** 0..1 position in the flight envelope: 0 = hands-off cruise, 1 = full boost. */
+function speedFraction(mph) {
+  const v = Number(mph);
+  if (!Number.isFinite(v)) return 0;
+  const span = Math.max(1, SPEED_TOP_MPH - SPEED_MIN_MPH);
+  return Math.max(0, Math.min(1, (v - SPEED_MIN_MPH) / span));
+}
 // Spawn pin reveal distance: the pin drops in once the jet is this far
 // from the spawn point (100 ft), so it never covers the screen on arrival.
 const PIN_REVEAL_M = 30.48;
@@ -167,11 +180,15 @@ const loadingStatus = { model: false, cesium: false, globe: false, terrain: fals
 // Real sub-progress (0..1) for stages that can report it: model bytes from
 // the GLTFLoader, globe/area tiles from Cesium's tile-queue decay. The bar
 // reads these through computeBootProgress — never a timer.
-const loadingSub = { model: 0, globe: 0, area: 0 };
+const loadingSub = { model: 0, audio: 0, globe: 0, area: 0 };
 // Display-side high-water marks: the queue ratios above are NOT monotonic
 // (Cesium re-requests tiles during LOD refinement, so the queue spikes and
 // the raw ratio retreats). These clamps make the shown bars never retreat.
-const bootBarShown = new MonotonicPercent();
+// The BOOT bar walks with a ramp on top: stage flags release 15-25 point
+// slices at once, so a bar wired straight to computeBootProgress jumps
+// 60 -> 80 -> 81 with dead stops between. The ramp spreads each release over
+// the following moments and keeps a slow stage visibly moving.
+const bootBarShown = new PercentRamp();
 const preparingBarShown = new MonotonicPercent();
 let maxGlobeQueue = 0; // largest tile queue seen during the globe stage
 
@@ -249,6 +266,7 @@ function startBootOutro() {
     }
     try { bootFilmLoop?.pause(); bootFilmTail?.pause(); } catch (e) { /* cosmetic */ }
     bootPageGone = true;
+    clearInterval(bootUITimer);
   }, played ? 2000 : 1100);
 }
 
@@ -376,6 +394,14 @@ function startPickerFilm() {
 const MAX_BOOT_SECONDS = 75;
 const bootStart = performance.now();
 
+// The boot bar walks (ramp + display floor) rather than snapping, so it needs
+// a clock of its own: the tile-progress events that normally drive it can go
+// quiet for seconds at a time. 10 Hz, off the render loop, and cleared for
+// good the moment the loading page is gone.
+const bootUITimer = setInterval(() => {
+  if (!bootPageGone) updateLoadingUI();
+}, 100);
+
 function hideLoadingPage() {
   if (!loadingIndicator || loadingPageHidden) return;
   // 100%: go to the menu NOW. The zoom-off tail plays immediately (its own
@@ -394,6 +420,33 @@ function updateLoadingUI() {
     return;
   }
   const isAllLoaded = loadingStatus.model && loadingStatus.audio && loadingStatus.cesium && loadingStatus.globe && loadingStatus.terrain && loadingStatus.area;
+  // Progress bar: REAL progress — done flags release their slice, partial
+  // sub-progress (model bytes, audio loads, tile-queue decay) releases
+  // proportional slices. Nothing here increments on a timer.
+  let shownPct = bootBarShown.value;
+  if (loadingBarFill) {
+    // Three honest layers, none of them a timer:
+    //   1. real stage flags + sub-progress -> computeBootProgress,
+    //   2. a slow display floor so a stage that reports nothing (queue that
+    //      hasn't grown, stalled network) still reads as alive, capped at 90%
+    //      so a stall can never fake completion,
+    //   3. the display ramp, which walks the shown number up to that target
+    //      instead of jumping: a stage flag's 20-point release becomes a
+    //      visible climb, and a target that sits still still creeps.
+    const raw = computeBootProgress(loadingStatus, loadingSub);
+    if (loadingStatus.failed) bootBarShown.reset(0);
+    const floor = 100 * bootDisplayFloor(performance.now() - bootStart);
+    shownPct = loadingStatus.failed
+      ? 0
+      : bootBarShown.update(Math.max(raw, floor), performance.now());
+    const pct = Math.round(shownPct);
+    loadingBarFill.style.width = `${pct}%`;
+    if (loadingPercent) loadingPercent.textContent = `${pct}%`;
+  }
+  // Completion needs BOTH: every stage genuinely done, and the bar having
+  // WALKED to 100 (the ramp only reaches it from real work, so waiting for it
+  // costs a fraction of a second and never fades the page at 80%).
+  const bootDone = isAllLoaded && shownPct >= 99.5;
   if (loadingStatus.failed) {
     loadingText.textContent = "Loading Failed. Please Refresh.";
   } else if (!isAllLoaded) {
@@ -404,7 +457,7 @@ function updateLoadingUI() {
     else if (!loadingStatus.terrain) loadingText.textContent = "Loading Terrain Data...";
     else if (!loadingStatus.area) loadingText.textContent = "Preloading Spawn Region...";
   }
-  if (!isAllLoaded || loadingStatus.failed) {
+  if (!bootDone || loadingStatus.failed) {
     loadingText.textContent = loadingText.textContent || "Loading...";
     startBtn.disabled = true;
     startBtn.style.pointerEvents = "none";
@@ -415,24 +468,6 @@ function updateLoadingUI() {
     hideLoadingPage();
     startBtn.disabled = false;
     startBtn.style.pointerEvents = "auto";
-  }
-  // Progress bar: REAL progress — done flags release their slice, partial
-  // sub-progress (model bytes, tile-queue decay) releases proportional
-  // slices. Nothing here increments on a timer.
-  if (loadingBarFill) {
-    // Failed is a deliberate reset (bar to 0); otherwise the shown bar only
-    // ever moves forward. Two honest layers: real stage flags + sub-progress
-    // (computeBootProgress), lifted by a slow display floor that keeps the
-    // bar visibly alive when a stage reports nothing (queue that hasn't
-    // grown, stalled network). The floor stops at 90% — completion still
-    // only comes from real work.
-    const raw = computeBootProgress(loadingStatus, loadingSub);
-    const floor = 100 * bootDisplayFloor(performance.now() - bootStart);
-    const pct = loadingStatus.failed
-      ? 0
-      : bootBarShown.update(Math.round(Math.max(raw, floor)));
-    loadingBarFill.style.width = `${pct}%`;
-    if (loadingPercent) loadingPercent.textContent = `${pct}%`;
   }
   // During spawn picking the same element is reused as the small
   // "Loading Terrain..." chip - never as the full-screen page.
@@ -851,7 +886,10 @@ function initThree() {
 // ── Sound suite (ref-flight samples, /sounds/*.mp3) ──────────────────────────
 async function initSounds() {
   soundManager.init(camera);
-  await Promise.all([
+  // 20 samples: the audio slice of the bar tracks them one by one instead of
+  // flipping a flag at the end (all 20 already download in parallel — this is
+  // the same work, just reported as it lands).
+  const soundLoads = [
     soundManager.loadSound("boost", "/sounds/boost.mp3", false, 0.35),
     soundManager.loadSound("throttle", "/sounds/throttle.mp3", false, 0.4),
     soundManager.loadSound("explode", "/sounds/explode.mp3", false, 0.75),
@@ -872,7 +910,13 @@ async function initSounds() {
     soundManager.loadSound("warning", "/sounds/warning.mp3", false, 0.6),
     soundManager.loadSound("glitch-1", "/sounds/glitch-transition-1.mp3", false, 0.25),
     soundManager.loadSound("glitch-2", "/sounds/glitch-transition-2.mp3", false, 0.25),
-  ]);
+  ];
+  let soundsLoaded = 0;
+  await Promise.all(soundLoads.map((p) => Promise.resolve(p).catch(() => {}).then(() => {
+    soundsLoaded++;
+    loadingSub.audio = soundsLoaded / soundLoads.length;
+    updateLoadingUI();
+  })));
   loadingStatus.audio = true;
   updateLoadingUI();
   setupButtonSounds();
@@ -2023,7 +2067,7 @@ function update(dt) {
 
   // ── Flight sounds (ref-flight behavior) ──
   if (soundManager.isPlaying("jet-engine")) {
-    const speedFactor = Math.max(0, Math.min(1, (state.speed - 500) / 9500));
+    const speedFactor = speedFraction(state.speed);
     soundManager.setVolume("jet-engine", 0.5 + speedFactor * 0.1);
     soundManager.setVolume("wind", 0.1 + speedFactor * 0.35);
   }
@@ -2090,7 +2134,7 @@ function update(dt) {
       const R = 6371000;
       const latR = Cesium.Math.toRadians(state.lat);
       const cosLat = Math.max(0.2, Math.cos(latR));
-      const groundSpeed = (state.speed || 500) * MPH_TO_MPS * WORLD_SPEED_SCALE;
+      const groundSpeed = (state.speed || SPEED_MIN_MPH) * MPH_TO_MPS * WORLD_SPEED_SCALE;
       const lead = Math.min(20000, Math.max(3000, groundSpeed * 2.5));
       const pts = [];
       for (const frac of [0.25, 0.5, 0.75, 1.0]) {
@@ -2154,15 +2198,15 @@ function update(dt) {
     r: Cesium.Math.toDegrees(finalHPR.roll),
   };
 
-  // Speed-visible camera: FOV widens continuously with TRUE speed so 5000
-  // mph already rushes and 10000 mph screams — boost adds an extra kick.
+  // Speed-visible camera: FOV widens continuously with TRUE speed so 3000 mph
+  // already rushes and 7000 mph screams — boost adds an extra kick.
   // World motion itself is untouched: movePosition() below converts MPH to
   // m/s linearly every substep, so the ground track is already real.
   try {
     const frustum = viewer.camera.frustum;
     if (frustum && typeof frustum.fovy === "number") {
       const baseFov = CONFIG.camera.fov * Math.PI / 180;
-      const speedFactor = Math.max(0, Math.min(1, (state.speed - 500) / 9500));
+      const speedFactor = speedFraction(state.speed);
       const targetFov = baseFov * (1 + speedFactor * 0.18 + (physicsResult.isBoosting ? 0.14 : 0));
       const cur = frustum.fovy;
       frustum.fovy = cur + (targetFov - cur) * Math.min(1, dt * 5);
@@ -2405,6 +2449,17 @@ function animate() {
   if (!Number.isFinite(dt) || dt < 0) dt = 0.016;
   dt = Math.min(dt, 0.25);
   const now = performance.now();
+
+  // Frame-budget thermostat. Fed ONLY while the game owns the frame: the
+  // loading films deliberately throttle the globe render, and measuring that
+  // would collapse the resolution for the whole session.
+  {
+    const owns = currentState === States.FLYING
+      || currentState === States.PAUSED
+      || currentState === States.TRANSITIONING;
+    if (owns !== adaptivePerf.enabled) adaptivePerf.setEnabled(owns);
+    if (owns) adaptivePerf.sample(dt * 1000, now);
+  }
 
   // MENU: the public Earth+Moon model slowly spins behind the buttons.
   // The overlay canvas is transparent, so the real globe stays behind it.
@@ -2691,6 +2746,16 @@ initialCameraView = {
 };
 
 initThree();
+// Frame-budget thermostat: trades pixels for smoothness when the GPU can't
+// hold the frame time (see core/performance.js). Built here so the overlay
+// renderer and the globe both exist; it starts at full resolution.
+const adaptivePerf = new AdaptivePerformance({
+  viewer,
+  renderer,
+  getMiniViewer,
+  getPixelRatioCap: () => getQualityProfile().pixelRatioCap,
+});
+adaptivePerf.apply();
 setupSpawnPicker();
 setupSearch();
 // (Minimap viewer init moved to the spawn beat - see the confirmSpawn
@@ -2724,6 +2789,19 @@ if (new URLSearchParams(location.search).has("devtest")) {
     // Devtest: wing vapor + wingtip vortices state, for probes that assert
     // the effect actually engages instead of eyeballing pixels.
     get aeroEffects() { return aeroEffects; },
+    // Devtest: the frame-budget thermostat's current reading.
+    get perf() { return adaptivePerf; },
+    // Devtest: the loading bar's real state — the shown (ramped) value next to
+    // the honest target it is walking toward, plus the stage flags feeding it.
+    get boot() {
+      return {
+        shown: +bootBarShown.value.toFixed(2),
+        raw: +computeBootProgress(loadingStatus, loadingSub).toFixed(2),
+        flags: { ...loadingStatus },
+        sub: { ...loadingSub },
+        pageGone: bootPageGone,
+      };
+    },
     get threeCamera() { return camera; },
     get threeScene() { return scene; },
     // Devtest: menu Earth backdrop state (loaded, visible, spinning).

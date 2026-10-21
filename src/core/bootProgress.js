@@ -72,6 +72,81 @@ export class MonotonicPercent {
 }
 
 /**
+ * Display ramp: walks the shown percent toward the real percent instead of
+ * jumping straight there.
+ *
+ * Stage completion is CHUNKY by nature — a boot stage releases its whole
+ * 15-25 point slice the instant it finishes — so a bar wired straight to
+ * computeBootProgress reads "60 ... 80 ... 81" with long dead stops in
+ * between. This ramp spreads each jump over the following moments:
+ *
+ *   - a bounded MINIMUM rate keeps the bar visibly moving even while the
+ *     target sits still (a slow stage still reads as progress, not a freeze),
+ *   - a proportional catch-up means a target far ahead is closed quickly,
+ *     so the bar never lags a fast machine by much,
+ *   - a bounded MAXIMUM rate stops a burst of finished stages (the first
+ *     second releases Cesium + model + audio at once) from sprinting the
+ *     bar to 60 and leaving it there,
+ *   - it NEVER passes the target and never retreats, so the displayed value
+ *     is always a true, honest lower bound of real work done,
+ *   - per-step elapsed time is clamped so a backgrounded tab does not
+ *     teleport the bar on the next paint.
+ *
+ * Pure and clock-free (the caller passes `now`); unit-tested.
+ */
+export class PercentRamp {
+  /**
+   * @param {{minRatePerMs?: number, maxRatePerMs?: number, gainPerMs?: number}} [opts]
+   *   minRatePerMs: floor creep, percent per millisecond (0.005 = 5%/s)
+   *   maxRatePerMs: ceiling on the climb, percent per millisecond (0.02 = 20%/s)
+   *   gainPerMs: fraction of the remaining gap closed per millisecond
+   */
+  constructor({ minRatePerMs = 0.005, maxRatePerMs = 0.02, gainPerMs = 0.0045 } = {}) {
+    this.minRatePerMs = minRatePerMs;
+    this.maxRatePerMs = maxRatePerMs;
+    this.gainPerMs = gainPerMs;
+    this.value = 0;
+    this._last = null;
+  }
+
+  /** Forget the ramp (new phase, or a deliberate reset like a failure). */
+  reset(value = 0) {
+    this.value = Number.isFinite(value) ? value : 0;
+    this._last = null;
+    return this.value;
+  }
+
+  /**
+   * @param {number} target the highest percent real work justifies (>= shown)
+   * @param {number} nowMs  now, e.g. performance.now()
+   * @returns {number} the value to display
+   */
+  update(target, nowMs) {
+    const goal = Number(target);
+    if (!Number.isFinite(goal)) return this.value;
+    if (this._last === null) {
+      this._last = nowMs;
+      return this.value;
+    }
+    const dtRaw = nowMs - this._last;
+    this._last = nowMs;
+    if (!(dtRaw > 0)) return this.value;
+    const dt = Math.min(dtRaw, 1000);
+    if (goal <= this.value) return this.value; // monotonic: never retreat
+    // Proportional catch-up, but never faster than the ceiling: the early
+    // stages land together (Cesium + model + audio = 40 points in under a
+    // second), and without a ceiling the bar would sprint 12 -> 58 and then
+    // crawl — the "super fast and then stop" shape this exists to remove.
+    const step = Math.min(
+      this.maxRatePerMs * dt,
+      Math.max(this.minRatePerMs * dt, (goal - this.value) * this.gainPerMs * dt),
+    );
+    this.value = Math.min(goal, this.value + step);
+    return this.value;
+  }
+}
+
+/**
  * Boot display floor — the anti-"dead bar" companion to computeBootProgress.
  *
  * Real sub-progress can legitimately sit still: a tile queue that hasn't

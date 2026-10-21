@@ -1783,3 +1783,61 @@ picking (defensive, in case any path left it visible), and the probe
 asserts the indicator stays hidden while browsing, plus openApp now waits
 for the boot zoom-off tail to finish before driving the picker (which
 caught a probe race, not a game bug). 90/90.
+
+## 37. Recent changes (slower envelope, a loading bar that actually walks, frame thermostat)
+
+### The speed envelope is now 250 / 3000 / 7000
+
+By request: hands off the throttle the jet cruises at **250 mph**, holding W
+tops out at **3000 mph**, and **7000 mph is reachable only through boost**
+(`physics.maxSpeed * CONFIG.boost.multiplier`, 3000 x 7/3). Previously 500 /
+5000 / 10000. The physics class carries its own copy of these numbers (it
+reads no CONFIG), so both sides are pinned by `test/speed-envelope.test.mjs`,
+including the behavioural claim: with W held the jet settles at 3000 and never
+crosses it, one boost press passes 3000 and reaches 7000, and 15 s after the
+burner dies it is back under 3000. The speed-driven visuals (engine/wind
+volume, the widening FOV) now derive their range from CONFIG through one
+`speedFraction()` helper instead of the hardcoded `(speed - 500) / 9500`.
+Side effect, and a welcome one: the jet covers 40% less ground per second, so
+it also makes 40% fewer tile requests per second.
+
+### The boot bar walks instead of jumping
+
+The complaint was exact: *"it went straight to 60 and then stopped and then 80
+then 81"*. The boot bar was wired straight to `computeBootProgress`, whose
+stage flags each release a whole 15-25 point slice the instant they finish -
+so the bar is chunky by construction, and between chunks it sits dead still.
+`PercentRamp` (src/core/bootProgress.js) sits on top: it walks the shown
+number up to the honest target at a bounded rate (min 5%/s so a slow stage
+still reads as movement, max 20%/s so the first second's burst of Cesium +
+model + audio cannot sprint the bar to 60 and strand it), never passes the
+target, never retreats, and clamps its own time step so a backgrounded tab
+cannot teleport it. Audio now reports per-file progress (20 samples) alongside
+the model's bytes and the tile queue's drain, and a 10 Hz tick drives the
+animation when tile events go quiet. Completion needs BOTH every stage done
+AND the bar to have walked to 100, so the page still never fades at 80%.
+
+**Measured** (headful Chrome, 1280x730 @ dpr 1.5, real Intel Arc 130V):
+before, 4-ish distinct values with multi-second stalls; after, **57 distinct
+values, longest stall 143 ms, largest single jump 3.98 points**, monotonic,
+reaching 99-100% as the last stage lands.
+
+### Frame-budget thermostat (core/performance.js)
+
+The game now measures its own frame time and trades pixels for smoothness:
+steady frames over 24 ms step the resolution scale down (0.85x at a time, floor
+0.6), comfortable frames hand it back, and a dead band in between means no
+oscillation. One scale drives all three surfaces - `viewer.resolutionScale`,
+the minimap's, and the Three overlay's pixel ratio - because pixel count is
+the lever that decides the frame rate on a fill-rate-bound GPU. It is fed only
+while the game owns the frame (the loading films deliberately throttle the
+globe render, and measuring that would collapse the resolution for good). Two
+cheaper fixes ride along: the minimap's second globe render is capped at 10 Hz
+(a map does not need 60) and its MSAA is off (a thumbnail does not need a
+multi-sample resolve per frame).
+
+**Measured** on the same machine and window: 38.5 fps with p50 18.2 ms /
+p95 36.0 ms (half the frames missing vsync) became **56 fps with p50 17.7 /
+p95 18.2** - the spikes are gone and the thermostat settled at 0.85x.
+`PERF_DEFAULTS.highMs` in performance.js is the dial if the trade should lean
+further toward resolution.

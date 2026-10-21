@@ -2,11 +2,12 @@ import * as THREE from 'three';
 
 export class PlanePhysics {
 	constructor() {
-		// Speeds are MPH: 500 cruises, W tops 5000, boost hits 10000.
+		// Speeds are MPH: 250 cruises (hands off the throttle), holding W tops
+		// out at 3000, and 7/3x that — 7000 — is reachable ONLY through boost.
 		// main.js converts to m/s for world movement via MPH_TO_MPS.
-		this.speed = 500;
-		this.maxSpeed = 5000;
-		this.minSpeed = 500;
+		this.speed = 250;
+		this.maxSpeed = 3000;
+		this.minSpeed = 250;
 		this.throttle = 0.5;
 		this.enginePower = 1.2;
 		this.drag = 0.005;
@@ -24,7 +25,8 @@ export class PlanePhysics {
 		this.isBoosting = false;
 		this.boostTimeRemaining = 0;
 		this.boostDuration = 3.0;
-		this.boostMultiplier = 2.0;
+		// 7000 mph at full boost / 3000 mph on W. The ONLY way past 3000.
+		this.boostMultiplier = 7 / 3;
 		this.boostRotations = 2;
 		this.boostPressed = false;
 		// Boost meter 0..1: drains across one boost, refills in ~3s, and a
