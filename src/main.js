@@ -10,6 +10,7 @@ import { GroundSampler } from "./core/ground.js";
 import { PlanePhysics } from "./plane/planePhysics.js";
 import { PlaneController } from "./plane/planeController.js";
 import { PlaneModel } from "./plane/planeModel.js";
+import { AerodynamicEffects } from "./plane/aerodynamicEffects.js";
 import { Hud } from "./ui/hud.js";
 import { MobileMode } from "./ui/mobileMode.js";
 import { TouchControls } from "./ui/touchControls.js";
@@ -65,6 +66,8 @@ const state = {
 // ── Three.js overlay ─────────────────────────────────────────────────────────
 let scene, camera, renderer, threeContainer;
 let planeModel;
+// Wing vapor + wingtip vortices (ref-flight), built once the model exists.
+let aeroEffects = null;
 // Menu backdrop: the CC-BY low-poly Earth + Moon (Jarlan Perez / Google
 // Poly archive via poly.pizza), slowly spinning behind the menu buttons.
 // Loaded onto render layer 1 like the jet so the menu camera draws it.
@@ -821,6 +824,23 @@ function initThree() {
   }).then(() => {
     loadingStatus.model = true;
     updateLoadingUI();
+    // Aerodynamic effects attach to the loaded model (the vapor pads are
+    // children of the jet group; the wingtip vortices live in world space).
+    try {
+      if (CONFIG.aeroEffects?.enabled !== false) {
+        aeroEffects = new AerodynamicEffects({
+          scene,
+          viewer,
+          playerModel: planeModel.model,
+          config: CONFIG.aeroEffects,
+          maxSpeed: Math.max(CONFIG.physics.maxSpeed, physics.maxSpeed) * CONFIG.boost.multiplier,
+          minSpeed: CONFIG.physics.minSpeed,
+        });
+      }
+    } catch (e) {
+      console.warn("[aero] effects unavailable:", e);
+      aeroEffects = null;
+    }
   }).catch((err) => {
     console.error("Failed to load model:", err);
     loadingStatus.failed = true;
@@ -1876,6 +1896,8 @@ function confirmSpawn() {
     particles.clear();
     bullets.clear();
     planeModel.reset();
+    // Wing vapor + wingtip vortices start clean at every spawn.
+    aeroEffects?.resetState();
 
     if (spawnInstruction) spawnInstruction.classList.add("hidden");
     if (confirmSpawnBtn) confirmSpawnBtn.classList.add("hidden");
@@ -2162,6 +2184,13 @@ function update(dt) {
     dt,
     physicsResult.isBoosting
   );
+
+  // Wing vapor + wingtip vortices (ref-flight). Sim rate: intensities and the
+  // vapor's own 30 Hz clock. The vortex ribbon is sampled and rebuilt in the
+  // render loop instead (see syncVisualState).
+  try {
+    aeroEffects?.update(dt, state, physicsResult);
+  } catch (e) { /* cosmetic */ }
 
   // Live rounds keep flying their frozen paths.
   bullets.update(dt);
@@ -2528,6 +2557,11 @@ function animate() {
         if (planeModel) planeModel.fovScale = planeScale;
       }
     } catch (e) { /* fov sync is cosmetic-critical but must never break the frame */ }
+    // Wingtip vortex ribbon: re-projected into the camera's view space AFTER
+    // the FOV compensation landed (the samples come from the model's frame).
+    try {
+      aeroEffects?.syncVisualState();
+    } catch (e) { /* cosmetic */ }
     camera.layers.set(1);
     renderer.render(scene, camera);
     renderer.clearDepth();
@@ -2676,7 +2710,9 @@ updateLoadingUI();
 if (new URLSearchParams(location.search).has("devtest")) {
   window.SKY_DEV = {
     controller,
-    physics,
+    // Live getter: the flight physics is re-created on every spawn, so a
+    // captured reference went stale after the first flight.
+    get physics() { return physics; },
     state,
     get currentState() { return currentState; },
     mobileMode,
@@ -2685,6 +2721,9 @@ if (new URLSearchParams(location.search).has("devtest")) {
     viewer,
     renderer,
     planeModel,
+    // Devtest: wing vapor + wingtip vortices state, for probes that assert
+    // the effect actually engages instead of eyeballing pixels.
+    get aeroEffects() { return aeroEffects; },
     get threeCamera() { return camera; },
     get threeScene() { return scene; },
     // Devtest: menu Earth backdrop state (loaded, visible, spinning).

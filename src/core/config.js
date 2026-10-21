@@ -88,6 +88,25 @@ export const CONFIG = {
     rotations: 2,
   },
 
+  // ── Aerodynamic effects: wing vapor + wingtip vortices ────────────────────
+  // Ported from ref-flight's per-aircraft `aerodynamicEffects` block. Vapor
+  // tears off the outer wing at speed + a hard pull-up (climb or high-G turn);
+  // wingtip vortices ribbon out on roll or pitch. Coordinates are in the F-15
+  // model's OWN local space — the same space the engine flames use — so they
+  // ride the model group's scale and FOV compensation automatically.
+  // The wing here spans 11.1 units (tips at +/-5.55), root leading edge at
+  // z=1.25, tip chord z=2.0..3.4: measured off the loaded GLB, not guessed.
+  aeroEffects: {
+    enabled: true,
+    condensation: {
+      size: 9.4, // puff size in model units (ref-flight F-15 value)
+      pos: { x: 3.0, y: 0.13, z: 2.0 }, // outer-wing root (flat pad)
+      tip: { x: 5.3, y: 0.14, z: 3.0 }, // wingtip
+      spread: { x: 1.2, y: 0.05, z: 3.0 }, // chord/wind spread of the trail
+    },
+    vortex: { pos: { x: 5.3, y: 0.14, z: 2.6 } }, // wingtip vortex origin
+  },
+
   // ── Camera ────────────────────────────────────────────────────────────────
   camera: {
     mouseSensitivity: 0.2,
