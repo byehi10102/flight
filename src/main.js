@@ -2823,21 +2823,26 @@ function animate() {
 // ── UI events ────────────────────────────────────────────────────────────────
 
 startBtn.addEventListener("click", () => {
-  // The aircraft selector comes FIRST (worldflightsimulator.com's step 1):
-  // pick the machine, then the spawn map opens already knowing what loads.
-  openAircraftSelect((vehicle) => {
-    currentVehicle = vehicle;
-    if (mainMenu) mainMenu.classList.add("hidden");
-    // A different machine than the one booted with: swap the model now, so
-    // the load rides the picker phase instead of the spawn dive.
-    if (planeModel.vehicle?.id !== vehicle.id) {
-      const oldModel = planeModel.model;
-      planeModel.load(null, vehicle).then(() => {
-        try { if (oldModel) planeModel.scene.remove(oldModel); } catch (e) { /* cosmetic */ }
-      }).catch(() => { /* keep the old model on failure */ });
-    }
-    enterSpawnPicking(false);
+  // The aircraft selector is its own screen (opaque — the old overlay let the
+  // menu bleed through). BACK restores the menu; CONTINUE moves on.
+  openAircraftSelect({
+    onBack: () => { if (mainMenu) mainMenu.classList.remove("hidden"); },
+    onDone: (vehicle) => {
+      currentVehicle = vehicle;
+      if (mainMenu) mainMenu.classList.add("hidden");
+      // A different machine than the one booted with: swap the model now, so
+      // the load rides the picker phase instead of the spawn dive.
+      if (planeModel.vehicle?.id !== vehicle.id) {
+        const oldModel = planeModel.model;
+        planeModel.load(null, vehicle).then(() => {
+          try { if (oldModel) planeModel.scene.remove(oldModel); } catch (e) { /* cosmetic */ }
+        }).catch(() => { /* keep the old model on failure */ });
+      }
+      enterSpawnPicking(false);
+    },
   });
+  if (mainMenu) mainMenu.classList.add("hidden");
+  soundManager.play("button-click");
 });
 
 confirmSpawnBtn.addEventListener("click", () => {

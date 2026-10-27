@@ -41,6 +41,8 @@ export class PlaneModel {
     this.modelScale = v.modelScale ?? CONFIG.aircraft.modelScale;
     this.rotorNode = null;
     this.tailRotorNode = null;
+    this.propNode = null;
+    this.fanNodes = [];
     const loader = new GLTFLoader();
     return new Promise((resolve, reject) => {
       loader.load(
@@ -67,12 +69,15 @@ export class PlaneModel {
           this.model.position.copy(BASE_PLANE_POS);
           this.model.scale.set(this.modelScale, this.modelScale, this.modelScale);
 
-          // Rotorcraft: remember the spin nodes (found by NAME CONVENTION —
-          // "ROTOR" is the main disc, "TAIL_ROTOR" the tail; the Blender
-          // build exports them as top-level nodes). Spun in update().
+          // Spin nodes, found by NAME CONVENTION: "ROTOR" is the helicopter's
+          // main disc, "TAIL_ROTOR" its tail rotor, "PROP" a propeller (the
+          // Global Hawk's pusher), "FAN_*" engine fan discs (the CRJ-900's
+          // turbofans). Spun in update().
           mesh.traverse((child) => {
             if (/^TAIL_ROTOR/i.test(child.name || "")) this.tailRotorNode = child;
             else if (/^ROTOR/i.test(child.name || "")) this.rotorNode = child;
+            else if (/^PROP/i.test(child.name || "")) this.propNode = child;
+            else if (/^FAN/i.test(child.name || "")) this.fanNodes.push(child);
           });
 
           // ref-flight plays the model's own animation clip once on load
@@ -251,6 +256,11 @@ export class PlaneModel {
       const rpm = Math.max(0, Math.min(1, state.rotor ?? 0));
       this.tailRotorNode.rotation.x += dt * rpm * 34;
     }
+    // Propeller (Global Hawk pusher) + engine fans (CRJ-900): spin with the
+    // throttle - running while the engine is alive, fastest at full W.
+    const thr = Math.max(0, Math.min(1, state.throttle ?? input.throttle ?? 0));
+    if (this.propNode) this.propNode.rotation.z += dt * (0.35 + 0.65 * thr) * 26;
+    for (const fan of this.fanNodes) fan.rotation.z += dt * (0.35 + 0.65 * thr) * 22;
   }
 
   reset() {

@@ -1996,3 +1996,35 @@ path; the P2P path remains for playing across the internet with no server.
 **Known limits:** remote players still render the host app's default model
 (vehicle type is not broadcast yet); the WS server needs `node server/server.js`
 running on the host machine (any Node host works — see server/README.md).
+
+## 40. Recent changes (aircraft screen rebuilt; real vehicle models)
+
+### The selector is a SCREEN now, not an overlay
+
+The old selector was a transparent overlay ON TOP of the menu — the SKYWARD
+logo and the SINGLE PLAYER/MULTIPLAYER buttons bled through it and the single
+column of cards read cramped. It is now its own opaque full screen: dark
+gradient backdrop, kicker + title, a 2x2 card grid (desktop) with monochrome
+SVG glyphs (the emoji rendered in clashing full colour), per-vehicle spec and
+controls lines, a selection check ring, CONTINUE/BACK. Mobile (<= 720 px)
+collapses to one column with full-width actions; short landscape phones get a
+compact 2x2. The menu is hidden while the screen is up and restored on BACK.
+`dev-flow-probe.mjs` (11/11) drives the new markup; the fleet cards carry the
+vehicle type as a class (`.fleet-card.heli`), which the probe asserts.
+
+### Real vehicle models
+
+- **Global Hawk** — NASA's official 3D Resources model of the EXACT vehicle
+  (public domain, 37k tris, textured; "Global Hawk.glb" from
+  science.nasa.gov/3d-resources). Re-oriented to the game's nose -Z
+  convention (fin test in world space), scaled to real metres (35.4 m span),
+  and given a pusher propeller as a named PROP node - spun in flight.
+- **CRJ-900** — no free model of this exact type exists anywhere, so the
+  aircraft is authored in Blender for this repo to the helicopter's standard
+  (19.5k tris, 28 parts): T-tail, rear-mounted nacelles with SPINNING FAN
+  discs (FAN_L/FAN_R nodes), winglets, cockpit and window bands, gear.
+- planeModel.js spins any node named ROTOR/PROP/FAN: the helicopter's rotors
+  by governed rotor RPM, the prop and fans by throttle.
+- The old placeholder crj900/hawk GLBs are replaced; attribution updated in
+  project.md 10. `dev-vehicle-probe.mjs`: CRJ + Hawk load, fly at cruise and
+  expose their spin nodes - 5/5.
