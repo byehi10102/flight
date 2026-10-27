@@ -34,7 +34,8 @@ const PORT = process.env.PORT || 3000;
 
 /** Unambiguous alphabet: no I/O/0/1, so codes are easy to read aloud. */
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-const CODE_LENGTH = 5;
+/** 4 characters per the one-code flow (same length the P2P path uses). */
+const CODE_LENGTH = 4;
 const MAX_PLAYERS_PER_ROOM = 8;
 /** Telemetry is sent at 20-30 Hz; this is a generous ceiling, not a target. */
 const MAX_TELEMETRY_HZ = 60;
@@ -255,6 +256,145 @@ io.on("connection", (socket) => {
     console.log(`[socket] disconnected ${socket.id} (${reason})`);
     leaveRoom(socket, "disconnected");
   });
+});
+
+// ── Native WebSocket real-time relay (/ws) ──────────────────────────────────
+// The game's raw-file multiplayer (multiplayer/wsNet.js) connects here with
+// the browser's own WebSocket — no client library, so the shipped files stay
+// dependency-free. Same rooms Map, same code format, same cleanup rules as
+// the Socket.IO path above; the two paths coexist (a socket.io player and a
+// /ws player never see each other — each transport has its own room scope).
+import { WebSocketServer } from "ws";
+
+const wss = new WebSocketServer({ noServer: true });
+
+/** Frame types the game may send; anything else is dropped. */
+const WS_TYPES = new Set(["st", "sp", "bk", "go", "ln", "bl", "hi", "hb"]);
+const WS_MAX_FRAME = 2048;        // bytes of JSON per frame
+const WS_MSG_CAP_PER_SEC = 120;   // a bad client cannot flood a room
+
+server.on("upgrade", (req, socket, head) => {
+  let pathname = "/";
+  let query = new URLSearchParams();
+  try {
+    const u = new URL(req.url, "http://localhost");
+    pathname = u.pathname;
+    query = u.searchParams;
+  } catch (e) { /* fall through with defaults */ }
+  if (pathname !== "/ws") return; // socket.io keeps its own path
+  wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws, query));
+});
+
+wss.on("connection", (ws, query) => {
+  const id = crypto.randomUUID();
+  const code = normalizeCode(query.get("code"));
+  if (!isValidCode(code)) {
+    ws.close(4000, "bad code");
+    return;
+  }
+  const callsign = sanitizeCallsign(query.get("name"));
+
+  // Symmetric create-on-join: the first arrival materialises the room with
+  // the code the game generated — the wire has no host/join asymmetry.
+  let room = rooms.get(code);
+  if (!room) {
+    room = { code, createdAt: Date.now(), players: new Map() };
+    rooms.set(code, room);
+    console.log(`[ws ${code}] created by ${callsign}`);
+  } else if (room.players.size >= MAX_PLAYERS_PER_ROOM) {
+    ws.close(4001, "room full");
+    return;
+  }
+
+  const player = { id, callsign, joinedAt: Date.now(), lastTelemetryAt: 0, state: null, ws };
+  room.players.set(id, player);
+
+  // Roster FIRST (late joiners see everyone's last known state), then the
+  // room hears about the newcomer.
+  ws.send(JSON.stringify({
+    t: "welcome",
+    id,
+    code,
+    players: [...room.players.values()]
+      .filter((p) => p.id !== id)
+      .map((p) => ({ id: p.id, name: p.callsign, state: p.state })),
+  }));
+  for (const other of room.players.values()) {
+    if (other.id !== id) other.ws.send(JSON.stringify({ t: "join", id, name: callsign }));
+  }
+  console.log(`[ws ${code}] ${callsign} joined (${room.players.size} in room)`);
+
+  // Per-socket rate cap over a sliding second.
+  let recent = [];
+  ws.on("message", (raw) => {
+    const now = Date.now();
+    recent = recent.filter((t) => now - t < 1000);
+    if (recent.length >= WS_MSG_CAP_PER_SEC) return; // dropped, not queued
+    recent.push(now);
+
+    if (raw.length > WS_MAX_FRAME) return;
+    let frame;
+    try { frame = JSON.parse(String(raw)); } catch (e) { return; }
+    if (!frame || !WS_TYPES.has(frame.t)) return;
+
+    // State packets feed every other player's interpolation: numbers must be
+    // finite (the game guards too, but the server does not trust the wire).
+    if (frame.t === "st") {
+      const d = frame.d;
+      if (!d || typeof d !== "object") return;
+      for (const k of ["lon", "lat", "alt", "h", "p", "r", "v"]) {
+        if (!Number.isFinite(Number(d[k]))) return;
+      }
+      player.state = d; // late joiners get this on their welcome roster
+    }
+
+    for (const other of room.players.values()) {
+      if (other.id !== id) {
+        try { other.ws.send(JSON.stringify({ t: frame.t, from: id, d: frame.d })); } catch (e) { /* dead socket */ }
+      }
+    }
+  });
+
+  ws.on("close", () => {
+    const r = rooms.get(code);
+    if (!r) return;
+    r.players.delete(id);
+    for (const other of r.players.values()) {
+      try { other.ws.send(JSON.stringify({ t: "left", id })); } catch (e) { /* dead socket */ }
+    }
+    if (r.players.size === 0) {
+      rooms.delete(code);
+      console.log(`[ws ${code}] empty → removed`);
+    } else {
+      console.log(`[ws ${code}] ${callsign} left (${r.players.size} left)`);
+    }
+  });
+
+  ws.on("error", () => { try { ws.close(); } catch (e) { /* already dead */ } });
+});
+
+// Dead-socket sweep: a client that vanished without a close frame (power
+// loss, network drop) is reaped after TWO missed pings. One missed ping is
+// normal here: the spawn launch blocks the page's main thread for tens of
+// seconds (full-detail warm-up behind the loading film), and a WebSocket
+// pong is processed on that same thread — measured in the two-browser e2e,
+// a 15 s single-miss window terminated live connections mid-launch.
+const WS_PING_MS = 15000;
+setInterval(() => {
+  for (const ws of wss.clients) {
+    if (ws.isAlive === false) {
+      ws.missedPings = (ws.missedPings || 0) + 1;
+      if (ws.missedPings >= 2) { try { ws.terminate(); } catch (e) { /* gone */ } continue; }
+    } else {
+      ws.missedPings = 0;
+    }
+    ws.isAlive = false;
+    try { ws.ping(); } catch (e) { /* gone */ }
+  }
+}, WS_PING_MS);
+wss.on("connection", (ws) => {
+  ws.isAlive = true;
+  ws.on("pong", () => { ws.isAlive = true; });
 });
 
 /**

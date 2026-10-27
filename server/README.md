@@ -1,18 +1,18 @@
-# Skyward multiplayer server (Express + Socket.IO)
+﻿# Skyward multiplayer server (Express + Socket.IO)
 
 A small room server for the flight sim: players create a lobby, share the
-5-character code, and see each other fly. The server is a **relay**, not a
-simulator — it never integrates physics.
+4-character code, and see each other fly. The server is a **relay**, not a
+simulator â€” it never integrates physics.
 
 ```
 server/
-├── server.js               Express + Socket.IO: rooms, telemetry, cleanup
-├── client.js               Cesium client: entities + 60 fps interpolation
-├── index.html              Cesium demo (needs network for the Cesium CDN)
-├── demo-2d.html            zero-dependency canvas demo (always works)
-├── test-server.mjs         headless test of the room lifecycle
-├── test-interpolation.mjs  headless test of the smoothing maths
-└── package.json
+â”œâ”€â”€ server.js               Express + Socket.IO: rooms, telemetry, cleanup
+â”œâ”€â”€ client.js               Cesium client: entities + 60 fps interpolation
+â”œâ”€â”€ index.html              Cesium demo (needs network for the Cesium CDN)
+â”œâ”€â”€ demo-2d.html            zero-dependency canvas demo (always works)
+â”œâ”€â”€ test-server.mjs         headless test of the room lifecycle
+â”œâ”€â”€ test-interpolation.mjs  headless test of the smoothing maths
+â””â”€â”€ package.json
 ```
 
 ## Run it
@@ -36,9 +36,9 @@ a CDN, so it needs network access; the 2D demo has no dependencies at all.
 npm test
 ```
 
-Covers the real Socket.IO path — create, join-by-code, telemetry relay,
+Covers the real Socket.IO path â€” create, join-by-code, telemetry relay,
 late-joiner roster with last-known state, disconnect notification, empty-room
-cleanup, and bad-code rejection — plus the interpolation maths
+cleanup, and bad-code rejection â€” plus the interpolation maths
 (frame-rate independence, shortest-angle heading).
 
 ## Integrating with the game
@@ -62,8 +62,8 @@ const mp = createMultiplayerClient(viewer, {
   ),
 });
 
-const code = await mp.createLobby();   // → "KQ7Z"
-const res  = await mp.joinLobby(code); // → { code, players: [...] }
+const code = await mp.createLobby();   // â†’ "KQ7Z"
+const res  = await mp.joinLobby(code); // â†’ { code, players: [...] }
 
 mp.on("joined", (p) => console.log(p.callsign, "joined"));
 mp.on("left",   (p) => console.log(p.callsign, "left"));
@@ -71,7 +71,7 @@ mp.on("left",   (p) => console.log(p.callsign, "left"));
 
 The client then does all of this by itself:
 
-- emits telemetry **25×/second** (in the requested 20-30 Hz band)
+- emits telemetry **25Ã—/second** (in the requested 20-30 Hz band)
 - `viewer.entities.add(...)` for each player who joins, with a model, a
   nametag, and a distance cull
 - updates them from `player-moved`, and removes them on `player-left`
@@ -83,13 +83,13 @@ Call `mp.leave()` (or `mp.destroy()`) to clean up.
 
 | Direction | Event | Payload |
 | --- | --- | --- |
-| client → server | `create-lobby` | `{ callsign }` → ack `{ ok, code, selfId, players }` |
-| client → server | `join-lobby` | `{ code, callsign }` → ack `{ ok, code, selfId, players }` |
-| client → server | `player-moved` | `{ x, y, z, heading, pitch, roll }` |
-| client → server | `leave-lobby` | ack `{ ok }` |
-| server → room | `player-joined` | `{ id, callsign, state }` |
-| server → room | `player-moved` | `{ id, x, y, z, heading, pitch, roll }` |
-| server → room | `player-left` | `{ id, callsign, reason }` |
+| client â†’ server | `create-lobby` | `{ callsign }` â†’ ack `{ ok, code, selfId, players }` |
+| client â†’ server | `join-lobby` | `{ code, callsign }` â†’ ack `{ ok, code, selfId, players }` |
+| client â†’ server | `player-moved` | `{ x, y, z, heading, pitch, roll }` |
+| client â†’ server | `leave-lobby` | ack `{ ok }` |
+| server â†’ room | `player-joined` | `{ id, callsign, state }` |
+| server â†’ room | `player-moved` | `{ id, x, y, z, heading, pitch, roll }` |
+| server â†’ room | `player-left` | `{ id, callsign, reason }` |
 
 `players` in the join/create ack **excludes you** and includes each player's
 last known `state`, so a late joiner sees everyone in their current position
@@ -100,9 +100,9 @@ for Cesium. It is bulkier than `lon/lat/alt` on the wire (~6-7 significant
 digits per axis); if bandwidth matters more than convenience, send lon/lat/alt
 and rebuild the Cartesian on receipt.
 
-## Interpolation — why it looks smooth
+## Interpolation â€” why it looks smooth
 
-Packets arrive ~25×/second but Cesium renders ~60, so setting
+Packets arrive ~25Ã—/second but Cesium renders ~60, so setting
 `entity.position` on each packet makes remote planes visibly step. Two
 details fix that, and both are verified by `test-interpolation.mjs`:
 
@@ -113,8 +113,8 @@ details fix that, and both are verified by `test-interpolation.mjs`:
    same wall-clock period. (The test asserts this, and includes a control
    showing the naive per-frame version failing it.)
 
-2. **Heading takes the short way round.** Interpolating 350° → 10° linearly
-   flies the long way (350 → 180 → 10) and the plane visibly spins. Heading
+2. **Heading takes the short way round.** Interpolating 350Â° â†’ 10Â° linearly
+   flies the long way (350 â†’ 180 â†’ 10) and the plane visibly spins. Heading
    is interpolated along the shortest signed angle; pitch and roll lerp
    normally.
 
@@ -130,7 +130,7 @@ exponential approach is used here because it is simpler and adds no latency.
 
 ## Server behaviour worth knowing
 
-- **Codes** are 5 characters from an unambiguous alphabet (no I/O/0/1) so
+- **Codes** are 4 characters from an unambiguous alphabet (no I/O/0/1) so
   they are easy to read aloud, and are checked for collisions on creation.
 - **Cleanup** is automatic: a disconnect removes the player and notifies the
   room; the last player leaving deletes the room code so it can be reused.
@@ -145,10 +145,10 @@ exponential approach is used here because it is simpler and adds no latency.
 ## Hosting
 
 Any Node host works (Render, Fly.io, Railway, a VPS, Docker). It needs no
-database — rooms live in memory, which also means a restart clears active
+database â€” rooms live in memory, which also means a restart clears active
 lobbies. For horizontal scaling you would need sticky sessions (Socket.IO
 supports it) or a Redis adapter so rooms span instances.
 
 Unlike the peer-to-peer mode elsewhere in this repo, this one **requires a
-hosted server** — that is the trade-off for a simpler, more predictable
+hosted server** â€” that is the trade-off for a simpler, more predictable
 connection.

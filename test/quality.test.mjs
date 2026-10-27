@@ -29,7 +29,7 @@ test("unknown inputs default to high tier (never punish the unknown)", () => {
 
 // ── Low tier: only visually-invisible trade-offs ────────────────────────────
 
-test("integrated GPU lands on low tier with invisible-only reductions", () => {
+test("integrated GPU lands on low tier with the smoothness trade-offs", () => {
   const p = deriveQualityProfile({
     gpuRenderer: "Intel(R) UHD Graphics 620",
     deviceMemoryGB: 8,
@@ -37,11 +37,13 @@ test("integrated GPU lands on low tier with invisible-only reductions", () => {
     devicePixelRatio: 1,
   });
   assert.equal(p.tier, QUALITY_TIERS.LOW);
-  assert.equal(p.msaaSamples, 2);
+  assert.equal(p.msaaSamples, 0, "fxaa only — msaa is the big fixed iGPU cost");
   assert.equal(p.tileCacheSize, 600);
   assert.equal(p.loadingDescendantLimit, 24);
-  assert.equal(p.pixelRatioCap, 1.75);
+  assert.equal(p.pixelRatioCap, 1.5);
   assert.equal(p.explosionScale, 0.7);
+  assert.equal(p.minimapHz, 5);
+  assert.equal(p.imageryFullLevel, 17);
 });
 
 test("low deviceMemory forces low tier even on a named GPU", () => {
@@ -76,13 +78,17 @@ test("Apple GPUs (no renderer string) on desktop stay high with ample memory", (
 
 // ── Realism invariants on EVERY tier ─────────────────────────────────────────
 
-test("no tier ever reduces render resolution or tile detail", () => {
+test("tile detail is tiered on purpose, and each tier ships its ladder", () => {
   const low = deriveQualityProfile({ gpuRenderer: "Intel UHD", deviceMemoryGB: 2, isMobile: false });
   const high = deriveQualityProfile({ gpuRenderer: "RTX", deviceMemoryGB: 16, isMobile: false });
   for (const p of [low, high]) {
-    assert.equal(p.resolutionScale, 1); // full res everywhere
-    assert.equal(p.maximumScreenSpaceError, 2); // full tile detail everywhere
+    assert.equal(p.resolutionScale, 1); // full res at rest on every tier
+    // The thermostat ladder starts AT the tier's shipped detail.
+    assert.equal(p.maximumScreenSpaceError, p.sseLadder[0]);
+    assert.ok(p.sseLadder.every((v, i, a) => i === 0 || v > a[i - 1]), "ladder ascends");
   }
+  assert.equal(high.maximumScreenSpaceError, 2); // full tile detail on high
+  assert.equal(low.maximumScreenSpaceError, 4);  // the smoothness trade on low
 });
 
 test("profiles are frozen objects (no mid-flight mutation)", () => {

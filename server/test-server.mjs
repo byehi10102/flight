@@ -2,7 +2,7 @@
  * Headless verification for the multiplayer server.
  *
  * Exercises the real Socket.IO path end to end:
- *   1. create a lobby → 5-character code
+ *   1. create a lobby  4-character code
  *   2. a second client joins by that code → same room, not a second lobby
  *   3. telemetry flows A → B with values intact
  *   4. a third client joining late receives the EXISTING players + state
@@ -64,7 +64,7 @@ console.log("\n=== Skyward multiplayer server test ===\n");
 const A = await connect();
 const created = await ack(A, "create-lobby", { callsign: "ACE-1" });
 check("create-lobby returns ok", created?.ok === true);
-check("room code is 5 chars", /^[A-Z2-9]{5}$/.test(created?.code || ""), `got "${created?.code}"`);
+check("room code is 4 chars", /^[A-Z2-9]{4}$/.test(created?.code || ""), `got "${created?.code}"`);
 check("server registered the room", rooms.has(created.code));
 const code = created.code;
 

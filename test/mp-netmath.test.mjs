@@ -8,6 +8,7 @@ import {
   convergeStep,
   adaptiveDelay,
   posDistanceM,
+  shouldTransmitState,
 } from "../multiplayer/netmath.js";
 
 test("wrapDeg wraps into (-180, 180]", () => {
@@ -104,4 +105,37 @@ test("adaptiveDelay sizes the buffer from interval and jitter, clamped", () => {
   assert.equal(adaptiveDelay(33, 20), 86);
   assert.equal(adaptiveDelay(150, 300), 250); // clamped high
   assert.equal(adaptiveDelay(33, 0), 66);
+});
+
+// ── shouldTransmitState: the DIS sender rule both transports share ──────────
+
+const FLY = (lon = 0) => ({ lon, lat: 0, alt: 1000, h: 0, p: 0, r: 0, v: 250, fly: 1 });
+
+test("shouldTransmitState: first packet always transmits", () => {
+  assert.equal(shouldTransmitState([], FLY(), 1000), true);
+});
+
+test("shouldTransmitState: steady flight inside the heartbeat window skips", () => {
+  // The packet shape matches the real wire payload (net.js broadcastState).
+  const sent = [{ ts: 0, lon: 0, lat: 0, alt: 1000, h: 0, p: 0, r: 0, v: 250, fly: 1 }];
+  // The TRUE state 100 ms into the cruise: the jet has flown north at
+  // 250 mph * 1.8 arcade = ~201 m/s, exactly what the receiver's dead
+  // reckoning predicts — so nothing needs to be sent.
+  const meters = 250 * 0.44704 * 1.8 * 0.1;
+  const truth = { ...FLY(), lat: meters / 111320 };
+  assert.equal(shouldTransmitState(sent, truth, 100), false);
+});
+
+test("shouldTransmitState: the heartbeat floor forces a send", () => {
+  const sent = [{ ts: 0, lon: 0, lat: 0, alt: 1000, h: 0, p: 0, r: 0, v: 250, fly: 1 }];
+  assert.equal(shouldTransmitState(sent, FLY(0), 1000), true);
+});
+
+test("shouldTransmitState: maneuvering past the threshold transmits early", () => {
+  const sent = [
+    { ts: 0, lon: 0, lat: 0, alt: 1000, h: 0, p: 0, r: 0, v: 250, fly: 1 },
+    { ts: 50, lon: 0.0005, lat: 0, alt: 1000, h: 0, p: 0, r: 0, v: 250, fly: 1 },
+  ];
+  // A hard heading change the receiver cannot predict: divergence > 3 deg.
+  assert.equal(shouldTransmitState(sent, { ...FLY(), h: 20 }, 100), true);
 });

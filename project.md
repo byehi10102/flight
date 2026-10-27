@@ -1907,3 +1907,92 @@ elevation.
 Measured in flight at 3000 mph, effects engaged: **59 fps, p50 16.7 ms /
 p95 16.8 ms, the tile queue EMPTY and `tilesLoaded` true** (the pre-change
 samples sat at queue 6-148). 128/128 tests.
+
+## 39. Recent changes (smoothness overhaul, aircraft + helicopter, real-time multiplayer)
+
+### The 2-3 fps report, measured to its roots
+
+The player's machine (Acer Aspire, Intel Arc 130V, 1920x1200 @ 150 %) reported
+2-3 fps. Reproduced on THE SAME machine in headful Chrome with the real GPU:
+56-60 fps at the player's own viewport (1280x740 CSS @ dpr 1.5), at 3000 mph,
+in boost, over downtown LA, while panning the picker — in every browser
+configuration tested (`dev-perf-probe.mjs`, `dev-stress-probe.mjs`,
+`dev-timeline-probe.mjs`; even `--disable-gpu` holds ~58 fps because the
+resolution floor keeps the render small in a fresh session). The player's own
+Chrome renderer processes carry `--disable-gpu-compositing` and its GPU process
+had burned ~305 CPU-seconds — their browser is compositing in software, which
+multiplies every frame's cost. **Action for the player: Chrome settings →
+"Use graphics acceleration when available" ON (or reset chrome://flags), then
+reload.** The game-side work below makes weak machines degrade gracefully
+regardless.
+
+### Real bugs the measurement exposed, now fixed
+
+1. **The minimap starved behind the main globe** — `miniTilesLoaded` false for
+   entire flights at speed, in every run (its level-15/SSE-1 requests lost the
+   shared 96-request scheduler to the main view and never finished). The map
+   now tops out at level 13 with SSE 4 and a 5 Hz render on LOW tiers: coarse
+   tiles that always arrive. Verified by `dev-flow-probe.mjs` — "minimap tiles
+   stay LOADED at speed", sampled at 190 mph with the queue hot.
+2. **The picker still streamed tiles after the boot bar** — the boot warm-up
+   parked at 160 km + 35 km but the picker opens at 15 km. A third pass now
+   warms the picker's EXACT destination pose (region budget 12 → 16 s), so the
+   map is loaded when the film fades.
+3. **The raster label layer popped** — city names baked into coarse ArcGIS
+   tiles appeared huge and shrank as tiles refined. Replaced with 92 vector
+   city labels (one size at every zoom, scale-by-distance, USA bounds).
+
+### The frame-budget controller (core/performance.js)
+
+Rewritten to the worldflightsimulator.com controller's design, adapted:
+MEDIAN frame time per window (spike-proof), vsync-RELATIVE thresholds learned
+from the fastest frame, a detail ladder — maximumScreenSpaceError 2→4→6 (HIGH)
+/ 4→6→8 (LOW) — sacrificed BEFORE pixels and recovered in reverse, severity-
+scaled steps (a 300 ms window drops detail AND pixels together), and a deeper
+resolution floor (0.5). LOW tier: msaa off (fxaa stays), SSE 4, dpr cap 1.5,
+imagery full-detail level 17 (HIGH tier unchanged: msaa 4, SSE 2, level 19).
+`decideFrameBudget` is pure and unit-tested; the old single-lever rule was
+replaced and its tests updated with the contract.
+
+### Aircraft selection + the helicopter
+
+New screen between SINGLE PLAYER and the spawn map (worldflightsimulator.com's
+step 1): four vehicles — F-15 EAGLE, CRJ-900, GLOBAL HAWK (all existing GLBs)
+and a new HELICOPTER authored in Blender for this repo (10.5k tris, rotor and
+tail-rotor nodes, CC0-equivalent — `public/models/helicopter.glb`). The choice
+persists; NEW LOCATION after a crash does not re-ask; the model swap rides the
+picker phase. `plane/heliPhysics.js`: attitude-commanded cyclic (ArrowUp tips
+the disc forward — the stick means direction of travel, as WFS ships it),
+collective on W/S mapped around the hover point (50 % holds altitude), pedals
++ bank-coupled turn, governed rotor that spools the visible discs, boost kept
+as an arcade dash. `main.js` branches once on vehicle type (movement via
+`vSpeed`), flames/wing-vapor stay F-15-only. 7 unit tests pin the model.
+`dev-flow-probe.mjs` drives the whole new flow headless: 11/11.
+
+### Real-time multiplayer (one code, the hexanaut.io path)
+
+REA on hexanaut.io's bundle: regional authoritative WebSocket servers, binary
+ArrayBuffer frames, per-server ping. The repo already shipped a Socket.IO
+relay — the game now uses it as the PRIMARY transport: `multiplayer/wsNet.js`
+speaks NATIVE WebSocket to `server/server.js` (new `/ws` endpoint sharing the
+rooms, 4-character codes, rate caps, dead-socket sweep), with the same Net
+surface, the same DIS threshold sending (extracted to the shared, tested
+`netmath.shouldTransmitState`), and automatic fallback to the Trystero P2P
+path when no server answers in 8 s. CREATE PARTY now yields the code with
+one click (the party-name field is gone). The two-browser e2e pointed at the
+running server (`?mpserver=`) drives the whole party lifecycle over the WS
+path: lobby, both-placed spawn gate, synchronized launch, rendered remote
+planes, networked gunfire, turn propagation, DIS skipping — 20/20. Three real
+findings from it, all fixed: (1) the WS welcome roster can deliver the peer
+BEFORE the caller's `net` assignment lands — the lobby re-renders after the
+handoff; (2) the P2P path heartbeats but the WS path did not — quiet phases
+(physics ticks do not run in the picker) starved the liveness sweep, so WsNet
+heartbeats every 2 s; (3) the spawn launch blocks the page's main thread for
+tens of seconds, which froze WebSocket pongs and 6 s liveness sweeps — the
+server sweep now needs two missed pings (30 s) and the peer timeout is 45 s.
+On a LAN/host machine this is round trips of ~1-5 ms — the "feels real time"
+path; the P2P path remains for playing across the internet with no server.
+
+**Known limits:** remote players still render the host app's default model
+(vehicle type is not broadcast yet); the WS server needs `node server/server.js`
+running on the host machine (any Node host works — see server/README.md).

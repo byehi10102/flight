@@ -9,6 +9,9 @@ import {
   Math as CesiumMath,
   Viewer as CesiumViewer,
   RequestScheduler,
+  LabelCollection,
+  LabelStyle,
+  NearFarScalar,
 } from "cesium";
 import "cesium/Build/Cesium/Widgets/widgets.css";
 import { CONFIG } from "./config.js";
@@ -129,15 +132,12 @@ export function applyBaseWorld(viewer) {
   layer.maximumLevel = CONFIG.imagery.maximumLevel;
   try { layer.anisotropy = 16; } catch (e) { /* older Cesium */ }
 
-  // Reference overlay (boundaries + place labels, transparent): hidden while
-  // flying, shown in the spawn picker over the SATELLITE view so cities and
-  // landmarks stay readable like a real map app.
-  const reference = new UrlTemplateImageryProvider({
-    url: "https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
-    maximumLevel: 19,
-  });
-  referenceLayer = viewer.imageryLayers.addImageryProvider(reference, 2);
-  referenceLayer.show = false;
+  // Reference labels over the satellite view while picking: real VECTOR
+  // labels, so a city name is one size at every zoom (the raster boundary
+  // tiles it replaces baked labels into coarse tiles, which is why names
+  // appeared huge and then shrank as the tiles refined). Hidden while flying.
+  ensureCityLabels(viewer);
+  if (cityLabelsPrim) cityLabelsPrim.show = false;
 
   // ── Quality: LOD, AA and atmosphere ──────────────────────────────────────
   // Tier-scaled values (auto quality): MSAA/cache/upload-pacing differ per
@@ -302,7 +302,6 @@ export { Cartographic, CesiumMath, CesiumViewer };
 // 2D canvas overlay (player wedge, spawn pin, compass labels) draws on top.
 let miniViewer = null;
 let streetsLayer = null;
-let referenceLayer = null;
 // The two global imagery layers, kept for the speed-driven detail cap.
 let baseImageryLayer = null;
 let satelliteImageryLayer = null;
@@ -323,14 +322,106 @@ export function setImageryLevelCap(level) {
   } catch (e) { /* imagery LOD is best-effort */ }
 }
 
-/** Reference-labels overlay for the spawn picker (satellite stays visible). */
+// ── Vector place labels for the spawn picker ────────────────────────────────
+// Major US cities, static and keyless. These replace the raster ArcGIS
+// "World_Boundaries_and_Places" tiles whose labels were BAKED into coarse
+// tiles — the reason a city name appeared at giant size and then shrank when
+// the tile refined. Vector labels render at one size at every zoom and cost
+// nothing to stream. All points sit inside USA_BOUNDS (USA-only flying).
+const US_CITIES = [
+  ["NEW YORK", -74.006, 40.7128], ["LOS ANGELES", -118.2437, 34.0522],
+  ["CHICAGO", -87.6298, 41.8781], ["HOUSTON", -95.3698, 29.7604],
+  ["PHOENIX", -112.074, 33.4484], ["PHILADELPHIA", -75.1652, 39.9526],
+  ["SAN ANTONIO", -98.4936, 29.4241], ["SAN DIEGO", -117.1611, 32.7157],
+  ["DALLAS", -96.797, 32.7767], ["SAN JOSE", -121.8863, 37.3382],
+  ["AUSTIN", -97.7431, 30.2672], ["JACKSONVILLE", -81.6557, 30.3322],
+  ["FORT WORTH", -97.3308, 32.7555], ["COLUMBUS", -83.0007, 39.9612],
+  ["CHARLOTTE", -80.8431, 35.2271], ["INDIANAPOLIS", -86.1581, 39.7684],
+  ["SAN FRANCISCO", -122.4194, 37.7749], ["SEATTLE", -122.3321, 47.6062],
+  ["DENVER", -104.9903, 39.7392], ["WASHINGTON", -77.0369, 38.9072],
+  ["BOSTON", -71.0589, 42.3601], ["EL PASO", -106.4869, 31.7619],
+  ["NASHVILLE", -86.7816, 36.1627], ["DETROIT", -83.0458, 42.3314],
+  ["OKLAHOMA CITY", -97.5164, 35.4676], ["PORTLAND", -122.6765, 45.5231],
+  ["LAS VEGAS", -115.1398, 36.1699], ["MEMPHIS", -90.0489, 35.1495],
+  ["LOUISVILLE", -85.7585, 38.2527], ["BALTIMORE", -76.6122, 39.2904],
+  ["MILWAUKEE", -87.9065, 43.0389], ["ALBUQUERQUE", -106.6504, 35.0844],
+  ["TUCSON", -110.9747, 32.2226], ["FRESNO", -119.7871, 36.7378],
+  ["SACRAMENTO", -121.4944, 38.5816], ["KANSAS CITY", -94.5786, 39.0997],
+  ["ATLANTA", -84.388, 33.749], ["OMAHA", -95.9345, 41.2565],
+  ["COLORADO SPRINGS", -104.8219, 38.8339], ["RALEIGH", -78.6382, 35.7796],
+  ["VIRGINIA BEACH", -75.9779, 36.8529], ["MIAMI", -80.1918, 25.7617],
+  ["OAKLAND", -122.2712, 37.8044], ["MINNEAPOLIS", -93.265, 44.9778],
+  ["TULSA", -95.9928, 36.154], ["WICHITA", -97.3361, 37.6872],
+  ["NEW ORLEANS", -90.0715, 29.9511], ["CLEVELAND", -81.6944, 41.4993],
+  ["TAMPA", -82.4572, 27.9506], ["ST LOUIS", -90.1994, 38.627],
+  ["PITTSBURGH", -79.9959, 40.4406], ["CINCINNATI", -84.512, 39.1031],
+  ["ORLANDO", -81.3792, 28.5383], ["BUFFALO", -78.8784, 42.8864],
+  ["SALT LAKE CITY", -111.891, 40.7608], ["SPOKANE", -117.426, 47.6588],
+  ["FARGO", -96.7898, 46.8772], ["BILLINGS", -108.5007, 45.7833],
+  ["CHEYENNE", -104.8202, 41.14], ["LUBBOCK", -101.8551, 33.5779],
+  ["LAREDO", -99.4804, 27.5306], ["MOBILE", -88.0431, 30.6954],
+  ["CHARLESTON", -79.9311, 32.7765], ["SAVANNAH", -81.0912, 32.0809],
+  ["DES MOINES", -93.625, 41.5868], ["SIOUX FALLS", -96.7266, 43.5446],
+  ["PROVIDENCE", -71.4128, 41.824], ["HARTFORD", -72.6734, 41.7658],
+  ["ALBANY", -73.7562, 42.6526], ["BANGOR", -68.7712, 44.8015],
+  ["ELKO", -115.7631, 40.8324], ["FLAGSTAFF", -111.6513, 35.1983],
+  ["BOISE", -116.2023, 43.615], ["ROCHESTER", -77.6102, 43.1566],
+  ["GRAND RAPIDS", -85.6681, 42.9634], ["MADISON", -89.4012, 43.0731],
+  ["KNOXVILLE", -83.9207, 35.9606], ["LITTLE ROCK", -92.2896, 34.7465],
+  ["JACKSON", -90.1848, 32.2988], ["SHREVEPORT", -93.7502, 32.5252],
+  ["RENO", -119.4194, 39.5296], ["FORT COLLINS", -105.0844, 40.5853],
+  ["EL CENTRO", -115.5631, 32.792], ["MERIDIAN", -88.7017, 32.3643],
+  ["ROSWELL", -104.5249, 33.3943], ["PUEBLO", -104.6092, 38.2545],
+  ["ABILENE", -99.7331, 32.4487], ["DULUTH", -92.1005, 46.7867],
+  ["GREEN BAY", -88.0199, 44.5133], ["ERIE", -80.0851, 42.1292],
+  ["YUMA", -114.6277, 32.6927], ["MCALLEN", -99.3305, 26.2039],
+];
+
+let cityLabelsPrim = null;
+
+/** Build the label collection once (idempotent) on the main viewer. */
+function ensureCityLabels(viewer) {
+  if (cityLabelsPrim) return cityLabelsPrim;
+  try {
+    const labels = viewer.scene.primitives.add(new LabelCollection());
+    labels.show = false;
+    for (const [name, lon, lat] of US_CITIES) {
+      labels.add({
+        position: Cartesian3.fromDegrees(lon, lat, 0),
+        text: name,
+        font: "600 14px 'Consolas','Courier New',monospace",
+        style: LabelStyle.FILL_AND_OUTLINE,
+        fillColor: Color.WHITE,
+        outlineColor: Color.fromCssColorString("#0b3a1c"),
+        outlineWidth: 3,
+        // Legible at the 15 km picker view, gracefully smaller from far away,
+        // and gone at distances where labels would only be noise.
+        scaleByDistance: new NearFarScalar(2.0e4, 1.0, 1.2e6, 0.45),
+        translucencyByDistance: new NearFarScalar(2.0e4, 1.0, 2.5e6, 0.4),
+        eyeOffset: new Cartesian3(0, 0, -50),
+      });
+    }
+    cityLabelsPrim = labels;
+  } catch (e) {
+    cityLabelsPrim = null; // labels are cosmetic; never break the viewer
+  }
+  return cityLabelsPrim;
+}
+
+/** City-label visibility for the spawn picker (satellite stays visible). */
 export function setStreetsVisible(show) {
   try {
-    if (referenceLayer) referenceLayer.show = !!show;
+    const labels = cityLabels || cityLabelsPrim;
+    if (labels) labels.show = !!show;
   } catch (e) { /* cosmetic */ }
 }
-/** The minimap never refines past this level: cheap tiles that always arrive. */
-const MINIMAP_MAX_LEVEL = 15;
+/** The minimap never refines past this level: 13 is 1.2 km tiles — at the
+ *  map's view altitudes (1.8-40 km) that is already sharper than the canvas,
+ *  and coarse tiles are the ones that actually arrive while the main globe is
+ *  streaming at speed. The old level-15/SSE-1 map starved behind the main
+ *  globe's request stream and never finished loading (measured: tilesLoaded
+ *  false for the whole flight). */
+const MINIMAP_MAX_LEVEL = 13;
 
 export function initMiniViewer(containerId) {
   if (miniViewer) return miniViewer;
@@ -365,13 +456,14 @@ export function initMiniViewer(containerId) {
     miniViewer.scene.fog.enabled = false;
     miniViewer.scene.globe.enableLighting = false;
     miniViewer.scene.highDynamicRange = false;
-    // REALISTIC DETAIL on the small canvas: screen-space error shrinks with
-    // viewport height, so a 200px map needs a finer SSE than the main globe
-    // (SSE 2) to resolve comparable imagery detail - SSE 1 doubles the
-    // effective tile detail, and native-DPR rendering kills the blur on
-    // HiDPI phones. A handful of tiles at this size, so the cost is tiny.
-    miniViewer.scene.globe.maximumScreenSpaceError = 1;
-    miniViewer.scene.globe.tileCacheSize = 400;
+    // REALISTIC DETAIL on the small canvas — but not SSE 1. SSE 1 forced the
+    // deepest tile levels for a 200 px canvas, and those fine requests starved
+    // behind the main globe's stream under the shared request scheduler, so
+    // the map sat empty for whole flights (measured). SSE 4 picks levels the
+    // map actually needs; MAX_LEVEL 13 above keeps every request coarse
+    // enough to arrive. Native-DPR rendering still un-blurs it on HiDPI.
+    miniViewer.scene.globe.maximumScreenSpaceError = 4;
+    miniViewer.scene.globe.tileCacheSize = 200;
     try {
       // Full device-pixel rendering (no browser-recommended downscale) —
       // this alone un-blurs the map on HiDPI phones.
@@ -428,7 +520,9 @@ export function getMiniViewer() {
 // HUD: same scene graph, same tile pyramid, same fill as the main view, spent
 // on a map 150 px wide. A map does not need 60 Hz — the cap keeps it fluid
 // while cutting that cost to a fraction, and tile streaming is unaffected.
-const MINIMAP_MIN_RENDER_MS = 100; // 10 Hz
+// The rate is the quality tier's (LOW tiers render the map at 5 Hz).
+const _quality = getQualityProfile();
+const MINIMAP_MIN_RENDER_MS = 1000 / (_quality.minimapHz || 10);
 let minimapLastRender = 0;
 
 /** Top-down minimap camera tracking the aircraft. Renders the mini viewer

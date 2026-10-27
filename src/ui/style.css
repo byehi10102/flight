@@ -803,8 +803,10 @@ html, body {
   width: 100%;
   height: 100%;
   z-index: 1;
-  opacity: 0.8;
-  filter: brightness(0.9) contrast(1.2);
+  opacity: 0.9;
+  /* NO CSS filter here: a filter on a canvas forces the compositor to
+     readback and re-process the whole map texture every frame. On browsers
+     running software compositing that alone can eat the frame budget. */
   pointer-events: none;
 }
 
@@ -815,6 +817,52 @@ html, body {
   height: 100% !important;
 }
 
+
+/* ── Aircraft selection screen ──────────────────────────────────────────────── */
+.fleet-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(560px, 86vw);
+  max-height: 52vh;
+  overflow-y: auto;
+  margin-bottom: 18px;
+}
+
+.fleet-card {
+  display: grid;
+  grid-template-columns: 54px 1fr;
+  grid-template-areas:
+    "glyph name"
+    "glyph role"
+    "glyph spec";
+  column-gap: 14px;
+  align-items: center;
+  text-align: left;
+  padding: 12px 16px;
+  background: rgba(0, 30, 12, 0.55);
+  border: 1px solid rgba(0, 255, 120, 0.35);
+  border-radius: 10px;
+  color: #d6ffe6;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, transform 0.1s;
+}
+
+.fleet-card:hover { background: rgba(0, 60, 24, 0.6); transform: translateY(-1px); }
+.fleet-card.sel {
+  border-color: #0f6;
+  background: rgba(0, 80, 34, 0.62);
+  box-shadow: 0 0 16px rgba(0, 255, 110, 0.28);
+}
+
+.fleet-glyph { grid-area: glyph; font-size: 30px; text-align: center; }
+.fleet-name { grid-area: name; font-weight: 800; letter-spacing: 0.08em; color: #eafff2; }
+.fleet-role { grid-area: role; font-size: 11px; letter-spacing: 0.22em; color: #7dffb0; }
+.fleet-spec { grid-area: spec; font-size: 11px; color: #9fd8b4; }
+
+#aircraftSelect .menu-desc { margin-bottom: 14px; }
+#aircraftSelect #fleetGoBtn { width: min(560px, 86vw); }
+#aircraftSelect #fleetBackBtn { width: min(560px, 86vw); margin-top: 8px; }
 /* ── Weapons HUD (ref-flight panel) ──────────────────────────────────────── */
 #weapons-hud {
   position: absolute;

@@ -16,6 +16,7 @@
  */
 import { ManualLink, looksLikeCode } from "./manual.js";
 import { Net, generateRoomCode, normalizeRoomCode } from "./net.js";
+import { WsNet } from "./wsNet.js";
 import { createRemoteBullets } from "./remoteBullets.js";
 import { createRemotePlanes } from "./remotePlanes.js";
 import { createSpawnPresence } from "./spawnPresence.js";
@@ -287,21 +288,49 @@ export function initMp(ctx) {
     return (ui.mpCallsign?.value || "PILOT").trim().slice(0, 14) || "PILOT";
   }
 
-  /** CREATE PARTY — name it, get a 4-character code, wait in the lobby. */
+  /**
+   * Pick the transport for this party and FULLY connect it: the REAL-TIME
+   * SERVER first (a native WebSocket to server/server.js — direct connection,
+   * ~1-5 ms on a LAN, no ordered channel to head-of-line block the state
+   * stream; the hexanaut.io model), falling back to serverless P2P
+   * (Trystero/Nostr) when no server is reachable. Both speak the same Net
+   * surface, so nothing downstream changes — only latency does.
+   */
+  async function makeNet(code) {
+    const ws = new WsNet();
+    attachHandlers(ws);
+    try {
+      await ws.connect(code, myCallsign());
+      setStatus(ui.wrDiag, "REAL-TIME SERVER connected — lowest latency path.", "ok");
+      return ws;
+    } catch (e) {
+      // No reachable server: tear the half-open socket down, go peer-to-peer.
+      try { await ws.leave(); } catch (e2) { /* best effort */ }
+      console.info("[mp] no real-time server at", ws.serverUrl, "— falling back to P2P:", e.message);
+      setStatus(ui.wrDiag, "No real-time server found — connecting P2P instead.", "busy");
+      const p2p = new Net();
+      attachHandlers(p2p);
+      await p2p.connect(code, myCallsign());
+      return p2p;
+    }
+  }
+
+  /** CREATE PARTY — get a 4-character code, wait in the lobby. */
   async function hostParty() {
-    partyName = (ui.mpPartyName?.value || "").trim().slice(0, 24);
     isHost = true;
     roomCode = generateRoomCode();
     beginManualParty();
     if (ui.wrCodeLabel) ui.wrCodeLabel.textContent = "PARTY CODE — share this with your friend";
     if (ui.wrCodeEl) ui.wrCodeEl.textContent = roomCode;
-    if (ui.wrPartyNameEl) ui.wrPartyNameEl.textContent = (partyName || "PARTY").toUpperCase();
-    net = new Net();
-    net.worldSpeedScale = ctx.worldSpeedScale;
-    attachHandlers(net);
-    setStatus(ui.wrStatusEl, `Party “${partyName || "PARTY"}” created — code ${roomCode}. Waiting for Player 2…`, "ok");
+    if (ui.wrPartyNameEl) ui.wrPartyNameEl.textContent = "PARTY";
+    partyName = "PARTY";
+    setStatus(ui.wrStatusEl, `Party created — code ${roomCode}. Waiting for Player 2…`, "ok");
     try {
-      await net.connect(roomCode, myCallsign());
+      net = await makeNet(roomCode);
+      net.worldSpeedScale = ctx.worldSpeedScale;
+      // The WS welcome roster can deliver the peer DURING makeNet — before
+      // this assignment — so re-render the lobby from the real transport.
+      updateWaitingRoom();
     } catch (e) {
       setStatus(ui.wrStatusEl, "Could not open the party: " + e.message, "error");
     }
@@ -314,20 +343,21 @@ export function initMp(ctx) {
       setStatus(ui.mpStatusEl, "Enter the 4-character party code.", "error");
       return;
     }
-    partyName = "";
+    partyName = "PARTY";
     isHost = false;
     roomCode = code;
     beginManualParty();
     if (ui.wrCodeLabel) ui.wrCodeLabel.textContent = `PARTY CODE — ${code}`;
     if (ui.wrCodeEl) ui.wrCodeEl.textContent = code;
     if (ui.wrPartyNameEl) ui.wrPartyNameEl.textContent = "PARTY";
-    net = new Net();
-    net.worldSpeedScale = ctx.worldSpeedScale;
-    attachHandlers(net);
     setStatus(ui.wrStatusEl, "Connecting to the party…", "busy");
     try {
-      const ok = await net.connect(code, myCallsign());
-      if (ok) setStatus(ui.wrStatusEl, "Connected — waiting for the host to start.", "ok");
+      net = await makeNet(code);
+      net.worldSpeedScale = ctx.worldSpeedScale;
+      // Same re-render as hostParty: the welcome roster may predate this
+      // assignment (the host may already be sitting in the room).
+      updateWaitingRoom();
+      setStatus(ui.wrStatusEl, "Connected — waiting for the host to start.", "ok");
     } catch (e) {
       setStatus(ui.wrStatusEl, "Could not join that party: " + e.message, "error");
     }
@@ -653,6 +683,19 @@ export function initMp(ctx) {
     remoteStats: () => remotePlanes.stats(),
     /** Diagnostics (?devtest/e2e): sender-side threshold-sending counters. */
     stateStats: () => ({ ...(net.stateStats || {}) }),
+    /** Diagnostics (?devtest): transport internals for netcode probes. */
+    netDebug: () => ({
+      mode: net.mode,
+      status: net.status,
+      peers: [...net.peers.entries()].map(([id, p]) => ({
+        id: id.slice(0, 8),
+        callsign: p.callsign,
+        ageMs: Math.round(performance.now() - p.lastSeen),
+        hasState: !!p.state,
+        hasSpawn: !!p.spawn,
+      })),
+      selfId: net.selfId ? String(net.selfId).slice(0, 8) : null,
+    }),
     /** Local round fired: broadcast its frozen path to the party. */
     noteBulletFired(bullet) {
       if (!active || phase !== "flying" || !bullet) return;

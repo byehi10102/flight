@@ -1,57 +1,101 @@
 /**
- * Adaptive performance — the frame budget's thermostat.
+ * Adaptive performance — the frame budget's controller.
  *
  * The game renders the same scene through THREE surfaces every frame: the
  * Cesium globe, the tactical minimap (a second Cesium viewer) and the Three.js
- * overlay. Pixel count is the one lever that scales ALL of them at once, and
- * it is the lever that decides the frame rate on a fill-rate-bound GPU (weak
- * integrated chips, phones, anything with a 2-4 M-pixel framebuffer).
+ * overlay. Two levers scale them:
  *
- * So the game measures its own frame time and trades resolution for smoothness
- * when it has to, then hands the pixels back when it can:
+ *   1. tile DETAIL (the globe's maximumScreenSpaceError) — fewer/coarser
+ *      tiles means less geometry, fewer fetches and less decode work. This is
+ *      sacrificed FIRST: a struggling device is usually tile-bound, and coarse
+ *      terrain beats a slideshow (the ordering worldflightsimulator.com ships:
+ *      scenery first, then pixels).
+ *   2. RESOLUTION (resolutionScale + the overlay's pixel ratio) — the lever
+ *      that decides the frame rate on a fill-rate-bound GPU. Given back FIRST
+ *      on recovery: sharpness returns before terrain detail does.
  *
- *   - steady 20 ms+ frames  -> resolution scale steps down (never below
- *     `min`, so the picture stays legible),
- *   - frames comfortably under budget -> it steps back up toward full,
- *   - a dead band in between -> no change (no oscillation around the border),
- *   - decisions only after a full sampling window, so one janky frame or one
- *     tile-upload hitch never moves the needle.
+ * How the decision is made (the parts that keep it honest):
  *
- * The tiers in quality.js stay untouched: this is a runtime response to the
- * actual frame, not a second opinion about the device.
+ *   - MEDIAN frame time per window, not the mean. Tile decode and terrain
+ *     uploads land as occasional main-thread spikes; a mean is dragged up by
+ *     them for the whole window and the controller sheds pixels for a problem
+ *     the GPU never had.
+ *   - Thresholds are RELATIVE TO THE DISPLAY. rAF is floored by vsync: on a
+ *     60 Hz panel everything renders at ~16.7 ms even at 90% idle, so fixed
+ *     millisecond thresholds ratchet one way. The fastest frame in the window
+ *     estimates the vsync interval; "pinned at vsync" is the only honest
+ *     headroom signal.
+ *   - A severe overload (median > 2.5x vsync — think 2-5 fps) drops BOTH
+ *     levers in the same window: at 300 ms frames a 0.85x shuffle per 1.5 s
+ *     takes half a minute to matter.
+ *   - A dead band between the thresholds means no oscillation, and decisions
+ *     only land after a full sampling window.
  *
- * `stepResolutionScale` is pure so the decision is unit-testable.
+ * `decideFrameBudget` is pure so the rule is unit-testable.
  */
 
 export const PERF_DEFAULTS = Object.freeze({
-  minScale: 0.6,       // floor: 0.6^2 = 36% of the pixels, still legible
+  minScale: 0.5,       // floor: 0.25x the pixels — deeper than before; at 2 fps
+                       // a 0.6 floor was still too many pixels for the GPU
   maxScale: 1,
-  stepDown: 0.85,
-  stepUp: 1.06,
-  highMs: 24,          // slower than this on average -> want more headroom
-  lowMs: 13,           // faster than this on average -> can afford detail
+  stepDown: 0.8,
+  stepUp: 1.1,
+  highMs: 24,          // fallback ceiling when no vsync can be estimated
+  lowMs: 13,           // fallback floor for "comfortably fast"
   windowMs: 1500,      // how long a verdict must hold before acting
   minFrames: 20,       // ignore windows with almost no frames in them
+  // Terrain-detail sacrifice ladder (maximumScreenSpaceError). Index 0 must
+  // equal the quality tier's shipped value; main.js passes the tier's ladder.
+  sseLadder: [2, 4, 6],
 });
 
 /**
- * One adaptation step. Pure: (current scale, mean frame time) -> next scale.
+ * One adaptation decision. Pure: (current levers, window stats) -> next levers.
  *
- * @param {number} current current resolution scale
- * @param {number} avgMs   mean frame time across the window, milliseconds
+ * @param {{scale: number, sseIndex: number}} current
+ * @param {{medianMs: number, minMs: number}} stats   median + fastest frame of the window
  * @param {object} [opts]  PERF_DEFAULTS overrides
- * @returns {number} the next scale, clamped to [minScale, maxScale]
+ * @returns {{scale: number, sseIndex: number, reason: string}}
  */
-export function stepResolutionScale(current, avgMs, opts = {}) {
+export function decideFrameBudget(current, stats, opts = {}) {
   const o = { ...PERF_DEFAULTS, ...opts };
-  const cur = Number.isFinite(current) && current > 0 ? current : o.maxScale;
-  const ms = Number(avgMs);
-  let next = cur;
-  if (Number.isFinite(ms)) {
-    if (ms > o.highMs) next = cur * o.stepDown;
-    else if (ms < o.lowMs) next = cur * o.stepUp;
+  const scale = Number(current?.scale);
+  const cur = Number.isFinite(scale) && scale > 0 ? scale : o.maxScale;
+  const maxIdx = (o.sseLadder?.length || 1) - 1;
+  let sseIndex = Math.max(0, Math.min(maxIdx, Number(current?.sseIndex) || 0));
+
+  const median = Number(stats?.medianMs);
+  const min = Number(stats?.minMs);
+  if (!Number.isFinite(median) || median <= 0) return { scale: cur, sseIndex, reason: "no-data" };
+
+  // Estimated vsync interval: the fastest frame we actually saw, clamped to a
+  // sane 50-150 Hz band. Falls back to the fixed ceiling when nothing fast
+  // was seen this window (a fully saturated device never produces one).
+  const vsync = Number.isFinite(min) && min > 0 ? Math.max(6.5, Math.min(20, min)) : o.highMs;
+  const downT = vsync * 1.5;                       // clearly missing the budget
+  const upT = Math.max(o.lowMs, vsync * 1.08);     // pinned at vsync = headroom
+  const severe = median > vsync * 2.5;             // 2-5 fps territory
+
+  if (median > downT) {
+    // Slow: detail first, then pixels. A severe window spends both at once.
+    if (sseIndex < maxIdx) {
+      sseIndex++;
+      return severe
+        ? { scale: Math.max(o.minScale, cur * o.stepDown), sseIndex, reason: "severe:detail+pixels" }
+        : { scale: cur, sseIndex, reason: "detail" };
+    }
+    return { scale: Math.max(o.minScale, cur * o.stepDown), sseIndex, reason: "pixels" };
   }
-  return Math.max(o.minScale, Math.min(o.maxScale, next));
+
+  if (median < upT) {
+    // Fast: recover in reverse — sharpness back before scenery does.
+    if (cur < o.maxScale) {
+      return { scale: Math.min(o.maxScale, cur * o.stepUp), sseIndex, reason: "sharpness" };
+    }
+    if (sseIndex > 0) return { scale: cur, sseIndex: sseIndex - 1, reason: "detail-back" };
+  }
+
+  return { scale: cur, sseIndex, reason: "hold" };
 }
 
 export class AdaptivePerformance {
@@ -68,7 +112,10 @@ export class AdaptivePerformance {
 
     this.enabled = true;
     this.scale = 1;
+    // Where we are on the terrain-detail ladder (index into opts.sseLadder).
+    this.sseIndex = 0;
     this.lastAvgMs = 0;
+    this.lastReason = "start";
     this.samples = [];
     // null, not 0: a legitimate first timestamp of exactly 0 must not read as
     // "no window started yet" (it would restart the window every frame).
@@ -98,26 +145,43 @@ export class AdaptivePerformance {
     if (nowMs - this.sampleStart < this.opts.windowMs) return this.scale;
 
     const n = this.samples.length;
-    const avg = n > 0 ? this.samples.reduce((a, b) => a + b, 0) / n : 0;
+    const sorted = [...this.samples].sort((a, b) => a - b);
     this.samples.length = 0;
     this.sampleStart = nowMs;
-    this.lastAvgMs = avg;
     if (n < this.opts.minFrames) return this.scale;
 
-    const next = stepResolutionScale(this.scale, avg, this.opts);
-    if (Math.abs(next - this.scale) > 0.005) {
-      this.scale = next;
+    const stats = {
+      medianMs: sorted[n >> 1],
+      minMs: sorted[0],
+    };
+    this.lastAvgMs = stats.medianMs;
+    const next = decideFrameBudget(
+      { scale: this.scale, sseIndex: this.sseIndex },
+      stats,
+      this.opts,
+    );
+    this.lastReason = next.reason;
+    if (Math.abs(next.scale - this.scale) > 0.005 || next.sseIndex !== this.sseIndex) {
+      this.scale = next.scale;
+      this.sseIndex = next.sseIndex;
       this.apply();
     }
     return this.scale;
   }
 
-  /** Push the current scale onto every surface that renders the world. */
+  /** Push the current levers onto every surface that renders the world. */
   apply() {
     const s = this.scale;
     try {
       if (this.viewer) this.viewer.resolutionScale = s;
     } catch (e) { /* older Cesium */ }
+    try {
+      const ladder = this.opts.sseLadder || PERF_DEFAULTS.sseLadder;
+      const sse = ladder[Math.min(this.sseIndex, ladder.length - 1)];
+      const globe = this.viewer?.scene?.globe;
+      // Only assign on change: each assignment makes Cesium re-evaluate LOD.
+      if (globe && globe.maximumScreenSpaceError !== sse) globe.maximumScreenSpaceError = sse;
+    } catch (e) { /* detail ladder is best-effort */ }
     try {
       const mv = this.getMiniViewer();
       if (mv) mv.resolutionScale = s;
@@ -133,10 +197,14 @@ export class AdaptivePerformance {
     } catch (e) { /* overlay resize is best-effort */ }
   }
 
-  /** Devtest readout: what the thermostat currently believes. */
+  /** Devtest readout: what the controller currently believes. */
   report() {
+    const ladder = this.opts.sseLadder || PERF_DEFAULTS.sseLadder;
     return {
       scale: +this.scale.toFixed(3),
+      sse: ladder[Math.min(this.sseIndex, ladder.length - 1)],
+      sseIndex: this.sseIndex,
+      reason: this.lastReason,
       avgMs: +this.lastAvgMs.toFixed(2),
       fps: this.lastAvgMs > 0 ? +(1000 / this.lastAvgMs).toFixed(1) : null,
       enabled: this.enabled,

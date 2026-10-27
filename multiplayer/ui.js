@@ -42,16 +42,12 @@ export function buildMpUi(ctx) {
             <span class="logo-main">MULTIPLAYER</span>
             <span class="logo-sub">BETA</span>
           </div>
-          <p class="menu-desc">Serverless — one short party code connects two devices. No accounts, no server of ours in the middle.</p>
+          <p class="menu-desc">One 4-character code connects you and a friend. A real-time server is used when reachable — direct P2P otherwise. No accounts.</p>
           <label class="mp-field">
             <span class="mp-field-label">CALLSIGN</span>
             <input id="mpCallsign" type="text" maxlength="14" placeholder="PILOT" autocomplete="off" />
           </label>
           <div class="mp-actions">
-            <label class="mp-field">
-              <span class="mp-field-label">PARTY NAME</span>
-              <input id="mpPartyName" type="text" maxlength="24" placeholder="SUNDAY SQUADRON" autocomplete="off" />
-            </label>
             <button id="mpCreateBtn" class="menu-btn">CREATE PARTY</button>
             <div class="mp-or"><span>OR JOIN WITH A PARTY CODE</span></div>
             <input id="mpCodeInput" class="mp-code-input" maxlength="4" placeholder="A1B2" autocomplete="off" autocapitalize="characters" />

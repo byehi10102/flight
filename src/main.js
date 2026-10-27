@@ -11,12 +11,14 @@ import { createViewer, attachTerrain, setSunForTime, initMiniViewer, getMiniView
 import { imageryLevelForSpeed } from "./core/detailPolicy.js";
 import { GroundSampler } from "./core/ground.js";
 import { PlanePhysics } from "./plane/planePhysics.js";
+import { HeliPhysics } from "./plane/heliPhysics.js";
 import { PlaneController } from "./plane/planeController.js";
 import { PlaneModel } from "./plane/planeModel.js";
 import { AerodynamicEffects } from "./plane/aerodynamicEffects.js";
 import { Hud } from "./ui/hud.js";
 import { MobileMode } from "./ui/mobileMode.js";
 import { TouchControls } from "./ui/touchControls.js";
+import { getSelectedAircraft, openAircraftSelect } from "./ui/aircraftSelect.js";
 import { Bullets } from "./weapon/bullet.js";
 import { particles } from "./utils/particles.js";
 import { soundManager } from "./utils/soundManager.js";
@@ -93,6 +95,9 @@ let mp = null;
 let physics = new PlanePhysics();
 let controller = new PlaneController();
 let hud = new Hud();
+// The chosen vehicle (aircraft select screen). Fixed-wing types share the
+// plane physics; the helicopter gets its own model (see heliPhysics.js).
+let currentVehicle = getSelectedAircraft();
 const bullets = new Bullets();
 let gunOverheatWarned = false;
 // Mouse trigger hold: set while the left button is down and still (see the
@@ -402,8 +407,11 @@ function startPickerFilm() {
 // long that takes (the film loops as long as necessary); the cap only
 // force-finishes stages if something has truly hung.
 const MAX_BOOT_SECONDS = 75;
-// Region warm-up budget (ms): see preloadTerrain.
-const PRELOAD_BUDGET_MS = 12000;
+// Region warm-up budget (ms): see preloadTerrain. Raised 12 -> 16 s for the
+// third warm pass (the picker's own 15 km view — the tiles the player saw
+// still streaming after the bar finished). Still a budget: a slow connection
+// hands the rest to the picker as before.
+const PRELOAD_BUDGET_MS = 16000;
 const bootStart = performance.now();
 
 // ── Load instrumentation (devtest only) ──────────────────────────────────────
@@ -728,11 +736,16 @@ async function preloadSpawnRegion() {
     seedPromise = withTimeout(groundSampler.seed(regionSeedPoints()), 6000)
       .catch(() => { /* the fallback path covers it */ });
     if (warmBudgetSpent()) { bootAreaActive = false; return; }
-    // Pass 2 (last): the city-level zoom the picker's first look uses. The
-    // deeper 8 km / 3 km passes are GONE: they warm a deliberate deep zoom-in
-    // that any map app streams on demand, and the spawn phase re-requests
-    // those tiles at the destination anyway. That was ~6 s of the bar.
-    await bootWarmPass(35000, 0.55);
+    // Pass 2: the city-level zoom (35 km top-down).
+    await bootWarmPass(35000, 0.5);
+    if (warmBudgetSpent()) { bootAreaActive = false; return; }
+    // Pass 3 (last): the PICKER'S OWN VIEW. The picker opens with a fly-to at
+    // 15 km over this point (enterSpawnPicking), and that view's deeper tiles
+    // were the ones still visibly streaming after the boot bar finished —
+    // the complaint "it should already be preloaded in the loading animation".
+    // Warming the exact destination pose means the map is already loaded the
+    // moment the film fades. Passes 1-2 kept: they cover the pan-around view.
+    await bootWarmPass(15000, 0.7);
     await seedPromise;
     loadTrace?.mark("terrainSeed");
   } catch (e) { /* best effort */ } finally {
@@ -937,14 +950,15 @@ function initThree() {
         updateLoadingUI();
       }
     } catch (e) { /* cosmetic */ }
-  }).then(() => {
+  }, currentVehicle).then(() => {
     loadingStatus.model = true;
     loadTrace?.mark("model");
     updateLoadingUI();
     // Aerodynamic effects attach to the loaded model (the vapor pads are
     // children of the jet group; the wingtip vortices live in world space).
+    // They exist only on the F-15 — the pad offsets are its wing stations.
     try {
-      if (CONFIG.aeroEffects?.enabled !== false) {
+      if (currentVehicle.effects && CONFIG.aeroEffects?.enabled !== false) {
         aeroEffects = new AerodynamicEffects({
           scene,
           viewer,
@@ -2044,8 +2058,12 @@ function confirmSpawn() {
     controller.reset();
     state.minimapHeading = state.heading;
     lastCrashPos = null;
-    physics = new PlanePhysics();
+    // Vehicle decides the flight model: rotorcraft hover, fixed-wing cruise.
+    physics = currentVehicle.type === "heli" ? new HeliPhysics() : new PlanePhysics();
     physics.reset(state.lon, state.lat, state.alt, state.heading, state.pitch, state.roll);
+    // The helicopter's collective rests at the hover point (50% holds
+    // altitude); the plane's throttle rests at 0 = hands-off cruise.
+    if (currentVehicle.type === "heli") controller.input.throttle = CONFIG.heli.hoverCollective;
     particles.clear();
     bullets.clear();
     planeModel.reset();
@@ -2210,10 +2228,24 @@ function update(dt) {
 
   // The aircraft travels wherever the nose points. The horizontal component is
   // scaled by cos(pitch), so it always moves forward as well as up or down.
-  const newPos = movePosition(state.lon, state.lat, state.alt, state.heading, state.pitch, state.speed * MPH_TO_MPS * WORLD_SPEED_SCALE * dt);
-  state.lon = newPos.lon;
-  state.lat = newPos.lat;
-  state.alt = newPos.alt;
+  // The HELICOPTER branches: its tilt is attitude, not a climb command —
+  // horizontal travel follows the heading alone, and the COLLECTIVE moves
+  // altitude (physics returns vSpeed in m/s).
+  if (currentVehicle.type === "heli") {
+    state.vSpeed = physicsResult.vSpeed ?? 0;
+    state.rotor = physicsResult.rotor ?? 0;
+    const newPos = movePosition(state.lon, state.lat, state.alt, state.heading, 0, state.speed * MPH_TO_MPS * WORLD_SPEED_SCALE * dt);
+    state.lon = newPos.lon;
+    state.lat = newPos.lat;
+    state.alt = newPos.alt + state.vSpeed * dt;
+  } else {
+    state.vSpeed = 0;
+    state.rotor = 0;
+    const newPos = movePosition(state.lon, state.lat, state.alt, state.heading, state.pitch, state.speed * MPH_TO_MPS * WORLD_SPEED_SCALE * dt);
+    state.lon = newPos.lon;
+    state.lat = newPos.lat;
+    state.alt = newPos.alt;
+  }
 
   // Realistic altitude: height above the terrain below (AGL), not sea
   // level, so skimming the ground reads near zero instead of ~900 ft.
@@ -2668,9 +2700,10 @@ function animate() {
     // Detail follows speed: at 3000 mph the deep imagery levels cannot arrive
     // in time (see core/detailPolicy.js), and asking for them is exactly what
     // makes detail pop in late under the jet. Cruising still gets every tile.
-    // Only assigned when the level actually changes.
+    // The quality tier caps the "every tile" ceiling (LOW tier tops out at a
+    // level the pipe can serve). Only assigned when the level changes.
     try {
-      const level = imageryLevelForSpeed(state.speed);
+      const level = imageryLevelForSpeed(state.speed, { fullLevel: getQualityProfile().imageryFullLevel });
       if (level !== imageryLevel) {
         imageryLevel = level;
         setImageryLevelCap(level);
@@ -2790,8 +2823,21 @@ function animate() {
 // ── UI events ────────────────────────────────────────────────────────────────
 
 startBtn.addEventListener("click", () => {
-  if (mainMenu) mainMenu.classList.add("hidden");
-  enterSpawnPicking(false);
+  // The aircraft selector comes FIRST (worldflightsimulator.com's step 1):
+  // pick the machine, then the spawn map opens already knowing what loads.
+  openAircraftSelect((vehicle) => {
+    currentVehicle = vehicle;
+    if (mainMenu) mainMenu.classList.add("hidden");
+    // A different machine than the one booted with: swap the model now, so
+    // the load rides the picker phase instead of the spawn dive.
+    if (planeModel.vehicle?.id !== vehicle.id) {
+      const oldModel = planeModel.model;
+      planeModel.load(null, vehicle).then(() => {
+        try { if (oldModel) planeModel.scene.remove(oldModel); } catch (e) { /* cosmetic */ }
+      }).catch(() => { /* keep the old model on failure */ });
+    }
+    enterSpawnPicking(false);
+  });
 });
 
 confirmSpawnBtn.addEventListener("click", () => {
@@ -2898,14 +2944,16 @@ initialCameraView = {
 };
 
 initThree();
-// Frame-budget thermostat: trades pixels for smoothness when the GPU can't
-// hold the frame time (see core/performance.js). Built here so the overlay
-// renderer and the globe both exist; it starts at full resolution.
+// Frame-budget controller: trades tile detail and pixels for smoothness when
+// the GPU can't hold the frame time (see core/performance.js). The detail
+// ladder starts at this quality tier's shipped value. Built here so the
+// overlay renderer and the globe both exist; it starts at full detail.
 const adaptivePerf = new AdaptivePerformance({
   viewer,
   renderer,
   getMiniViewer,
   getPixelRatioCap: () => getQualityProfile().pixelRatioCap,
+  opts: { sseLadder: getQualityProfile().sseLadder },
 });
 adaptivePerf.apply();
 setupSpawnPicker();

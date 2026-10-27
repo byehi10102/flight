@@ -1,48 +1,85 @@
 /**
- * Frame-budget thermostat (core/performance.js).
+ * Frame-budget controller (core/performance.js).
  *
  * The decision rule is pure, and the controller's job is to apply it on a
- * sampled window and push the result onto all three render surfaces. Both are
+ * sampled window and push the result onto every render surface. Both are
  * asserted here: the rule (so tuning can't silently invert it) and the class
  * (so a single bad frame never moves the picture).
+ *
+ * Contract note (deliberate spec change, approved with the smoothness work):
+ * the levers are now DETAIL FIRST, PIXELS SECOND — a struggling device is
+ * usually tile-bound, so terrain detail (maximumScreenSpaceError) steps down
+ * the ladder before resolution does. Recovery runs in reverse. The old
+ * single-lever stepResolutionScale rule was replaced by decideFrameBudget.
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { stepResolutionScale, AdaptivePerformance, PERF_DEFAULTS } from "../src/core/performance.js";
+import { decideFrameBudget, AdaptivePerformance, PERF_DEFAULTS } from "../src/core/performance.js";
 
-test("a slow window steps the resolution down", () => {
-  assert.ok(stepResolutionScale(1, 40) < 1);
+const FULL = { scale: 1, sseIndex: 0 };
+
+test("a slow window steps tile DETAIL down first, pixels hold", () => {
+  const r = decideFrameBudget(FULL, { medianMs: 40, minMs: 16 });
+  assert.equal(r.sseIndex, 1, "detail ladder must move first");
+  assert.equal(r.scale, 1, "pixels must hold while detail can still drop");
 });
 
-test("a fast window steps the resolution back up", () => {
-  assert.ok(stepResolutionScale(0.6, 8) > 0.6);
+test("a severe overload (2-5 fps) drops detail AND pixels together", () => {
+  const r = decideFrameBudget(FULL, { medianMs: 300, minMs: 300 });
+  assert.equal(r.sseIndex, 1);
+  assert.ok(r.scale < 1, "severe frames must also shed pixels");
+});
+
+test("once the detail ladder is exhausted, pixels step down", () => {
+  const low = { scale: 1, sseIndex: PERF_DEFAULTS.sseLadder.length - 1 };
+  const r = decideFrameBudget(low, { medianMs: 40, minMs: 16 });
+  assert.equal(r.sseIndex, low.sseIndex, "ladder clamps at its end");
+  assert.ok(r.scale < 1);
+});
+
+test("a fast window hands pixels back first, then detail", () => {
+  const shed = { scale: 0.6, sseIndex: 1 };
+  const r = decideFrameBudget(shed, { medianMs: 8, minMs: 8 });
+  assert.ok(r.scale > 0.6, "sharpness returns first");
+  assert.equal(r.sseIndex, 1, "detail waits until pixels are back");
+  const full = decideFrameBudget({ scale: 1, sseIndex: 1 }, { medianMs: 8, minMs: 8 });
+  assert.equal(full.sseIndex, 0, "detail returns once pixels are full");
 });
 
 test("a window inside the dead band does not move", () => {
-  assert.equal(stepResolutionScale(0.8, 16), 0.8);
-  assert.equal(stepResolutionScale(1, PERF_DEFAULTS.highMs), 1);
-  assert.equal(stepResolutionScale(1, PERF_DEFAULTS.lowMs), 1);
+  // 16 ms median with a 16 ms fastest frame: vsync 16, upT ~17.3, downT 24 —
+  // right in the dead band.
+  const r = decideFrameBudget(FULL, { medianMs: 16, minMs: 16 });
+  assert.equal(r.scale, 1);
+  assert.equal(r.sseIndex, 0);
+  assert.equal(r.reason, "hold");
 });
 
 test("the scale never leaves [minScale, maxScale]", () => {
-  // One step at a time: a slow window takes 1 -> 0.85, it never teleports to
-  // the floor (a single visible resolution change is worth a gradual descent).
-  assert.equal(stepResolutionScale(1, 500), PERF_DEFAULTS.stepDown);
-  assert.ok(stepResolutionScale(1, 500) < 1);
-  // At the edge it clamps instead of undershooting.
-  assert.equal(stepResolutionScale(0.7, 500), PERF_DEFAULTS.minScale);
-  assert.equal(stepResolutionScale(0.6, 500), PERF_DEFAULTS.minScale);
-  assert.equal(stepResolutionScale(1, 1), PERF_DEFAULTS.maxScale);
-  assert.equal(stepResolutionScale(0.99, 1), PERF_DEFAULTS.maxScale);
+  const low = { scale: PERF_DEFAULTS.minScale, sseIndex: PERF_DEFAULTS.sseLadder.length - 1 };
+  const r = decideFrameBudget(low, { medianMs: 500, minMs: 500 });
+  assert.equal(r.scale, PERF_DEFAULTS.minScale);
+  const high = decideFrameBudget(FULL, { medianMs: 1, minMs: 1 });
+  assert.equal(high.scale, PERF_DEFAULTS.maxScale);
+});
+
+test("a window with no fast frame still judges by the fallback ceiling", () => {
+  // Everything at 40 ms: no vsync evidence, fallback 24 ms ceiling applies.
+  const r = decideFrameBudget(FULL, { medianMs: 40, minMs: 40 });
+  assert.equal(r.sseIndex, 1, "40 ms against a 24 ms ceiling is still slow");
 });
 
 test("non-finite frame times are ignored by the rule", () => {
-  assert.equal(stepResolutionScale(0.7, NaN), 0.7);
-  assert.equal(stepResolutionScale(0.7, Infinity), 0.7);
+  const r = decideFrameBudget({ scale: 0.7, sseIndex: 0 }, { medianMs: NaN, minMs: 16 });
+  assert.equal(r.scale, 0.7);
+  assert.equal(r.reason, "no-data");
 });
 
 function makeSurfaces() {
-  const viewer = { resolutionScale: 1 };
+  const viewer = {
+    resolutionScale: 1,
+    scene: { globe: { maximumScreenSpaceError: 2, set: [] } },
+  };
   const miniViewer = { resolutionScale: 1 };
   const renderer = { ratios: [], setPixelRatio(v) { this.ratios.push(v); } };
   const perf = new AdaptivePerformance({
@@ -56,24 +93,24 @@ function makeSurfaces() {
   return { perf, viewer, miniViewer, renderer };
 }
 
-test("one janky frame inside a window does not change the resolution", () => {
+test("one janky frame inside a window does not change anything", () => {
   const { perf, viewer } = makeSurfaces();
   perf.sample(16, 0);
   perf.sample(600, 10);   // a single hitch
   assert.equal(perf.sample(16, 20), 1);
   assert.equal(viewer.resolutionScale, 1);
+  assert.equal(viewer.scene.globe.maximumScreenSpaceError, 2);
 });
 
-test("a sustained slow window reduces BOTH globes and the overlay", () => {
-  const { perf, viewer, miniViewer, renderer } = makeSurfaces();
-  // 40 fps... no: 40 ms frames = 25 fps, sustained past the window.
+test("a sustained slow window steps detail down on both globes", () => {
+  const { perf, viewer } = makeSurfaces();
+  // 40 ms median (median ignores the single hitch below).
   perf.sample(40, 0);
   perf.sample(40, 50);
+  perf.sample(600, 60);
   perf.sample(40, 150);   // window closes here
-  assert.ok(viewer.resolutionScale < 1);
-  assert.ok(miniViewer.resolutionScale < 1);
-  assert.ok(renderer.ratios.length > 0, "overlay pixel ratio was never applied");
-  assert.ok(renderer.ratios[0] <= 2, "overlay ratio must respect the device cap");
+  assert.equal(viewer.scene.globe.maximumScreenSpaceError, 4, "detail ladder moved");
+  assert.equal(viewer.resolutionScale, 1, "pixels hold while detail can drop");
 });
 
 test("a sustained fast window hands the resolution back", () => {
@@ -96,7 +133,7 @@ test("the thermostat is inert while it is disabled (loading films)", () => {
   assert.equal(perf.report().enabled, false);
 });
 
-test("report exposes the current scale and measured frame rate", () => {
+test("report exposes the levers and measured frame rate", () => {
   const { perf } = makeSurfaces();
   perf.sample(20, 0);
   perf.sample(20, 50);
@@ -105,4 +142,5 @@ test("report exposes the current scale and measured frame rate", () => {
   assert.equal(r.avgMs, 20);
   assert.equal(r.fps, 50);
   assert.ok(r.scale <= 1 && r.scale >= PERF_DEFAULTS.minScale);
+  assert.equal(r.sse, PERF_DEFAULTS.sseLadder[r.sseIndex]);
 });

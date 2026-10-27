@@ -437,11 +437,13 @@ const browserMob = await puppeteer.launch(LAUNCH);
   check("joystick zones exist on the page", meta.zones === 4, `${meta.zones}`);
   check("menu shows the touch cheat-sheet", meta.menuShowsTouchHelp);
 
-  // Single-player spawn flow: menu -> picker -> place -> launch. Placement
-  // uses the game's own selectSpawnPoint via the devtest hook: tapping the
-  // globe is ray-dependent on headless WebGL and proves nothing about the
-  // sticks anyway.
+  // Single-player spawn flow: menu -> AIRCRAFT SELECT -> picker -> place ->
+  // launch. Placement uses the game's own selectSpawnPoint via the devtest
+  // hook: tapping the globe is ray-dependent on headless WebGL and proves
+  // nothing about the sticks anyway.
   await page.click("#startBtn");
+  await page.waitForSelector("#aircraftSelect:not(.hidden)", { timeout: 30000 });
+  await page.click("#fleetGoBtn"); // default selection (the F-15) is fine here
   await page.waitForFunction(() =>
     !document.getElementById("spawnInstruction").classList.contains("hidden"),
     { timeout: 30000 });

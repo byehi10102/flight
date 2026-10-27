@@ -8,8 +8,11 @@
  * pacing, a HiDPI pixel-ratio cap, and the explosion's puff budget.
  *
  * Never tiered — identical on every device:
- *   resolutionScale (always 1), maximumScreenSpaceError (always 2),
- *   terrain lighting, atmosphere, fog, fxaa, anisotropy, explosion style.
+ *   resolutionScale (always 1 at rest), terrain lighting, atmosphere, fog,
+ *   fxaa, anisotropy, explosion style.
+ * Tiered (the smoothness trade, revised after the 3-fps report): msaa level,
+ * maximumScreenSpaceError + its thermostat ladder, tile-cache size, tile-upload
+ * pacing, HiDPI pixel-ratio cap, minimap rate, imagery detail cap.
  *
  * deriveQualityProfile() is pure (unit-tested); getQualityProfile() does the
  * browser probing and caches the result.
@@ -30,20 +33,36 @@ const HIGH_PROFILE = Object.freeze({
   explosionScale: 1,
   resolutionScale: 1,
   maximumScreenSpaceError: 2,
+  // Coarse-terrain ladder the thermostat walks down under load: index 0 is
+  // the shipped detail, the rest are the sacrifice steps (detail before
+  // pixels — the weak device needs fewer TILES, not just fewer pixels).
+  sseLadder: [2, 4, 6],
+  // Minimap render rate (a second globe render per frame is real money).
+  minimapHz: 10,
+  // Deepest imagery level the speed policy may ask for at low speed.
+  imageryFullLevel: 19,
 });
 
 const LOW_PROFILE = Object.freeze({
   tier: QUALITY_TIERS.LOW,
-  // Visually-invisible reductions only. The 600-tile cache (vs 2048) is the
-  // big one: 2048 hi-res tiles hoard ~0.5-2 GB of GPU textures, which is
-  // what freezes low-VRAM machines in the first place.
-  msaaSamples: 2,
+  // Real low-power trade-offs now — the "visually invisible only" tier still
+  // 3 fps'd on weak iGPUs, and smooth beats crisp there:
+  //  - msaa 0 (fxaa stays on): a multi-sample resolve is a large fixed cost
+  //    on integrated chips.
+  //  - maximumScreenSpaceError 4: half the tile geometry/fetch depth. This is
+  //    the ONE visible trade, and it is what buys the frame rate back.
+  //  - 600-tile cache still (VRAM hoard was the freeze), dpr cap 1.5,
+  //    minimap at 5 Hz (a map does not need 10), imagery cap 17 at low speed.
+  msaaSamples: 0,
   tileCacheSize: 600,
   loadingDescendantLimit: 24,
-  pixelRatioCap: 1.75,
+  pixelRatioCap: 1.5,
   explosionScale: 0.7,
   resolutionScale: 1,
-  maximumScreenSpaceError: 2,
+  maximumScreenSpaceError: 4,
+  sseLadder: [4, 6, 8],
+  minimapHz: 5,
+  imageryFullLevel: 17,
 });
 
 // Integrated / mobile / software GPUs: not enough VRAM headroom for the

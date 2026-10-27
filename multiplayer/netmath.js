@@ -19,6 +19,35 @@ export const MPH_TO_MPS = 0.44704;
 const DEG = Math.PI / 180;
 const EARTH_R = 6371000;
 
+/** DIS threshold sending (shared by BOTH transports).
+ *
+ * Sender-side dead reckoning: transmit only when the receiver's
+ * extrapolation of the last sent packet would diverge from the truth by more
+ * than DR_THRESHOLD_M / DR_THRESHOLD_DEG, with a heartbeat floor so the
+ * interpolation window never starves. Pure so it is unit-testable and so the
+ * WebSocket and P2P transports send with byte-identical policy.
+ *
+ * @param {Array<{ts:number, lon:number, lat:number, h:number}>} sentLog last two SENT packets
+ * @param {object} state            the true current flight state
+ * @param {number} now              performance.now()
+ * @param {number} worldSpeedScale  arcade speed lever (sender DR == receiver DR)
+ * @param {{m?: number, deg?: number, heartbeatMs?: number}} [opts]
+ * @returns {boolean} true = transmit now
+ */
+export function shouldTransmitState(sentLog, state, now, worldSpeedScale = 1.8, opts = {}) {
+  const DR_THRESHOLD_M = opts.m ?? 15;
+  const DR_THRESHOLD_DEG = opts.deg ?? 3;
+  const STATE_HEARTBEAT_MS = opts.heartbeatMs ?? 150;
+  const last = sentLog[sentLog.length - 1];
+  if (!last) return true;
+  const elapsed = now - last.ts;
+  if (elapsed >= STATE_HEARTBEAT_MS) return true; // heartbeat floor
+  const prev = sentLog[sentLog.length - 2];
+  const predicted = drStep(last, estimateRates(prev || last, last), elapsed, worldSpeedScale);
+  const div = divergence(state, predicted);
+  return div.m > DR_THRESHOLD_M || div.hDeg > DR_THRESHOLD_DEG;
+}
+
 /** Wrap a longitude/heading difference into (-180, 180]. */
 export function wrapDeg(d) {
   while (d > 180) d -= 360;

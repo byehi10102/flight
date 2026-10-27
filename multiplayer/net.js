@@ -17,7 +17,7 @@
  *  - Every send is wrapped: a network hiccup can never break the sim loop.
  */
 import { joinRoom, selfId, getRelaySockets } from "./vendor/trystero.mjs";
-import { drStep, estimateRates, divergence } from "./netmath.js";
+import { shouldTransmitState } from "./netmath.js";
 
 const APP_ID = "skyward-flight-sim-v1";
 /**
@@ -457,21 +457,13 @@ export class Net {
   broadcastState(state) {
     if (!this.active || !this._sendState) return;
     const now = performance.now();
-    const last = this._sentLog[this._sentLog.length - 1];
-    let transmit = true;
-    if (last) {
-      const elapsed = now - last.ts;
-      if (elapsed >= STATE_HEARTBEAT_MS) {
-        transmit = true; // heartbeat floor keeps the interp window fed
-      } else {
-        const prev = this._sentLog[this._sentLog.length - 2];
-        const predicted = drStep(
-          last, estimateRates(prev || last, last), elapsed, this.worldSpeedScale
-        );
-        const div = divergence(state, predicted);
-        transmit = div.m > DR_THRESHOLD_M || div.hDeg > DR_THRESHOLD_DEG;
-        if (transmit) this.stateStats.forcedByThreshold++;
-      }
+    // DIS sender-side threshold sending — the shared, unit-tested rule
+    // (netmath.shouldTransmitState). The WebSocket transport sends with the
+    // exact same policy, so both paths feel identical.
+    const transmit = shouldTransmitState(this._sentLog, state, now, this.worldSpeedScale);
+    if (transmit && this._sentLog.length) {
+      const last = this._sentLog[this._sentLog.length - 1];
+      if (performance.now() - last.ts < STATE_HEARTBEAT_MS) this.stateStats.forcedByThreshold++;
     }
     if (!transmit) {
       this.stateStats.skipped++;
