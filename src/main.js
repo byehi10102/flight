@@ -11,14 +11,12 @@ import { createViewer, attachTerrain, setSunForTime, initMiniViewer, getMiniView
 import { imageryLevelForSpeed } from "./core/detailPolicy.js";
 import { GroundSampler } from "./core/ground.js";
 import { PlanePhysics } from "./plane/planePhysics.js";
-import { HeliPhysics } from "./plane/heliPhysics.js";
 import { PlaneController } from "./plane/planeController.js";
 import { PlaneModel } from "./plane/planeModel.js";
 import { AerodynamicEffects } from "./plane/aerodynamicEffects.js";
 import { Hud } from "./ui/hud.js";
 import { MobileMode } from "./ui/mobileMode.js";
 import { TouchControls } from "./ui/touchControls.js";
-import { getSelectedAircraft, openAircraftSelect } from "./ui/aircraftSelect.js";
 import { Bullets } from "./weapon/bullet.js";
 import { particles } from "./utils/particles.js";
 import { soundManager } from "./utils/soundManager.js";
@@ -95,9 +93,6 @@ let mp = null;
 let physics = new PlanePhysics();
 let controller = new PlaneController();
 let hud = new Hud();
-// The chosen vehicle (aircraft select screen). Fixed-wing types share the
-// plane physics; the helicopter gets its own model (see heliPhysics.js).
-let currentVehicle = getSelectedAircraft();
 const bullets = new Bullets();
 let gunOverheatWarned = false;
 // Mouse trigger hold: set while the left button is down and still (see the
@@ -950,15 +945,14 @@ function initThree() {
         updateLoadingUI();
       }
     } catch (e) { /* cosmetic */ }
-  }, currentVehicle).then(() => {
+  }).then(() => {
     loadingStatus.model = true;
     loadTrace?.mark("model");
     updateLoadingUI();
     // Aerodynamic effects attach to the loaded model (the vapor pads are
     // children of the jet group; the wingtip vortices live in world space).
-    // They exist only on the F-15 — the pad offsets are its wing stations.
     try {
-      if (currentVehicle.effects && CONFIG.aeroEffects?.enabled !== false) {
+      if (CONFIG.aeroEffects?.enabled !== false) {
         aeroEffects = new AerodynamicEffects({
           scene,
           viewer,
@@ -2058,12 +2052,8 @@ function confirmSpawn() {
     controller.reset();
     state.minimapHeading = state.heading;
     lastCrashPos = null;
-    // Vehicle decides the flight model: rotorcraft hover, fixed-wing cruise.
-    physics = currentVehicle.type === "heli" ? new HeliPhysics() : new PlanePhysics();
+    physics = new PlanePhysics();
     physics.reset(state.lon, state.lat, state.alt, state.heading, state.pitch, state.roll);
-    // The helicopter's collective rests at the hover point (50% holds
-    // altitude); the plane's throttle rests at 0 = hands-off cruise.
-    if (currentVehicle.type === "heli") controller.input.throttle = CONFIG.heli.hoverCollective;
     particles.clear();
     bullets.clear();
     planeModel.reset();
@@ -2228,24 +2218,10 @@ function update(dt) {
 
   // The aircraft travels wherever the nose points. The horizontal component is
   // scaled by cos(pitch), so it always moves forward as well as up or down.
-  // The HELICOPTER branches: its tilt is attitude, not a climb command —
-  // horizontal travel follows the heading alone, and the COLLECTIVE moves
-  // altitude (physics returns vSpeed in m/s).
-  if (currentVehicle.type === "heli") {
-    state.vSpeed = physicsResult.vSpeed ?? 0;
-    state.rotor = physicsResult.rotor ?? 0;
-    const newPos = movePosition(state.lon, state.lat, state.alt, state.heading, 0, state.speed * MPH_TO_MPS * WORLD_SPEED_SCALE * dt);
-    state.lon = newPos.lon;
-    state.lat = newPos.lat;
-    state.alt = newPos.alt + state.vSpeed * dt;
-  } else {
-    state.vSpeed = 0;
-    state.rotor = 0;
-    const newPos = movePosition(state.lon, state.lat, state.alt, state.heading, state.pitch, state.speed * MPH_TO_MPS * WORLD_SPEED_SCALE * dt);
-    state.lon = newPos.lon;
-    state.lat = newPos.lat;
-    state.alt = newPos.alt;
-  }
+  const newPos = movePosition(state.lon, state.lat, state.alt, state.heading, state.pitch, state.speed * MPH_TO_MPS * WORLD_SPEED_SCALE * dt);
+  state.lon = newPos.lon;
+  state.lat = newPos.lat;
+  state.alt = newPos.alt;
 
   // Realistic altitude: height above the terrain below (AGL), not sea
   // level, so skimming the ground reads near zero instead of ~900 ft.
@@ -2823,26 +2799,8 @@ function animate() {
 // ── UI events ────────────────────────────────────────────────────────────────
 
 startBtn.addEventListener("click", () => {
-  // The aircraft selector is its own screen (opaque — the old overlay let the
-  // menu bleed through). BACK restores the menu; CONTINUE moves on.
-  openAircraftSelect({
-    onBack: () => { if (mainMenu) mainMenu.classList.remove("hidden"); },
-    onDone: (vehicle) => {
-      currentVehicle = vehicle;
-      if (mainMenu) mainMenu.classList.add("hidden");
-      // A different machine than the one booted with: swap the model now, so
-      // the load rides the picker phase instead of the spawn dive.
-      if (planeModel.vehicle?.id !== vehicle.id) {
-        const oldModel = planeModel.model;
-        planeModel.load(null, vehicle).then(() => {
-          try { if (oldModel) planeModel.scene.remove(oldModel); } catch (e) { /* cosmetic */ }
-        }).catch(() => { /* keep the old model on failure */ });
-      }
-      enterSpawnPicking(false);
-    },
-  });
   if (mainMenu) mainMenu.classList.add("hidden");
-  soundManager.play("button-click");
+  enterSpawnPicking(false);
 });
 
 confirmSpawnBtn.addEventListener("click", () => {

@@ -2028,3 +2028,20 @@ vehicle type as a class (`.fleet-card.heli`), which the probe asserts.
 - The old placeholder crj900/hawk GLBs are replaced; attribution updated in
   project.md 10. `dev-vehicle-probe.mjs`: CRJ + Hawk load, fly at cruise and
   expose their spin nodes - 5/5.
+
+## 41. Recent changes (vehicle selection removed — F-15 only)
+
+By request: the aircraft selection screen and the multi-vehicle option are
+REMOVED — the game is back to the single F-15, exactly the pre-vehicle flow
+(SINGLE PLAYER -> spawn picker -> dive -> flight). Removed: the selector
+screen (src/ui/aircraftSelect.js + its CSS), heliPhysics.js and its tests,
+the fleet/heli config sections, the vehicle branch in main.js (physics,
+collective, movement), the model-swap path, and the vehicle spin-node code
+in planeModel.js. The placeholder vehicle GLBs are gone; the project owner's
+original crj900.glb and hawk.glb are restored from history (unused by the
+game but kept in the repo as assets, per the no-delete rule for owner
+supplied files). HELICOPTER/CRJ/GLOBAL HAWK work (sections 39-40) stays in
+git history if the feature returns. The perf work (controller, LOW tier,
+minimap, labels, boot preload) and the real-time multiplayer transport are
+untouched. dev-flight-probe.mjs (6/6): picker directly, F-15 + PlanePhysics,
+250 mph cruise, minimap loaded at 3000 mph, no page errors. 135/135 tests.

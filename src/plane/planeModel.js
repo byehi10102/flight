@@ -30,23 +30,11 @@ export class PlaneModel {
     this.prevSpeed = 0;
   }
 
-  async load(onProgress, vehicle = null) {
-    const v = vehicle || {
-      modelUrl: CONFIG.aircraft.modelUrl,
-      modelScale: CONFIG.aircraft.modelScale,
-      effects: true,
-      type: "jet",
-    };
-    this.vehicle = v;
-    this.modelScale = v.modelScale ?? CONFIG.aircraft.modelScale;
-    this.rotorNode = null;
-    this.tailRotorNode = null;
-    this.propNode = null;
-    this.fanNodes = [];
+  async load(onProgress) {
     const loader = new GLTFLoader();
     return new Promise((resolve, reject) => {
       loader.load(
-        v.modelUrl,
+        CONFIG.aircraft.modelUrl,
         (gltf) => {
           const mesh = gltf.scene;
 
@@ -67,18 +55,7 @@ export class PlaneModel {
           mesh.position.sub(center);
 
           this.model.position.copy(BASE_PLANE_POS);
-          this.model.scale.set(this.modelScale, this.modelScale, this.modelScale);
-
-          // Spin nodes, found by NAME CONVENTION: "ROTOR" is the helicopter's
-          // main disc, "TAIL_ROTOR" its tail rotor, "PROP" a propeller (the
-          // Global Hawk's pusher), "FAN_*" engine fan discs (the CRJ-900's
-          // turbofans). Spun in update().
-          mesh.traverse((child) => {
-            if (/^TAIL_ROTOR/i.test(child.name || "")) this.tailRotorNode = child;
-            else if (/^ROTOR/i.test(child.name || "")) this.rotorNode = child;
-            else if (/^PROP/i.test(child.name || "")) this.propNode = child;
-            else if (/^FAN/i.test(child.name || "")) this.fanNodes.push(child);
-          });
+          this.model.scale.set(CONFIG.aircraft.modelScale, CONFIG.aircraft.modelScale, CONFIG.aircraft.modelScale);
 
           // ref-flight plays the model's own animation clip once on load
           // (their 'flight_mode'); our F-15 ships the equivalent gear
@@ -95,17 +72,15 @@ export class PlaneModel {
             }
           } catch (e) { /* model without clips: fine */ }
 
-          // Jet exhaust flames — only for the F-15 (the offsets are its own
-          // tailpipe positions in model space; other vehicles have none).
-          if (v.effects) {
-            const flameL = new JetFlame();
-            const flameR = new JetFlame();
-            flameL.group.position.set(-0.4, -0.065, 5);
-            flameR.group.position.set(0.4, -0.065, 5);
-            this.model.add(flameL.group);
-            this.model.add(flameR.group);
-            this.jetFlames.push(flameL, flameR);
-          }
+          // Jet exhaust flames — same offsets as ref-flight so the flames sit
+          // in the tailpipes (+Z is behind the jet when nose points -Z).
+          const flameL = new JetFlame();
+          const flameR = new JetFlame();
+          flameL.group.position.set(-0.4, -0.065, 5);
+          flameR.group.position.set(0.4, -0.065, 5);
+          this.model.add(flameL.group);
+          this.model.add(flameR.group);
+          this.jetFlames.push(flameL, flameR);
           this.model.traverse((child) => {
             child.layers.set(1);
           });
@@ -226,7 +201,7 @@ export class PlaneModel {
     const k = this.fovScale || 1;
     if (k !== 1) {
       this.model.position.set(this.model.position.x * k, this.model.position.y * k, this.model.position.z);
-      const s = this.modelScale * k;
+      const s = CONFIG.aircraft.modelScale * k;
       this.model.scale.set(s, s, s);
     }
 
@@ -244,23 +219,6 @@ export class PlaneModel {
         flame.update(throttle, isBoosting, time, dt);
       }
     }
-
-    // Rotorcraft: spin the discs. `state.rotor` is the governed RPM (0..1)
-    // from HeliPhysics; the visual rate is capped so the blades read as
-    // motion instead of a transparent blur at real rotor speeds.
-    if (this.rotorNode) {
-      const rpm = Math.max(0, Math.min(1, state.rotor ?? 0));
-      this.rotorNode.rotation.y += dt * rpm * 28;
-    }
-    if (this.tailRotorNode) {
-      const rpm = Math.max(0, Math.min(1, state.rotor ?? 0));
-      this.tailRotorNode.rotation.x += dt * rpm * 34;
-    }
-    // Propeller (Global Hawk pusher) + engine fans (CRJ-900): spin with the
-    // throttle - running while the engine is alive, fastest at full W.
-    const thr = Math.max(0, Math.min(1, state.throttle ?? input.throttle ?? 0));
-    if (this.propNode) this.propNode.rotation.z += dt * (0.35 + 0.65 * thr) * 26;
-    for (const fan of this.fanNodes) fan.rotation.z += dt * (0.35 + 0.65 * thr) * 22;
   }
 
   reset() {

@@ -442,8 +442,6 @@ const browserMob = await puppeteer.launch(LAUNCH);
   // hook: tapping the globe is ray-dependent on headless WebGL and proves
   // nothing about the sticks anyway.
   await page.click("#startBtn");
-  await page.waitForSelector("#aircraftSelect:not(.hidden)", { timeout: 30000 });
-  await page.click("#fleetGoBtn"); // default selection (the F-15) is fine here
   await page.waitForFunction(() =>
     !document.getElementById("spawnInstruction").classList.contains("hidden"),
     { timeout: 30000 });

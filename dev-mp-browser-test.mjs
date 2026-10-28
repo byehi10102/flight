@@ -387,10 +387,8 @@ try {
     () => { const b = document.getElementById("startBtn"); return b && !b.disabled; },
     { timeout: 60000, polling: 500 }
   );
-  // Menu -> AIRCRAFT SELECT -> picker: the selector must not touch the party.
+  // Single player must reach the picker with no party anywhere.
   await sp.click("#startBtn");
-  await sp.waitForSelector("#aircraftSelect:not(.hidden)", { timeout: 30000 });
-  await sp.click("#fleetGoBtn");
   let spOk = false;
   for (let i = 0; i < 40; i++) {
     spOk = await sp.evaluate(() => {
