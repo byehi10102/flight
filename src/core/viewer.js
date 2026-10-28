@@ -395,9 +395,11 @@ function ensureCityLabels(viewer) {
         outlineColor: Color.fromCssColorString("#0b3a1c"),
         outlineWidth: 3,
         // Legible at the 15 km picker view, gracefully smaller from far away,
-        // and gone at distances where labels would only be noise.
+        // and GONE beyond 150 km — from the whole-USA view a wall of labels
+        // read as leftover big text (the picker is browsed zoomed into a
+        // region, so labels beyond ~150 km are noise there anyway).
         scaleByDistance: new NearFarScalar(2.0e4, 1.0, 1.2e6, 0.45),
-        translucencyByDistance: new NearFarScalar(2.0e4, 1.0, 2.5e6, 0.4),
+        translucencyByDistance: new NearFarScalar(2.0e4, 1.0, 1.6e5, 0.0),
         eyeOffset: new Cartesian3(0, 0, -50),
       });
     }
@@ -411,8 +413,7 @@ function ensureCityLabels(viewer) {
 /** City-label visibility for the spawn picker (satellite stays visible). */
 export function setStreetsVisible(show) {
   try {
-    const labels = cityLabels || cityLabelsPrim;
-    if (labels) labels.show = !!show;
+    if (cityLabelsPrim) cityLabelsPrim.show = !!show;
   } catch (e) { /* cosmetic */ }
 }
 /** The minimap never refines past this level: 13 is 1.2 km tiles — at the

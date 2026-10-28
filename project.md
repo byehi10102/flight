@@ -2045,3 +2045,35 @@ git history if the feature returns. The perf work (controller, LOW tier,
 minimap, labels, boot preload) and the real-time multiplayer transport are
 untouched. dev-flight-probe.mjs (6/6): picker directly, F-15 + PlanePhysics,
 250 mph cruise, minimap loaded at 3000 mph, no page errors. 135/135 tests.
+
+## 42. Recent changes (the spawn picker: crisp, capped, uncluttered)
+
+The picker read blurry, heavy, and littered with big leftover text. Four real
+causes, all fixed and probed (`dev-picker-probe.mjs`, 6/6):
+
+1. **The flight-time quality shed PERSISTED into the picker.** The controller
+   only samples while flying, so a resolution floor of 0.5 and a coarse detail
+   ladder from the last flight were still in force when the map opened - the
+   "everything is blurry". `AdaptivePerformance.restoreFull()` now runs on
+   picker entry: full resolution, tier tile detail; it re-sheds within seconds
+   of flying if the device needs it.
+2. **The boot preload warmed the picker's view with the FLIGHT's coarse-first
+   LOD profile** - the map arrived blurry and sharpened on screen.
+   `beginDetailLod(fullDetail)` now flips the globe to the full-detail pyramid
+   for the boot's third warm pass (the picker's own 15 km view) and restores
+   the flight profile after; the SPAWN warm-up keeps the coarse-first profile
+   (the section 38 boot-time reasoning stands there).
+3. **The label clutter**: the 92 city labels rendered at EVERY distance - from
+   a zoomed-out picker they were a wall of "leftover big text". They now fade
+   out and disappear beyond ~160 km (translucencyByDistance to 0), and the
+   landmark pins are distance-culled past 250 km. Also fixed here:
+   `setStreetsVisible` referenced a removed variable and silently no-oped in
+   its try/catch - the labels never showed at all since the raster layer was
+   replaced.
+4. **The picker rendered the globe at full frame rate for a map you pan** -
+   now capped at ~40 renders/s (tile streaming rides those renders), and the
+   MENU skips the covered globe render entirely. On software-composited
+   browsers that is half the picker's work gone.
+
+The remaining blur on the player's own machine is Chrome's software
+compositing (section 39): enable "Use graphics acceleration when available".

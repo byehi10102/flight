@@ -197,6 +197,20 @@ export class AdaptivePerformance {
     } catch (e) { /* overlay resize is best-effort */ }
   }
 
+  /** Back to the tier's full quality: called when the player leaves flight
+   *  for the menu or the spawn picker. The map-browsing screens must be CRISP
+   *  (the shed resolution/detail is a flight-time trade — a picker browsed at
+   *  0.5x resolution reads as "blurry" and coarse tiles read as unfinished),
+   *  and the controller re-sheds within seconds of flight if it has to. */
+  restoreFull() {
+    this.scale = this.opts.maxScale ?? 1;
+    this.sseIndex = 0;
+    this.samples.length = 0;
+    this.sampleStart = null;
+    this.apply();
+    return this.scale;
+  }
+
   /** Devtest readout: what the controller currently believes. */
   report() {
     const ladder = this.opts.sseLadder || PERF_DEFAULTS.sseLadder;

@@ -205,6 +205,7 @@ let maxGlobeQueue = 0; // largest tile queue seen during the globe stage
 // Boot loading page: fade to the menu instead of cutting. Idempotent.
 let loadingPageHidden = false;
 let lastThrottledRender = 0;
+let lastPickerRender = 0;
 
 // ── Preparing-flight phase (between SPAWN HERE and the camera dive) ─────────
 let preparingActive = false;
@@ -680,7 +681,7 @@ const WARM_PASS_DRAIN_MS = 300;
 /** Finish drain: longer than a pass (it is the last look before the picker
  *  opens) but not the 1.2 s it used to be. */
 const FINAL_DRAIN_MS = 600;
-async function bootWarmPass(altitude, milestone) {
+async function bootWarmPass(altitude, milestone, fullDetail = false) {
   // Never TAKE the camera on a spent budget: leaving it parked is worse than a
   // colder picker (see warmBudgetSpent).
   if (warmBudgetSpent()) return false;
@@ -691,10 +692,12 @@ async function bootWarmPass(altitude, milestone) {
   // Fill THIS pass's slice as its queue drains; the milestone lands when
   // the tiles have genuinely settled. The hang guard is the budget's own
   // remainder when that is shorter, so a cut can't be overrun by 9 s.
+  if (fullDetail) beginDetailLod(true);
   bootAreaMilestone = milestone - 0.2;
   bootAreaPeak = 0;
   const remaining = bootWarmDeadline > 0 ? bootWarmDeadline - performance.now() : 9000;
   await waitForGenuineDrain(WARM_PASS_DRAIN_MS, Math.max(400, Math.min(9000, remaining)));
+  if (fullDetail) endDetailLod();
   loadTrace?.mark(`pass:${milestone}`);
   loadingSub.area = milestone;
   updateLoadingUI();
@@ -734,13 +737,12 @@ async function preloadSpawnRegion() {
     // Pass 2: the city-level zoom (35 km top-down).
     await bootWarmPass(35000, 0.5);
     if (warmBudgetSpent()) { bootAreaActive = false; return; }
-    // Pass 3 (last): the PICKER'S OWN VIEW. The picker opens with a fly-to at
-    // 15 km over this point (enterSpawnPicking), and that view's deeper tiles
-    // were the ones still visibly streaming after the boot bar finished —
-    // the complaint "it should already be preloaded in the loading animation".
-    // Warming the exact destination pose means the map is already loaded the
-    // moment the film fades. Passes 1-2 kept: they cover the pan-around view.
-    await bootWarmPass(15000, 0.7);
+    // Pass 3 (last): the PICKER'S OWN VIEW, warmed at FULL DETAIL — the boot
+    // bar's whole job here is that the map the player lands on is crisp and
+    // fully loaded the moment the film fades (the flight's coarse-first
+    // profile would hand them a blurry map that sharpens on screen). The
+    // flip is bounded to this pass; the flight profile returns after.
+    await bootWarmPass(15000, 0.7, true);
     await seedPromise;
     loadTrace?.mark("terrainSeed");
   } catch (e) { /* best effort */ } finally {
@@ -1105,6 +1107,10 @@ function enterSpawnPicking(useVignette = true) {
     if (menuEarth) menuEarth.visible = false; // the picker shows the real map
     if (uiContainer) uiContainer.classList.add("hidden");
     currentState = States.PICK_SPAWN;
+    // The picker is a MAP-BROWSING screen: it must be crisp. Undo whatever
+    // the flight-time controller shed (resolution + tile detail) — it re-sheds
+    // within seconds of flying if the device needs it.
+    try { adaptivePerf.restoreFull(); } catch (e) { /* best-effort */ }
     setStreetsVisible(true);
     showNotablePlaces();
     showUsaBounds();
@@ -1590,9 +1596,13 @@ function showNotablePlaces() {
           outlineWidth: 2,
           verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
           pixelOffset: new Cesium.Cartesian2(0, -20),
+          // gone beyond ~250 km: from the whole-USA view the landmark
+          // labels read as leftover big text on top of the map
+          distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 250000),
         },
       });
       ent.notable = p;
+      try { ent.point.distanceDisplayCondition = new Cesium.DistanceDisplayCondition(0, 250000); } catch (e) { /* cosmetic */ }
       notableEntities.push(ent);
     }
   } catch (e) { /* landmarks are cosmetic */ }
@@ -1766,14 +1776,24 @@ let preparingDrainedAt = 0;
  *  jet will ACTUALLY use have arrived, instead of when a deeper pyramid has.
  *  The detail flip is one line each way if a sharper spawn is ever wanted
  *  back at the cost of the wait. */
-function beginDetailLod() {
+function beginDetailLod(fullDetail = false) {
   try {
     const g = viewer.scene.globe;
     preparingSavedLod = {
       baseScreenSpaceError: g.baseScreenSpaceError,
       skipLevelOfDetail: g.skipLevelOfDetail,
+      maximumScreenSpaceError: g.maximumScreenSpaceError,
     };
-    // No LOD flip: keep skipLevelOfDetail (coarse-first streaming).
+    // FULL detail for the warm-up: the whole point is that the destination
+    // view arrives CRISP — under the flight's skip-LOD coarse-first profile
+    // the spawned view still showed coarse tiles resolving into detail after
+    // the dive ("the map looks blurry"). The profile is restored in
+    // endDetailLod; the phase cap bounds the extra wait.
+    if (fullDetail) {
+      g.baseScreenSpaceError = 1;
+      g.skipLevelOfDetail = false;
+      g.maximumScreenSpaceError = getQualityProfile().maximumScreenSpaceError;
+    }
   } catch (e) { /* best-effort; defaults still load */ }
 }
 
@@ -1783,6 +1803,7 @@ function endDetailLod() {
       const g = viewer.scene.globe;
       g.baseScreenSpaceError = preparingSavedLod.baseScreenSpaceError;
       g.skipLevelOfDetail = preparingSavedLod.skipLevelOfDetail;
+      if (preparingSavedLod.maximumScreenSpaceError) g.maximumScreenSpaceError = preparingSavedLod.maximumScreenSpaceError;
     }
   } catch (e) { /* best-effort */ }
   preparingSavedLod = null;
@@ -2789,9 +2810,26 @@ function animate() {
   // (~6 renders/s: tile streaming needs only a few passes a second, and the
   // headroom is what lets the films decode smoothly - full-rate rendering
   // during the preparing phase is what made the second film choppy).
+  //
+  // The MENU skips the globe render entirely (the opaque menu covers it - the
+  // spinning Earth backdrop renders through the Three overlay), and the PICKER
+  // renders at 40 Hz: a panning map does not need 60+, and on weak/software-
+  // composited browsers the picker's full-rate globe render was the heaviest
+  // thing on screen. Tile streaming still rides those renders.
   const filmsOwnTheScreen = !bootPageGone || preparingActive || pickerFilmActive;
-  if (!filmsOwnTheScreen || now - lastThrottledRender > 150) {
-    if (filmsOwnTheScreen) lastThrottledRender = now;
+  if (filmsOwnTheScreen) {
+    if (now - lastThrottledRender > 150) {
+      lastThrottledRender = now;
+      try { viewer.render(); } catch (e) { /* one bad frame never kills the loop */ }
+    }
+  } else if (currentState === States.MENU) {
+    // covered by the menu overlay - the globe would be rendered for nothing
+  } else if (currentState === States.PICK_SPAWN) {
+    if (now - lastPickerRender > 25) {
+      lastPickerRender = now;
+      try { viewer.render(); } catch (e) { /* one bad frame never kills the loop */ }
+    }
+  } else {
     try { viewer.render(); } catch (e) { /* one bad frame never kills the loop */ }
   }
 }
