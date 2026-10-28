@@ -2077,3 +2077,33 @@ causes, all fixed and probed (`dev-picker-probe.mjs`, 6/6):
 
 The remaining blur on the player's own machine is Chrome's software
 compositing (section 39): enable "Use graphics acceleration when available".
+
+## 43. Recent changes (picker drag: render-on-demand; backdrop-filter removed; perf notice)
+
+The picker drag felt delayed and tiles streamed visibly while panning. The
+flat ~40 Hz render cap traded input latency for load - the wrong trade for a
+map you are actively dragging. Replaced with RENDER-ON-DEMAND, the standard
+interactive-Cesium pattern: the globe re-renders only when something changed
+(camera moved - via camera.changed at a 0.4% threshold - or the tile queue
+ticked) plus a 300 ms idle fallback. A drag now renders at the FULL rAF rate
+(measured: ~55/s under SwiftShader), an idle map costs almost nothing, and
+tile streaming rides the invalidations - so dragging both feels immediate AND
+lets its tiles finish sooner than the cap did.
+
+Also cut from every picker frame:
+- backdrop-filter blur on the search pill, results and loading chip removed
+  (the browser re-blurs that region every frame on top of the WebGL canvas -
+  one of the heaviest costs on software-composited browsers; the slightly
+  more opaque backgrounds read the same).
+- the menu skips the covered globe render (was rendering it for nothing).
+
+And the bottleneck is now VISIBLE: the menu measures its own idle frame rate
+once; < 25 fps while idle means the browser is rendering in software, and a
+dismissible banner says exactly that with the Chrome fix (Settings - System -
+"Use graphics acceleration when available" ON). The player's machine has been
+measured at 56-60 fps in a healthy Chrome on this same GPU (section 39).
+
+dev-picker-probe.mjs now 7/7 (adds: drag renders at the full rAF rate);
+dev-flight-probe.mjs 6/6 (the minimap check now verifies imagery is actually
+SHOWING at 3000 mph via a pixel readback - minimap canvas gained
+preserveDrawingBuffer for the readback, negligible at 200 px). 135/135 tests.

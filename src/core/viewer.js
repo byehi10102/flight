@@ -450,7 +450,7 @@ export function initMiniViewer(containerId) {
       useDefaultRenderLoop: false,
       skyBox: false,
       contextOptions: {
-        webgl: { powerPreference: "low-power" },
+        webgl: { powerPreference: "low-power", preserveDrawingBuffer: true },
       },
     });
     miniViewer.scene.skyAtmosphere.show = false;

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Picker quality probe: the map-browsing screen must be CRISP (flight-shed
  * resolution/detail restored on entry), render the globe at the capped rate,
  * and show the city labels. Runs headless with software GL like the other
@@ -71,6 +71,32 @@ const rate = await page.evaluate(() => new Promise((resolve) => {
   setTimeout(() => { v.render = orig; resolve(+(n / ((performance.now() - t0) / 1000)).toFixed(1)); }, 3000);
 }));
 check("picker globe render capped (<= 46/s)", rate <= 46, `${rate}/s (rAF-bound under software GL)`);
+
+// DRAG RESPONSIVENESS: while the map is dragged, the camera invalidates every
+// frame, so the globe must render at the full rAF rate (a flat cap would lag).
+// Real trusted input: Cesium calls setPointerCapture on pointerdown, which a
+// synthetic PointerEvent fails (no active pointer) and the drag never engages.
+await page.evaluate(() => {
+  const v = SKY_DEV.viewer;
+  window.__dragRenders = 0;
+  const orig = v.render.bind(v);
+  v.render = (...args) => { window.__dragRenders++; return orig(...args); };
+});
+const cvBox = await (await page.$("#cesiumContainer canvas")).boundingBox();
+await page.mouse.move(cvBox.x + cvBox.width / 2, cvBox.y + cvBox.height / 2);
+await page.mouse.down();
+for (let i = 0; i < 60; i++) {
+  await page.mouse.move(cvBox.x + cvBox.width / 2 - i * 8, cvBox.y + cvBox.height / 2);
+  await sleep(16);
+}
+await page.mouse.up();
+const dragRate = await page.evaluate(() => {
+  const r = +(window.__dragRenders / 2).toFixed(1);
+  const proto = Object.getPrototypeOf(SKY_DEV.viewer);
+  SKY_DEV.viewer.render = proto.render;
+  return r;
+});
+check("drag renders at the full rAF rate (responsive)", dragRate >= 25, `${dragRate}/s`);
 
 // The menu does not render the globe at all (covered backdrop)
 await page.evaluate(() => { location.reload(); });

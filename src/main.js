@@ -206,6 +206,12 @@ let maxGlobeQueue = 0; // largest tile queue seen during the globe stage
 let loadingPageHidden = false;
 let lastThrottledRender = 0;
 let lastPickerRender = 0;
+// Render-on-demand for the spawn picker: the map only re-renders when
+// something CHANGED (camera moved, tiles arrived) instead of every frame.
+// A drag renders at the full rAF rate (responsive); an idle map costs
+// almost nothing, which is also what lets its tiles finish fastest.
+let pickerNeedsRender = true;
+let pickerInvalidationHooks = null;
 
 // ── Preparing-flight phase (between SPAWN HERE and the camera dive) ─────────
 let preparingActive = false;
@@ -1112,6 +1118,21 @@ function enterSpawnPicking(useVignette = true) {
     // within seconds of flying if the device needs it.
     try { adaptivePerf.restoreFull(); } catch (e) { /* best-effort */ }
     setStreetsVisible(true);
+    // Render-on-demand invalidation sources (installed once):
+    //   - the camera moved (a drag pans => render at the full rAF rate),
+    //   - the tile queue changed (new imagery arrived => show it),
+    //   - a 300 ms idle fallback in the render loop catches the rest.
+    if (!pickerInvalidationHooks) {
+      pickerInvalidationHooks = true;
+      try {
+        viewer.camera.percentageChanged = 0.004;
+        viewer.camera.changed.addEventListener(() => { pickerNeedsRender = true; });
+      } catch (e) { /* older Cesium without camera.changed */ }
+      try {
+        viewer.scene.globe.tileLoadProgressEvent.addEventListener(() => { pickerNeedsRender = true; });
+      } catch (e) { /* streaming invalidation is best-effort */ }
+    }
+    pickerNeedsRender = true;
     showNotablePlaces();
     showUsaBounds();
     // Coming back from a crash (NEW LOCATION): show the full-screen film
@@ -2637,6 +2658,7 @@ function animate() {
   // PlaneModel.reset() at every spawn.
   if (currentState === States.MENU) {
     if (planeModel?.model) planeModel.model.visible = false;
+    maybeShowPerfNotice();
     if (menuEarth) {
       menuEarth.rotation.y += dt * MENU_EARTH_SPIN;
       menuEarth.visible = true;
@@ -2825,7 +2847,8 @@ function animate() {
   } else if (currentState === States.MENU) {
     // covered by the menu overlay - the globe would be rendered for nothing
   } else if (currentState === States.PICK_SPAWN) {
-    if (now - lastPickerRender > 25) {
+    if (pickerNeedsRender || now - lastPickerRender > 300) {
+      pickerNeedsRender = false;
       lastPickerRender = now;
       try { viewer.render(); } catch (e) { /* one bad frame never kills the loop */ }
     }
@@ -2834,6 +2857,43 @@ function animate() {
   }
 }
 
+// -- Low-performance notice ----------------------------------------------
+// A browser rendering the game in SOFTWARE (disabled hardware acceleration,
+// or a blocklisted GPU) runs the whole sim at a fraction of the speed no
+// code change can recover. Measured once, in the idle menu: if the median
+// frame is slower than 40 ms (< 25 fps) while the menu does almost nothing,
+// the BROWSER is the bottleneck - say so, with the exact fix. Shown once.
+let perfNoticeMeasured = false;
+function maybeShowPerfNotice() {
+  if (perfNoticeMeasured) return;
+  perfNoticeMeasured = true;
+  try { if (sessionStorage.getItem("skyward_perfnotice") === "1") return; } catch (e) { /* private mode */ }
+  const t0 = performance.now();
+  let last = t0;
+  const samples = [];
+  const tick = (t) => {
+    samples.push(t - last); last = t;
+    if (t - t0 < 3000 && currentState === States.MENU) requestAnimationFrame(tick);
+    else finishPerfNotice(samples);
+  };
+  requestAnimationFrame(tick);
+}
+function finishPerfNotice(samples) {
+  try {
+    samples.sort((a, b) => a - b);
+    const med = samples.length ? samples[samples.length >> 1] : 16.7;
+    if (med < 40) return; // 25+ fps while idle: the machine is fine
+    const el = document.createElement("div");
+    el.id = "perfNotice";
+    el.innerHTML = "      <b>LOW PERFORMANCE DETECTED</b>\r\n      <span>Your browser is likely rendering in software mode, which makes the game laggy no matter what. Fix: Chrome <b>Settings - System - \"Use graphics acceleration when available\" ON</b>, then restart Chrome. (Edge: same setting.)</span>\r\n      <button id=\"perfNoticeClose\">X</button>";
+    document.body.appendChild(el);
+    requestAnimationFrame(() => el.classList.add("show"));
+    el.querySelector("#perfNoticeClose").addEventListener("click", () => {
+      el.remove();
+      try { sessionStorage.setItem("skyward_perfnotice", "1"); } catch (e) { /* private mode */ }
+    });
+  } catch (e) { /* the notice is cosmetic */ }
+}
 // ── UI events ────────────────────────────────────────────────────────────────
 
 startBtn.addEventListener("click", () => {

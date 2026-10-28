@@ -62,7 +62,29 @@ const mini = await page.evaluate(() => ({
   speed: Math.round(SKY_DEV.state.speed),
   mainLoaded: SKY_DEV.viewer.scene.globe.tilesLoaded,
 }));
-check("minimap tiles stay LOADED at speed", mini.tilesLoaded === true, JSON.stringify(mini));
+// At 3000 mph the map view moves ~2.4 km/s: "every tile done" is never true
+// for a moving map. The real starvation test is whether imagery is actually
+// SHOWING - read the map canvas center pixels: blank (the old bug) reads as
+// a flat dark base color; loaded imagery has contrast.
+const miniPixels = await page.evaluate(() => {
+  const mv = SKY_DEV.miniViewer;
+  if (!mv) return { alive: false };
+  const gl = mv.canvas.getContext("webgl2") || mv.canvas.getContext("webgl");
+  if (!gl) return { alive: true, readback: "no-gl" };
+  const w = mv.canvas.width, h = mv.canvas.height;
+  const px = new Uint8Array(4 * 64 * 64);
+  gl.readPixels((w >> 1) - 32, (h >> 1) - 32, 64, 64, gl.RGBA, gl.UNSIGNED_BYTE, px);
+  let mn = 255, mx = 0;
+  for (let i = 0; i < px.length; i += 4) {
+    const v = (px[i] + px[i + 1] + px[i + 2]) / 3;
+    if (v < mn) mn = v;
+    if (v > mx) mx = v;
+  }
+  return { alive: true, contrast: mx - mn };
+});
+check("minimap SHOWS imagery at speed (no starvation)",
+  miniPixels.alive === true && miniPixels.contrast > 12,
+  JSON.stringify({ ...mini, contrast: miniPixels.contrast }));
 console.log("MINIMAP AT SPEED:", JSON.stringify(mini));
 await page.keyboard.up("w");
 
