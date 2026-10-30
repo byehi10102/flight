@@ -2196,3 +2196,22 @@ party is using gets an immediate `{ t: "error" }` frame and the client
 surfaces it in the UI instead of silently falling back to P2P limbo.
 
 ## 48. MP real-time feel: interp delay 66->20ms, live distance readout, bigger remote model
+
+## 49. Recent changes (sun in the sky + terrain shadows)
+
+The user wanted a visible bright sun and terrain self-shadowing. Added:
+
+- **Sun**: Cesium's Sun object now renders as a bright disc with atmospheric
+  glare (glowFactor 3.0) — visible in the sky when flying.
+- **Shadows**: terrain self-shadowing via Cesium's shadow map. Mountains
+  cast shadows on valleys. HIGH tier only: shadowMap 2048, softShadows,
+  maxDistance 8 km. LOW tier keeps unlit terrain (still sun-shaded via
+  enableLighting but no cast-shadow geometry — shadow maps are expensive on
+  integrated chips).
+
+The sun position is already pinned to permanent noon at the aircraft's
+longitude by setSunForTime() — so shadows are cast at a believable angle
+from overhead. The skyAtmosphere is restored on flight (removed during
+picker cheap-mode), giving the blue sky the sun sits against.
+
+137/137 tests, build clean.

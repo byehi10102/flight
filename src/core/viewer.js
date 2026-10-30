@@ -12,6 +12,7 @@
   LabelCollection,
   LabelStyle,
   NearFarScalar,
+  ShadowMode,
 } from "cesium";
 import "cesium/Build/Cesium/Widgets/widgets.css";
 import { CONFIG } from "./config.js";
@@ -187,6 +188,19 @@ export function applyBaseWorld(viewer) {
 
   viewer.scene.skyAtmosphere.hueShift = -0.02;
   viewer.scene.skyAtmosphere.saturationShift = -0.08;
+
+  // Sun: bright disc with atmospheric glare, visible in the sky.
+  viewer.scene.sun.show = true;
+  viewer.scene.sun.glowFactor = 3.0;
+
+  // Shadows: terrain self-shadowing (mountains cast shadows on valleys).
+  // HIGH tier only: shadow maps are a large per-frame cost on integrated
+  // chips. LOW keeps unlit terrain (still sun-shaded via enableLighting).
+  viewer.scene.shadowMap.enabled = profile.shadows;
+  viewer.scene.shadowMap.maximumDistance = 8000;
+  viewer.scene.shadowMap.size = profile.shadowMapSize;
+  viewer.scene.shadowMap.softShadows = true;
+  viewer.scene.globe.shadows = profile.shadows ? Cesium.ShadowMode.ENABLED : Cesium.ShadowMode.DISABLED;
 
   // Aerial haze, at the density flight.tarmizi.id ships (0.001, with the fog
   // colour pinned bright). Cesium scales the density down with camera height

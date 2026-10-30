@@ -37,6 +37,9 @@ const HIGH_PROFILE = Object.freeze({
   // the shipped detail, the rest are the sacrifice steps (detail before
   // pixels — the weak device needs fewer TILES, not just fewer pixels).
   sseLadder: [2, 4, 6],
+  // Terrain self-shadowing (sun casts mountain shadows on valleys).
+  shadows: true,
+  shadowMapSize: 2048,
   // Minimap render rate (a second globe render per frame is real money).
   minimapHz: 10,
   // Deepest imagery level the speed policy may ask for at low speed.
@@ -61,6 +64,8 @@ const LOW_PROFILE = Object.freeze({
   resolutionScale: 1,
   maximumScreenSpaceError: 4,
   sseLadder: [4, 6, 8],
+  shadows: false,
+  shadowMapSize: 0,
   minimapHz: 5,
   imageryFullLevel: 17,
 });
