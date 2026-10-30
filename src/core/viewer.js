@@ -1,4 +1,4 @@
-import {
+﻿import {
   Viewer,
   EllipsoidTerrainProvider,
   UrlTemplateImageryProvider,
@@ -450,7 +450,7 @@ export function initMiniViewer(containerId) {
       useDefaultRenderLoop: false,
       skyBox: false,
       contextOptions: {
-        webgl: { powerPreference: "low-power", preserveDrawingBuffer: true },
+        webgl: { powerPreference: "low-power" },
       },
     });
     miniViewer.scene.skyAtmosphere.show = false;

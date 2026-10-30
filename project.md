@@ -2107,3 +2107,29 @@ dev-picker-probe.mjs now 7/7 (adds: drag renders at the full rAF rate);
 dev-flight-probe.mjs 6/6 (the minimap check now verifies imagery is actually
 SHOWING at 3000 mph via a pixel readback - minimap canvas gained
 preserveDrawingBuffer for the readback, negligible at 200 px). 135/135 tests.
+
+## 44. Recent changes (the 2 fps root cause: two controller dead zones, fixed and verified)
+
+The instrumented repro finally isolated WHY the player's session sat at
+2 fps while the same build ran 56 fps in a fresh Chrome on the same machine.
+Two dead zones in the frame-budget controller, both now fixed:
+
+1. **The vsync estimate was clamped to a 20 ms ceiling** (an assumption that
+   every display reaches 50 Hz). Under software compositing the best
+   achievable frame is 24-29 ms, so the estimate pinned at 20, the too-slow
+   threshold computed to 30 ms, and 26-29 ms medians sat under it forever:
+   12 measured windows at scale 1.0 / SSE 4-6 on the slow path while the
+   healthy path shed to 0.5. The clamp is now the true 60 Hz budget (16.7 ms).
+2. **The minFrames guard made the controller fully inert below ~13 fps.** At
+   2 fps a 1.5 s window holds ~3 of the required 20 samples - exactly the
+   machines that need shedding most got none. New emergency path: with 3+
+   samples whose median exceeds 150 ms, shed straight to the floor (resolution
+   + detail) in one window; recovery stays gradual.
+
+Verified: the pure decision function no longer holds at the measured frame
+times (regression tests added), and the live software-compositing run now
+walks detail 4->6->8 then resolution 0.8 within 40 s and settles at 45 fps
+(previously: 12 windows stuck at scale 1.0 / 34-38 fps). On the player's
+2 fps session the emergency path reaches the floor in seconds. The residual
+difference vs a healthy Chrome is the browser's software rendering path
+(sections 39/43): chrome://gpu names it.

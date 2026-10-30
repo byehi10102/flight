@@ -71,7 +71,7 @@ export function decideFrameBudget(current, stats, opts = {}) {
   // Estimated vsync interval: the fastest frame we actually saw, clamped to a
   // sane 50-150 Hz band. Falls back to the fixed ceiling when nothing fast
   // was seen this window (a fully saturated device never produces one).
-  const vsync = Number.isFinite(min) && min > 0 ? Math.max(6.5, Math.min(20, min)) : o.highMs;
+  const vsync = Number.isFinite(min) && min > 0 ? Math.max(6.5, Math.min(16.7, min)) : o.highMs;
   const downT = vsync * 1.5;                       // clearly missing the budget
   const upT = Math.max(o.lowMs, vsync * 1.08);     // pinned at vsync = headroom
   const severe = median > vsync * 2.5;             // 2-5 fps territory
@@ -148,7 +148,23 @@ export class AdaptivePerformance {
     const sorted = [...this.samples].sort((a, b) => a - b);
     this.samples.length = 0;
     this.sampleStart = nowMs;
-    if (n < this.opts.minFrames) return this.scale;
+    if (n < this.opts.minFrames) {
+      // EMERGENCY SHED: at 1-5 fps a window holds only a handful of frames -
+      // below minFrames, which made the controller fully inert on exactly the
+      // machines that need shedding most (measured: 2 fps locked at scale 1.0
+      // / SSE 4 forever). If the few frames we DID see are all extreme, act
+      // on them immediately: straight to the floor. Recovery is normal -
+      // fast windows step the quality back up.
+      const med = sorted.length ? sorted[sorted.length >> 1] : 0;
+      if (med > 150) {
+        this.scale = this.opts.minScale;
+        const ladder = this.opts.sseLadder || PERF_DEFAULTS.sseLadder;
+        this.sseIndex = ladder.length - 1;
+        this.lastReason = "emergency";
+        this.apply();
+      }
+      return this.scale;
+    }
 
     const stats = {
       medianMs: sorted[n >> 1],

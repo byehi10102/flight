@@ -75,6 +75,40 @@ test("non-finite frame times are ignored by the rule", () => {
   assert.equal(r.reason, "no-data");
 });
 
+
+// ── Regression: the software-compositing dead band (measured on the player's
+// machine: 12 straight windows at scale 1.0 / SSE 4-6 while a fresh Chrome
+// shed to 0.5). The fastest frame on that path is ~25 ms; the old 20 ms
+// vsync clamp pushed the too-slow threshold to 30 ms and nothing ever shed.
+
+test("35 fps on a software path (median 28 / min 25) sheds detail then pixels", () => {
+  const opts = { sseLadder: [4, 6, 8] };
+  let s = { scale: 1, sseIndex: 0 };
+  s = decideFrameBudget(s, { medianMs: 28, minMs: 25 }, opts);
+  assert.equal(s.sseIndex, 1, "window 1: detail steps first");
+  s = decideFrameBudget(s, { medianMs: 28, minMs: 25 }, opts);
+  assert.equal(s.sseIndex, 2, "window 2: ladder exhausts");
+  s = decideFrameBudget(s, { medianMs: 28, minMs: 25 }, opts);
+  assert.ok(s.scale < 1, "window 3: pixels shed once detail is at the floor");
+});
+
+test("the emergency shed acts on a handful of extreme frames (2 fps session)", () => {
+  // Default opts: windowMs 1500, minFrames 20. At 2 fps a window closes
+  // with ~3 samples - below minFrames, where the old controller abstained
+  // forever. The few frames are all extreme (300 ms), so it must go to the
+  // floor immediately.
+  const perf = new AdaptivePerformance({
+    viewer: { resolutionScale: 1, scene: { globe: { maximumScreenSpaceError: 4 } } },
+    renderer: { setPixelRatio() {} },
+  });
+  perf.sample(300, 0);
+  perf.sample(300, 800);
+  perf.sample(300, 1600); // window closes here with 3 of 20 frames
+  assert.equal(perf.scale, PERF_DEFAULTS.minScale, "resolution at the floor");
+  assert.equal(perf.report().sse, PERF_DEFAULTS.sseLadder[PERF_DEFAULTS.sseLadder.length - 1], "detail at the floor");
+  assert.equal(perf.report().reason, "emergency");
+});
+
 function makeSurfaces() {
   const viewer = {
     resolutionScale: 1,
