@@ -296,14 +296,20 @@ export function initMp(ctx) {
    * (Trystero/Nostr) when no server is reachable. Both speak the same Net
    * surface, so nothing downstream changes — only latency does.
    */
-  async function makeNet(code) {
+  async function makeNet(code, isHost = false) {
     const ws = new WsNet();
     attachHandlers(ws);
     try {
-      await ws.connect(code, myCallsign());
+      await ws.connect(code, myCallsign(), isHost);
       setStatus(ui.wrDiag, "REAL-TIME SERVER connected — lowest latency path.", "ok");
       return ws;
     } catch (e) {
+      // The server rejected the join (party does not exist): do NOT fall
+      // back to P2P - the party does not exist there either.
+      if (ws.status === "error" && ws.error && ws.error.includes("party")) {
+        try { await ws.leave(); } catch (e2) { /* best effort */ }
+        throw e;
+      }
       // No reachable server: tear the half-open socket down, go peer-to-peer.
       try { await ws.leave(); } catch (e2) { /* best effort */ }
       console.info("[mp] no real-time server at", ws.serverUrl, "— falling back to P2P:", e.message);
@@ -326,7 +332,7 @@ export function initMp(ctx) {
     partyName = "PARTY";
     setStatus(ui.wrStatusEl, `Party created — code ${roomCode}. Waiting for Player 2…`, "ok");
     try {
-      net = await makeNet(roomCode);
+      net = await makeNet(roomCode, true);
       net.worldSpeedScale = ctx.worldSpeedScale;
       // The WS welcome roster can deliver the peer DURING makeNet — before
       // this assignment — so re-render the lobby from the real transport.

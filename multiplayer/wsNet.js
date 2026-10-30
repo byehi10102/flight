@@ -103,8 +103,9 @@ export class WsNet {
    * Resolves when the socket is open and the room joined; rejects on failure
    * so index.js can fall back to the P2P path.
    */
-  connect(code, callsign) {
+  connect(code, callsign, isHost = false) {
     this.code = code;
+    this._isHost = isHost;
     this.callsign = (callsign || "PILOT").slice(0, 14);
     this.serverUrl = resolveServerUrl();
     let url;
@@ -112,6 +113,7 @@ export class WsNet {
       url = toWsUrl(this.serverUrl);
       url.searchParams.set("code", code);
       url.searchParams.set("name", this.callsign);
+      if (isHost) url.searchParams.set("host", "1");
     } catch (e) {
       return Promise.reject(new Error("bad server url"));
     }
@@ -251,6 +253,11 @@ export class WsNet {
         break;
       }
       case "bk": this._emit("onBack"); break;
+      case "error":
+        // The server rejected the join (party does not exist).
+        this._setStatus("error", msg.d || "party not found");
+        try { this._ws.close(); } catch (e) { /* already closing */ }
+        break;
       case "go": this._emit("onGo", msg.from, msg.d); break;
       case "ln": this._emit("onLaunch", msg.from, msg.d); break;
       case "bl": this._emit("onBullet", msg.from, msg.d); break;

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Skyward multiplayer server — Express + Socket.IO.
  *
  * Responsibilities:
@@ -293,19 +293,26 @@ wss.on("connection", (ws, query) => {
     return;
   }
   const callsign = sanitizeCallsign(query.get("name"));
+  const isHost = query.get("host") === "1";
 
-  // Symmetric create-on-join: the first arrival materialises the room with
-  // the code the game generated — the wire has no host/join asymmetry.
+  // Host creates the room; a joiner requires an existing room.
   let room = rooms.get(code);
+  if (!isHost && !room) {
+    ws.send(JSON.stringify({ t: "error", d: "That party code does not exist." }));
+    ws.close(4002, "party not found");
+    return;
+  }
+  if (room && room.players.size >= MAX_PLAYERS_PER_ROOM) {
+    ws.close(4001, "room full");
+    return;
+  }
   if (!room) {
     room = { code, createdAt: Date.now(), players: new Map() };
     rooms.set(code, room);
     console.log(`[ws ${code}] created by ${callsign}`);
-  } else if (room.players.size >= MAX_PLAYERS_PER_ROOM) {
-    ws.close(4001, "room full");
-    return;
   }
 
+  // Symmetric create-on-join: the first arrival materialises the room with
   const player = { id, callsign, joinedAt: Date.now(), lastTelemetryAt: 0, state: null, ws };
   room.players.set(id, player);
 

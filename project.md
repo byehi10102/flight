@@ -2172,3 +2172,25 @@ sampler nor a resident tile provides a real height, the sub-sample is SKIPPED
 (no terrain data = can't crash there). The plane can only crash when actual
 terrain geometry exists beneath it. The AGL/GPWS paths keep their own
 fallbacks (they are readouts, not crash triggers).
+
+## 47. Recent changes (menu backdrop fix, MP host/join distinction, party-not-found)
+
+### Menu backdrop: the boot warm-up's last frame was stuck behind the menu
+
+The menu is translucent - it shows the Cesium canvas behind it. The boot
+preload parks the camera at ground level over Anaheim to warm tiles, then
+restores initialCameraView (space view) - but a "menu skips the globe"
+optimisation meant the canvas KEPT the last warm-up frame (ground-level
+satellite imagery) behind the translucent menu. The globe now renders
+normally in the menu: at the initial camera view (from space) there are no
+detail tiles, so the render is cheap - and the backdrop is the spinning
+Earth + stars as designed.
+
+### Multiplayer: host/joiner distinction on the WS path
+
+The WS relay used symmetric create-on-join (the first arrival materialises
+the room), which means typing a random code created an empty room and the
+joiner waited in it forever. Now the host passes `host=1` in the WS URL;
+the server only creates rooms for hosts. A joiner typing a code that no
+party is using gets an immediate `{ t: "error" }` frame and the client
+surfaces it in the UI instead of silently falling back to P2P limbo.

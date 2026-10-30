@@ -2860,8 +2860,6 @@ function animate() {
       lastThrottledRender = now;
       try { viewer.render(); } catch (e) { /* one bad frame never kills the loop */ }
     }
-  } else if (currentState === States.MENU) {
-    // covered by the menu overlay - the globe would be rendered for nothing
   } else if (currentState === States.PICK_SPAWN) {
     if (pickerNeedsRender || now - lastPickerRender > 300) {
       pickerNeedsRender = false;
