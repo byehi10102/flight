@@ -2597,8 +2597,16 @@ function checkCrash() {
     try {
       const cartographic = Cesium.Cartographic.fromDegrees(lon, lat);
       const terrainHeight = viewer.scene.globe.getHeight(cartographic);
-      ground = groundSampler.get(lat, lon, terrainHeight ?? state.alt);
+      // NaN fallback: if neither the sampler cache nor a resident tile has
+      // a height for this point, we have NO terrain data here. The old
+      // code fell back to state.alt, making state.alt <= state.alt + 5
+      // always true (a phantom crash into unloaded terrain).
+      ground = groundSampler.get(lat, lon, NaN);
+      if (!Number.isFinite(ground) && typeof terrainHeight === "number" && Number.isFinite(terrainHeight)) {
+        ground = terrainHeight;
+      }
     } catch (e) { continue; }
+    if (!Number.isFinite(ground)) continue; // no terrain data here, skip
     if (state.alt <= ground + 5) { hitGround = ground; break; }
   }
   if (hitGround === null) return;

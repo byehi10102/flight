@@ -2155,3 +2155,20 @@ dev-picker-probe.mjs 8/8: adds drag-renders-track-input (was the flat-cap
 regression) and first-move-after-idle latency (was the 300 ms dead lag).
 dev-flight-probe.mjs 6/6. 137/137 tests. The minimap canvas carries
 preserveDrawingBuffer for the probe pixel readback (negligible at 200 px).
+
+## 46. Recent changes (phantom crash fix: no terrain data = no crash)
+
+The player reported crashing "when I haven't actually hit anything." Root
+cause: the crash sweep in checkCrash() fell back to `state.alt` when neither
+the ground sampler cache nor a resident terrain tile had a height for the
+sampled point. `state.alt <= state.alt + 5` is always true — a phantom crash
+into terrain that has not loaded yet. This happened when:
+- spawning at a non-default location where terrain tiles haven't streamed in,
+- flying at speed into an area whose tiles are still in flight,
+- the tile cache evicting terrain tiles under a fast-moving jet.
+
+Fix: the crash sweep now uses NaN as the height fallback. If neither the
+sampler nor a resident tile provides a real height, the sub-sample is SKIPPED
+(no terrain data = can't crash there). The plane can only crash when actual
+terrain geometry exists beneath it. The AGL/GPWS paths keep their own
+fallbacks (they are readouts, not crash triggers).
