@@ -2194,3 +2194,5 @@ joiner waited in it forever. Now the host passes `host=1` in the WS URL;
 the server only creates rooms for hosts. A joiner typing a code that no
 party is using gets an immediate `{ t: "error" }` frame and the client
 surfaces it in the UI instead of silently falling back to P2P limbo.
+
+## 48. MP real-time feel: interp delay 66->20ms, live distance readout, bigger remote model

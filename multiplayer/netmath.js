@@ -158,5 +158,9 @@ export function convergeStep(shown, target, dtMs, { epsM = 30, ratePerS = 6 } = 
 export function adaptiveDelay(intervalMs, jitterMs) {
   const interval = Number.isFinite(intervalMs) && intervalMs > 0 ? intervalMs : 33;
   const jitter = Number.isFinite(jitterMs) && jitterMs > 0 ? jitterMs : 0;
-  return Math.max(66, Math.min(250, 2 * interval + jitter));
+  // Floor lowered 66 -> 20: the WS transport on a LAN has < 5 ms RTT and
+  // negligible jitter. A 66 ms buffer was adding a perceptible lag to every
+  // remote-plane movement, making the other plane feel frozen. 20 ms is
+  // still enough to always have a bracketing snapshot pair at 30 Hz.
+  return Math.max(20, Math.min(250, 2 * interval + jitter));
 }

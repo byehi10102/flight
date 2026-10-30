@@ -183,10 +183,10 @@ export class RemotePlanes {
         model: {
           uri: MODEL_URI,
           color: colour,
-          minimumPixelSize: 48,
+          minimumPixelSize: 64,
           maximumScale: 40000,
           silhouetteColor: Cesium.Color.BLACK,
-          silhouetteSize: 1.0,
+          silhouetteSize: 1.5,
         },
       });
       plane.labelEntity = this.viewer.entities.add({
@@ -446,6 +446,18 @@ export class RemotePlanes {
         }
         if (plane.labelEntity) {
           plane.labelEntity.position = Cesium.Cartesian3.fromDegrees(pose.lon, pose.lat, pose.alt);
+          // Live distance readout: proves the other plane is moving even
+          // when both are at cruise (zero relative velocity reads as frozen).
+          try {
+            const cam = this.viewer.camera.positionCartographic;
+            if (cam) {
+              const dc = Math.hypot(
+                (pose.lon - Cesium.Math.toDegrees(cam.longitude)) * 111320 * Math.cos(cam.latitude),
+                (pose.lat - Cesium.Math.toDegrees(cam.latitude)) * 111320
+              );
+              plane.labelEntity.label.text = plane.callsign + (dc > 1000 ? " · " + (dc / 1000).toFixed(1) + " km" : " · " + dc.toFixed(0) + " m");
+            }
+          } catch (e) { /* cosmetic */ }
           if (plane.leaving) {
             plane.labelEntity.label.fillColor = plane.colour.withAlpha(
               Math.max(0, plane.fadeT / FADE_OUT_S)
