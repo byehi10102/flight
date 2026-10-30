@@ -98,6 +98,30 @@ const dragRate = await page.evaluate(() => {
 });
 check("drag renders at the full rAF rate (responsive)", dragRate >= 25, `${dragRate}/s`);
 
+// FIRST-MOVE LATENCY: after an idle stretch, the first pointer input must
+// produce a render almost immediately (input invalidation), not wait for
+// the 300 ms idle fallback - the "map moves a second late" regression guard.
+const firstMove = await page.evaluate(() => new Promise((resolve) => {
+  const v = SKY_DEV.viewer;
+  const orig = v.render.bind(v);
+  let inputAt = 0, renderAt = -1;
+  v.render = (...args) => {
+    if (inputAt > 0 && renderAt < 0) renderAt = performance.now();
+    return orig(...args);
+  };
+  setTimeout(() => {
+    inputAt = performance.now();
+    const cv = document.querySelector("#cesiumContainer canvas");
+    cv.dispatchEvent(new PointerEvent("pointermove", { clientX: 400, clientY: 300, pointerId: 9, isPrimary: true, bubbles: true, pointerType: "mouse" }));
+  }, 900); // idle longer than the 300 ms fallback
+  const poll = setInterval(() => {
+    if (renderAt > 0) { clearInterval(poll); v.render = orig; resolve(+(renderAt - inputAt).toFixed(1)); }
+  }, 4);
+  setTimeout(() => { clearInterval(poll); v.render = orig; resolve(-1); }, 4000);
+}));
+const firstMoveOk = firstMove > 0 && firstMove < 120;
+check("first move after idle renders fast (no dead lag)", firstMoveOk, `${firstMove} ms after input`);
+
 // The menu does not render the globe at all (covered backdrop)
 await page.evaluate(() => { location.reload(); });
 await page.waitForFunction(() => window.SKY_DEV, { timeout: 60000, polling: 500 });

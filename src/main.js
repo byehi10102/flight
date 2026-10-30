@@ -1133,6 +1133,14 @@ function enterSpawnPicking(useVignette = true) {
       } catch (e) { /* streaming invalidation is best-effort */ }
     }
     pickerNeedsRender = true;
+    // The map is the only thing streaming while browsing - open the request
+    // pipe wider so pans into NOT-preloaded areas fill fast (restored on
+    // flight, where the jet stream needs the budget back).
+    try {
+      Cesium.RequestScheduler.maximumRequests = 160;
+      const imageryHost = new URL(CONFIG.imagery.url).host + ":443";
+      Cesium.RequestScheduler.requestsByServer[imageryHost] = 64;
+    } catch (e) { /* best-effort */ }
     showNotablePlaces();
     showUsaBounds();
     // Coming back from a crash (NEW LOCATION): show the full-screen film

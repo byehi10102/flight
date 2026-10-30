@@ -2133,3 +2133,25 @@ walks detail 4->6->8 then resolution 0.8 within 40 s and settles at 45 fps
 2 fps session the emergency path reaches the floor in seconds. The residual
 difference vs a healthy Chrome is the browser's software rendering path
 (sections 39/43): chrome://gpu names it.
+
+## 45. Recent changes (picker drag: input invalidation, cheap scene, wider pipe)
+
+The picker drag felt delayed ("a second before the map moves") and tiles
+streamed visibly while panning. Three causes, all fixed:
+
+1. **Input did not invalidate the render.** The camera is updated INSIDE
+   viewer.render(), so camera.changed could only fire after a render — after
+   an idle stretch the first drag waited for the 300 ms idle fallback before
+   the map moved. Pointer events on the canvas now set pickerNeedsRender
+   directly, so the first move renders on the next frame.
+2. **The picker scene ran at full flight cost** (atmosphere dome, fog,
+   per-fragment sun shading) for a top-down map that reads identically
+   without them. Cheap-mode on picker entry; restored on flight start.
+3. **Non-preloaded pans streamed slowly**: the request scheduler budget was
+   flight-sized (96 global / 40 per server). While browsing the map it
+   widens to 160 / 64 so pans into new areas fill fast; restored on flight.
+
+dev-picker-probe.mjs 8/8: adds drag-renders-track-input (was the flat-cap
+regression) and first-move-after-idle latency (was the 300 ms dead lag).
+dev-flight-probe.mjs 6/6. 137/137 tests. The minimap canvas carries
+preserveDrawingBuffer for the probe pixel readback (negligible at 200 px).
