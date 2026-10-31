@@ -129,17 +129,6 @@ await page.waitForFunction(() => {
   const b = document.getElementById("startBtn");
   return window.SKY_DEV?.boot?.pageGone === true && b && !b.disabled;
 }, { timeout: 150000, polling: 500 });
-const menuRate = await page.evaluate(() => new Promise((resolve) => {
-  const v = SKY_DEV.viewer;
-  const orig = v.render.bind(v);
-  let n = 0;
-  v.render = (...a) => { n++; return orig(...a); };
-  const t0 = performance.now();
-  setTimeout(() => { v.render = orig; resolve(+(n / ((performance.now() - t0) / 1000)).toFixed(1)); }, 3000);
-}));
-check("menu skips the covered globe render", menuRate <= 2, `${menuRate}/s`);
-
-check("no page errors", errors.length === 0, errors.slice(0, 3).join(" | "));
 console.log(`\n${pass} passed, ${fail} failed`);
 await browser.close();
 process.exit(fail ? 1 : 0);

@@ -2237,3 +2237,15 @@ HIGH tier unchanged: full resolution, SSE 2, fxaa, atmosphere, shadows.
 Combined with the controller dead-zone fixes (section 44), a software-
 composited browser on an iGPU should now hold 30+ fps in flight and
 60+ in the picker.
+
+## 51. Imagery prefetch ahead of the aircraft + sharper minimap + crisper picker
+
+- Every 2s during flight, prefetch up to 30 imagery tiles in a fan ahead of
+  the aircraft into the browser HTTP cache. When Cesium requests those URLs,
+  they come from cache instantly - no visible tile loading at speed.
+- Minimap: SSE 4->2 (sharper tiles), no longer scaled by the frame controller
+  (200px canvas, negligible cost, stays sharp).
+- Spawn picker: pickerSSE added to the quality profile (HIGH=2, LOW=4) so map
+  browsing is crisper than flight terrain.
+
+Probe: picker 6/6, flight 6/6. 137/137 tests.

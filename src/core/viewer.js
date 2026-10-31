@@ -477,7 +477,7 @@ export function initMiniViewer(containerId) {
     // the map sat empty for whole flights (measured). SSE 4 picks levels the
     // map actually needs; MAX_LEVEL 13 above keeps every request coarse
     // enough to arrive. Native-DPR rendering still un-blurs it on HiDPI.
-    miniViewer.scene.globe.maximumScreenSpaceError = 4;
+    miniViewer.scene.globe.maximumScreenSpaceError = 2;
     miniViewer.scene.globe.tileCacheSize = 200;
     try {
       // Full device-pixel rendering (no browser-recommended downscale) —

@@ -200,7 +200,7 @@ export class AdaptivePerformance {
     } catch (e) { /* detail ladder is best-effort */ }
     try {
       const mv = this.getMiniViewer();
-      if (mv) mv.resolutionScale = s;
+      // minimap stays sharp: 200 px, controller shedding does not apply
     } catch (e) { /* minimap is cosmetic */ }
     try {
       // The overlay canvas is full-screen and transparent: the browser pays

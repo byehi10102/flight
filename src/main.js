@@ -838,6 +838,11 @@ viewer.camera.moveEnd.addEventListener(() => {
       }
     }
     groundSampler.seed(pts).catch(() => {});
+    imageryPrefetchTimer += dt;
+    if (imageryPrefetchTimer >= 2) {
+      imageryPrefetchTimer = 0;
+      prefetchImageryAhead();
+    }
   } catch (e) { /* warm-up is best-effort */ }
 });
 
@@ -2331,6 +2336,55 @@ function update(dt) {
       groundSampler.seed(pts).catch(() => {});
     }
   } catch (e) { /* preload is best-effort */ }
+
+  // ── Imagery prefetch: fetch satellite tiles AHEAD of the aircraft into
+  // the browser HTTP cache, so when Cesium requests them the tiles appear
+  // instantly. This is what eliminates visible tile loading at speed —
+  // the DEM fan covers elevation, this covers the imagery you SEE.
+  let imageryPrefetchTimer = 0;
+  const imageryPrefetchSet = new Set();
+  function prefetchImageryAhead() {
+    try {
+      const gs = (state.speed || 250) * MPH_TO_MPS * WORLD_SPEED_SCALE;
+      const level = imageryLevelForSpeed(state.speed, { fullLevel: getQualityProfile().imageryFullLevel });
+      const n = Math.pow(2, level);
+      const lead = Math.min(40000, Math.max(8000, gs * 4));
+      const latR = state.lat * Math.PI / 180;
+      const heading = (state.heading || 0) * Math.PI / 180;
+      // tile coords for the aircraft's current position
+      const tileN = Math.pow(2, level);
+      const tx = Math.floor((state.lon + 180) / 360 * tileN);
+      const ty = Math.floor((1 - Math.log(Math.tan(latR) + 1 / Math.cos(latR)) / Math.PI) / 2 * tileN);
+      // tile angular size at this level
+      const tileDeg = 360 / tileN;
+      // prefetch a 5x7 grid ahead (covering the lead distance and some width)
+      const host = "https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/";
+      const now = Date.now();
+      let fetched = 0;
+      for (let step = 0; step <= 4; step++) {
+        const d = (lead * step) / 4;
+        const nlat = state.lat + Math.cos(heading) * d / 111320;
+        const nlon = state.lon + Math.sin(heading) * d / (111320 * Math.max(0.2, Math.cos(latR)));
+        const ntx = Math.floor((nlon + 180) / 360 * tileN);
+        const nty = Math.floor((1 - Math.log(Math.tan(nlat * Math.PI / 180) + 1 / Math.cos(nlat * Math.PI / 180)) / Math.PI) / 2 * tileN);
+        for (let dx = -2; dx <= 2; dx++) {
+          for (let dy = -1; dy <= 1; dy++) {
+            const px = ntx + dx, py = nty + dy;
+            if (px < 0 || px >= tileN || py < 0 || py >= tileN) continue;
+            const key = level + "/" + py + "/" + px;
+            if (imageryPrefetchSet.has(key)) continue;
+            imageryPrefetchSet.add(key);
+            const url = host + level + "/" + py + "/" + px;
+            fetch(url).catch(() => {});
+            fetched++;
+            if (fetched > 30) return; // cap per call
+          }
+        }
+      }
+      // prevent unbounded growth
+      if (imageryPrefetchSet.size > 2000) imageryPrefetchSet.clear();
+    } catch (e) { /* prefetch is best-effort */ }
+  }
 
   // Pin drop: the spawn pin stays hidden through the dive and pops in once
   // the jet is 100 ft out, marking the exact launch point behind you.
