@@ -2215,3 +2215,25 @@ from overhead. The skyAtmosphere is restored on flight (removed during
 picker cheap-mode), giving the blue sky the sun sits against.
 
 137/137 tests, build clean.
+
+## 50. Recent changes (LOW tier aggressively lightened for cheap devices)
+
+The player on an Intel Arc iGPU with software-composited Chrome was at
+14 fps even after the controller fixes. The LOW tier was still too heavy:
+it rendered at full resolution, detailed terrain, with fxaa and atmosphere.
+The tier is now MUCH lighter:
+
+- resolutionScale 0.75 (44% fewer pixels rendered AND composited)
+- pixelRatioCap 1.0 (no HiDPI rendering on weak devices)
+- maximumScreenSpaceError 8, sseLadder [8, 12, 16] (much coarser terrain)
+- fxaa off (no post-processing pass)
+- atmosphere off (no atmospheric scattering pass)
+- tileCacheSize 300 (half the GPU texture memory)
+- loadingDescendantLimit 16 (fewer concurrent tile fetches)
+- minimapHz 3 (barely animating map)
+- imageryFullLevel 15 (shallower imagery)
+
+HIGH tier unchanged: full resolution, SSE 2, fxaa, atmosphere, shadows.
+Combined with the controller dead-zone fixes (section 44), a software-
+composited browser on an iGPU should now hold 30+ fps in flight and
+60+ in the picker.

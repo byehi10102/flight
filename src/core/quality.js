@@ -44,6 +44,8 @@ const HIGH_PROFILE = Object.freeze({
   minimapHz: 10,
   // Deepest imagery level the speed policy may ask for at low speed.
   imageryFullLevel: 19,
+  atmosphere: true,
+  fxaa: true,
 });
 
 const LOW_PROFILE = Object.freeze({

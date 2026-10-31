@@ -200,7 +200,7 @@ export function applyBaseWorld(viewer) {
   viewer.scene.shadowMap.maximumDistance = 8000;
   viewer.scene.shadowMap.size = profile.shadowMapSize;
   viewer.scene.shadowMap.softShadows = true;
-  viewer.scene.globe.shadows = profile.shadows ? Cesium.ShadowMode.ENABLED : Cesium.ShadowMode.DISABLED;
+  viewer.scene.globe.shadows = profile.shadows ? ShadowMode.ENABLED : ShadowMode.DISABLED;
 
   // Aerial haze, at the density flight.tarmizi.id ships (0.001, with the fog
   // colour pinned bright). Cesium scales the density down with camera height
