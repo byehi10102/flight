@@ -2249,3 +2249,12 @@ composited browser on an iGPU should now hold 30+ fps in flight and
   browsing is crisper than flight terrain.
 
 Probe: picker 6/6, flight 6/6. 137/137 tests.
+
+## 52. Recent changes (controller hysteresis: no more fps oscillation)
+
+The player reported fps jumping from 2 to 30 and back - the controller was
+oscillating: shed -> recover too fast -> overshoot -> shed again. Fixed with
+hysteresis: after any shed, recovery is blocked for 5 seconds (10 seconds
+after an emergency shed). During cooldown, only further shedding is allowed.
+This lets the fps stabilise at the shed quality before any quality is
+handed back, eliminating the oscillation.

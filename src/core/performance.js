@@ -161,6 +161,7 @@ export class AdaptivePerformance {
         const ladder = this.opts.sseLadder || PERF_DEFAULTS.sseLadder;
         this.sseIndex = ladder.length - 1;
         this.lastReason = "emergency";
+        this._shedCooldown = 10;
         this.apply();
       }
       return this.scale;
@@ -171,6 +172,26 @@ export class AdaptivePerformance {
       minMs: sorted[0],
     };
     this.lastAvgMs = stats.medianMs;
+    // Hysteresis: after shedding, block recovery for a dwell period so the
+    // fps stabilises before quality is handed back. Without it the
+    // controller oscillates: shed -> recover too fast -> overshoot -> shed.
+    if (this._shedCooldown > 0) {
+      this._shedCooldown -= this.opts.windowMs / 1000;
+      // During cooldown: only shed further, never recover.
+      if (stats.medianMs > 20) {
+        const next2 = decideFrameBudget(
+          { scale: this.scale, sseIndex: this.sseIndex },
+          stats, this.opts,
+        );
+        if (next2.scale < this.scale || next2.sseIndex > this.sseIndex) {
+          this.scale = next2.scale;
+          this.sseIndex = next2.sseIndex;
+          this.lastReason = next2.reason;
+          this.apply();
+        }
+      }
+      return this.scale;
+    }
     const next = decideFrameBudget(
       { scale: this.scale, sseIndex: this.sseIndex },
       stats,
@@ -178,6 +199,9 @@ export class AdaptivePerformance {
     );
     this.lastReason = next.reason;
     if (Math.abs(next.scale - this.scale) > 0.005 || next.sseIndex !== this.sseIndex) {
+      if (next.scale < this.scale || next.sseIndex > this.sseIndex) {
+        this._shedCooldown = 5; // dwell: no recovery for 5 s after a shed
+      }
       this.scale = next.scale;
       this.sseIndex = next.sseIndex;
       this.apply();
