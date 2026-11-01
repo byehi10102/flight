@@ -2297,3 +2297,43 @@ BEFORE: 8.6 fps, browser gap 111.6 ms/frame.
 AFTER:  37 fps sustained (in-game FPS readout 27), gap 34.9 ms,
         controller trail stable 36-40 fps, no oscillation.
 Probes: perf GREEN, flight 6/6, picker 6/6, tests 137/137.
+
+## 54. Tiles before they are needed: spawn radius + picker pan + flight ring
+
+User report: still laggy, picker not responsive, tiles still visibly
+loading; asked for tiles in a larger radius around the spawn point to be
+pre-loaded.
+
+Diagnosis first (measured, not guessed):
+- The picker's drag stall was NOT render cost: renders are ~3 ms submission
+  and the drag cadence hit 59 fps. The stall was tile STREAMING cache misses
+  landing as ~171 ms p95 frame gaps. So: prefetch, not cheaper rendering.
+- Experiments that made the picker WORSE (reverted with evidence):
+  res 0.5 dropped the drag to ~12 renders/s, and SSE 8 invalidated the
+  boot-warmed tile set (terrain re-refines during the drag, first-move
+  latency 200 ms). The picker keeps full resolution at tier-base SSE.
+- At cruise the detail policy asks level 17 (0.24 km tiles) - a "large
+  radius" at that depth is tens of thousands of tiles. The visible fix is
+  the PARENT CHAIN: Cesium falls back to cached ancestor tiles the moment
+  it has them, so cached coarse levels over a wide radius is the
+  difference between brown ground and sharpen-in-place.
+
+Three prefetch paths, one shared HTTP-cache dedupe set (imageryPrefetchSet,
+hoisted to module scope - it had been trapped inside update(), which would
+have been a runtime ReferenceError for the new module-level callers):
+
+1. SPAWN RADIUS (the ask): confirmSpawn() now calls preloadSpawnImagery() -
+   levels 12+13 over a 30 km radius, level 14 over 9 km, level 15 over
+   4 km around the chosen point (~400 tiles, ~6 MB), staggered 24 per
+   350 ms so the pipe stays responsive for the spawn dive. Rides the
+   preparing film; whatever is unfinished keeps streaming into early flight.
+2. PICKER PAN: camera.changed (throttled 400 ms, idle-rearm so the first
+   move never shares its frame with fetches) prefetches the visible level
+   around the view center - level derived from camera height.
+3. FLIGHT MID RING: the existing ahead-fan gained a coarse ring
+   (level-2, 15 km square, capped 24/tick) around the aircraft, killing
+   the mid-distance tile loading the player sees at speed.
+
+Verified (dev-prefetch-verify.mjs): picker drag1 fetched 38-62 tiles,
+warm re-drag 0-6 (cache hit); 411 tiles during spawn preparing; 105-249
+during 15 s cruise. Picker probe 6/6, flight 6/6, 137/137 tests.

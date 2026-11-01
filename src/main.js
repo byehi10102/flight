@@ -1,4 +1,4 @@
-import * as THREE from "three";
+﻿import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import * as Cesium from "cesium";
 import "cesium/Build/Cesium/Widgets/widgets.css";
@@ -33,7 +33,7 @@ const States = {
 let currentState = States.MENU;
 
 // Flight speeds are MPH throughout (250 hands-off cruise, 3000 with W held,
-// 7000 in boost — boost is the only way past 3000); world movement needs m/s.
+// 7000 in boost â€” boost is the only way past 3000); world movement needs m/s.
 // WORLD_SPEED_SCALE is the arcade lever: HUD still shows true MPH, but the jet
 // covers tiles 1.8x faster so the top speeds feel like they should.
 const MPH_TO_MPS = 0.44704;
@@ -70,15 +70,15 @@ const state = {
   spawnLon: null,
   spawnLat: null,
   // Dynamic minimap zoom: the map's view altitude, smoothed toward
-  // computeMinimapZoomAltitude(AGL) every frame — no manual range setting.
-  // 2400 m ≈ the view at a 1500 m spawn AGL.
+  // computeMinimapZoomAltitude(AGL) every frame â€” no manual range setting.
+  // 2400 m â‰ˆ the view at a 1500 m spawn AGL.
   minimapZoom: 2400,
   // Single smoothed heading feeding BOTH the real-map camera and the canvas
   // overlay, so the two can never disagree mid-turn (ref-flight parity).
   minimapHeading: 0,
 };
 
-// ── Three.js overlay ─────────────────────────────────────────────────────────
+// â”€â”€ Three.js overlay â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 let scene, camera, renderer, threeContainer;
 let planeModel;
 // Wing vapor + wingtip vortices (ref-flight), built once the model exists.
@@ -87,7 +87,7 @@ let aeroEffects = null;
 // Poly archive via poly.pizza), slowly spinning behind the menu buttons.
 // Loaded onto render layer 1 like the jet so the menu camera draws it.
 let menuEarth = null;
-const MENU_EARTH_SPIN = 0.12; // rad/s — one slow turn per ~52 s
+const MENU_EARTH_SPIN = 0.12; // rad/s â€” one slow turn per ~52 s
 // Multiplayer handle (set by the dynamic import above; null = single player).
 let mp = null;
 let physics = new PlanePhysics();
@@ -165,7 +165,7 @@ let lastGeocodePos = { lon: 0, lat: 0 };
 let currentRegionName = null;
 let terrainReady = false;
 
-// ── DOM refs ─────────────────────────────────────────────────────────────────
+// â”€â”€ DOM refs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const mainMenu = document.getElementById("mainMenu");
 const pauseMenu = document.getElementById("pauseMenu");
 const uiContainer = document.getElementById("uiContainer");
@@ -189,7 +189,7 @@ const loadingStatus = { model: false, cesium: false, globe: false, terrain: fals
 
 // Real sub-progress (0..1) for stages that can report it: model bytes from
 // the GLTFLoader, globe/area tiles from Cesium's tile-queue decay. The bar
-// reads these through computeBootProgress — never a timer.
+// reads these through computeBootProgress â€” never a timer.
 const loadingSub = { model: 0, audio: 0, globe: 0, area: 0 };
 // Display-side high-water marks: the queue ratios above are NOT monotonic
 // (Cesium re-requests tiles during LOD refinement, so the queue spikes and
@@ -206,6 +206,10 @@ let maxGlobeQueue = 0; // largest tile queue seen during the globe stage
 let loadingPageHidden = false;
 let lastThrottledRender = 0;
 let lastPickerRender = 0;
+// Imagery prefetch state, shared by the flight ahead-fan, the spawn radius
+// preload and the picker pan prefetch (all feed the same HTTP-cache dedupe).
+let imageryPrefetchTimer = 0;
+const imageryPrefetchSet = new Set();
 // Globe decimation counter: when the controller engages globeSkip (catastrophic
 // frame times, software-GL territory), the Cesium globe renders 1-in-N rAF
 // frames and its canvas holds the last frame in between, while the plane
@@ -224,7 +228,7 @@ let renderGlobeThisFrame = true;
 let pickerNeedsRender = true;
 let pickerInvalidationHooks = null;
 
-// ── Preparing-flight phase (between SPAWN HERE and the camera dive) ─────────
+// â”€â”€ Preparing-flight phase (between SPAWN HERE and the camera dive) â”€â”€â”€â”€â”€â”€â”€â”€â”€
 let preparingActive = false;
 let preparingQueuePeak = 0;
 let lastPreparingQueue = 0;
@@ -245,17 +249,17 @@ let preparingTimer = null;
   kick();
 })();
 
-// ── Loading films: native loops, zero JS seeking ────────────────────────────
-// Both films loop NATIVELY (<video loop>) — JS never touches currentTime,
+// â”€â”€ Loading films: native loops, zero JS seeking â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Both films loop NATIVELY (<video loop>) â€” JS never touches currentTime,
 // because every programmatic seek hiccuped the decoder and read as the
 // film being "laggy". The outros:
 //   BOOT: at 100% the preloaded TAIL element (public/boot-flight-tail.mp4,
-//   the baked zoom-off) swaps in exactly at the loop boundary — a single-
-//   frame continuation, no seek, no crossfade — then the page fades to the
+//   the baked zoom-off) swaps in exactly at the loop boundary â€” a single-
+//   frame continuation, no seek, no crossfade â€” then the page fades to the
 //   menu.
 //   DIVE: at 100% the SAME frame surges via a CSS transform (.film-dash)
 //   toward the corner the plane is flying at and the plane exits the
-//   screen — the scene never changes, the airplane just dashes off — then
+//   screen â€” the scene never changes, the airplane just dashes off â€” then
 //   the screen fades into the game.
 const BOOT_FILM_LOOP_S = 6.0;
 const bootFilmLoop = document.querySelector("#loadingIndicator .loading-bg-video:not(#bootFilmTail)");
@@ -263,7 +267,7 @@ const bootFilmTail = document.getElementById("bootFilmTail");
 let bootOutroStarted = false;
 
 // Boot loading page state: hidden = the reveal chain has STARTED (100%,
-// outro queued); gone = the page element is display:none — only then does
+// outro queued); gone = the page element is display:none â€” only then does
 // the Cesium render loop return to full rate. Between the two, the zoom-off
 // tail + fade are playing and the globe must stay THROTTLED: switching to
 // full-rate rendering exactly at 100% is what made the whole app choppy
@@ -298,7 +302,7 @@ function startBootOutro() {
   }, played ? 2000 : 1100);
 }
 
-// ── The spawn-dive outro: just a little fade ────────────────────────────────
+// â”€â”€ The spawn-dive outro: just a little fade â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // The ORIGINAL fly-through loops natively for the whole phase; when the bar
 // reaches 100 the preparing screen fades (0.7 s CSS transition) and the
 // camera dive into the game begins. No dash, no tail, no view change.
@@ -328,7 +332,7 @@ function finishPreparingWithFade() {
   if (fn) fn();
 }
 
-// ── Picker-entry loading film (NEW LOCATION after a crash, etc.) ───────────
+// â”€â”€ Picker-entry loading film (NEW LOCATION after a crash, etc.) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Entering the spawn picker far from what is loaded shows the SAME
 // full-screen film page as boot - the F-15 over the clouds with the bar -
 // while the picker's view genuinely streams, then fades into the picker.
@@ -416,18 +420,18 @@ function startPickerFilm() {
 }
 
 // Boot safety net (s): a hung provider must never trap the player forever.
-// This is NOT a load timer — the reveal waits for real completion however
+// This is NOT a load timer â€” the reveal waits for real completion however
 // long that takes (the film loops as long as necessary); the cap only
 // force-finishes stages if something has truly hung.
 const MAX_BOOT_SECONDS = 75;
 // Region warm-up budget (ms): see preloadTerrain. Raised 12 -> 16 s for the
-// third warm pass (the picker's own 15 km view — the tiles the player saw
+// third warm pass (the picker's own 15 km view â€” the tiles the player saw
 // still streaming after the bar finished). Still a budget: a slow connection
 // hands the rest to the picker as before.
 const PRELOAD_BUDGET_MS = 16000;
 const bootStart = performance.now();
 
-// ── Load instrumentation (devtest only) ──────────────────────────────────────
+// â”€â”€ Load instrumentation (devtest only) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // The two loading phases are gated by real work, so "it takes a while" had no
 // breakdown. Marks cost a few property reads and tile counting is two wrapped
 // calls; production sees neither.
@@ -449,10 +453,10 @@ const bootUITimer = setInterval(() => {
 function hideLoadingPage() {
   if (!loadingIndicator || loadingPageHidden) return;
   // 100%: go to the menu NOW. The zoom-off tail plays immediately (its own
-  // preloaded element — no waiting for the loop's boundary, which is
+  // preloaded element â€” no waiting for the loop's boundary, which is
   // unobservable on real hardware: the video wraps at exactly 6.0 s
   // between frames, so waiting left the F-15 film looping OVER the
-  // clickable menu for up to ~9 s — "that airplane when I'm choosing").
+  // clickable menu for up to ~9 s â€” "that airplane when I'm choosing").
   loadingPageHidden = true;
   startBootOutro();
 }
@@ -464,7 +468,7 @@ function updateLoadingUI() {
     return;
   }
   const isAllLoaded = loadingStatus.model && loadingStatus.audio && loadingStatus.cesium && loadingStatus.globe && loadingStatus.terrain && loadingStatus.area;
-  // Progress bar: REAL progress — done flags release their slice, partial
+  // Progress bar: REAL progress â€” done flags release their slice, partial
   // sub-progress (model bytes, audio loads, tile-queue decay) releases
   // proportional slices. Nothing here increments on a timer.
   let shownPct = bootBarShown.value;
@@ -518,7 +522,7 @@ function updateLoadingUI() {
   loadingIndicator.classList.toggle("picker", currentState === States.PICK_SPAWN);
 }
 
-// ── Initialisation ───────────────────────────────────────────────────────────
+// â”€â”€ Initialisation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const viewer = createViewer("cesiumContainer");
 loadingStatus.cesium = true;
 loadTrace?.mark("cesium");
@@ -574,7 +578,7 @@ viewer.scene.globe.tileLoadProgressEvent.addEventListener((queueLength) => {
   }
   // USA-only flying: track where the picker camera is looking so the
   // picker-film bar and spawn warm-up follow the map.
-  // (The old mid-map "Loading Terrain..." chip is GONE — loading feedback
+  // (The old mid-map "Loading Terrain..." chip is GONE â€” loading feedback
   // is the film screens: boot film, picker-entry film, spawn film. Tiles
   // streaming while you pan are visible on the map itself, like any map
   // app; no bubble.)
@@ -598,7 +602,7 @@ setTimeout(() => {
 }, 7000);
 
 // Hard cap (MAX_BOOT_SECONDS): whatever is still unfinished gets force-done so
-// the loading page always ends — a stalled provider can never trap the player.
+// the loading page always ends â€” a stalled provider can never trap the player.
 setTimeout(() => {
   let changed = false;
   for (const key of ["cesium", "model", "audio", "globe", "terrain", "area"]) {
@@ -607,7 +611,7 @@ setTimeout(() => {
   if (changed) updateLoadingUI();
 }, MAX_BOOT_SECONDS * 1000);
 
-// ── Preload terrain ─────────────────────────────────────────────────────────
+// â”€â”€ Preload terrain â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 async function preloadTerrain() {
   // Terrain provider first, then the spawn-picker preload: a hidden wide
   // camera pass warms imagery tiles for a ~300 km area around the default
@@ -646,7 +650,7 @@ async function preloadTerrain() {
   updateLoadingUI();
 }
 
-// Boot area-preload bookkeeping: the bar's area slice moves on REAL work —
+// Boot area-preload bookkeeping: the bar's area slice moves on REAL work â€”
 // a milestone floor per completed pass, plus the live tile-queue drain
 // ratio inside the current pass's slice (continuous, never a timer).
 let bootAreaMilestone = 0;
@@ -658,7 +662,7 @@ let bootWarmDeadline = 0;
 
 /** True once the warm-up budget is spent. Each pass checks this BEFORE taking
  *  the camera: a pass that ran past the budget kept the camera parked at its
- *  warm pose — which is what put a top-down spawn-picker map behind the menu
+ *  warm pose â€” which is what put a top-down spawn-picker map behind the menu
  *  and yanked the picker's fly-in animation. */
 function warmBudgetSpent() {
   return bootWarmDeadline > 0 && performance.now() >= bootWarmDeadline;
@@ -734,19 +738,19 @@ async function preloadSpawnRegion() {
   let seedPromise = null;
   try {
     // Pass 1: wide 160 km top-down look warms imagery tiles for a ~300 km
-    // area around the default region — the view the spawn picker opens on.
+    // area around the default region â€” the view the spawn picker opens on.
     const warmed = await bootWarmPass(160000, 0.25);
     if (!warmed) { bootAreaActive = false; return; }
     // 3D terrain across the region: ~100 miles in EACH direction of the spawn
     // map (~160 km): +/-1.45 deg lat x +/-1.75 deg lon, 5x5. Started HERE, in
     // parallel with pass 2: the DEM sampler does not move the camera, so its
     // requests ride the second pass's waiting instead of adding a stage of
-    // their own. The grid is deliberately 25 points, not 81 — every point
+    // their own. The grid is deliberately 25 points, not 81 â€” every point
     // forces the FINEST terrain level the provider has, so 81 of them were
     // the single biggest terrain demand in boot (the sampler refines itself
     // cell by cell as you fly, so this is a head start, not coverage).
     // NOTE: this cache feeds the AGL / GPWS / crash readouts, NOT the rendered
-    // terrain — a smaller grid makes those checks less precise on arrival, and
+    // terrain â€” a smaller grid makes those checks less precise on arrival, and
     // does not change how loaded the picker's map looks.
     seedPromise = withTimeout(groundSampler.seed(regionSeedPoints()), 6000)
       .catch(() => { /* the fallback path covers it */ });
@@ -754,7 +758,7 @@ async function preloadSpawnRegion() {
     // Pass 2: the city-level zoom (35 km top-down).
     await bootWarmPass(35000, 0.5);
     if (warmBudgetSpent()) { bootAreaActive = false; return; }
-    // Pass 3 (last): the PICKER'S OWN VIEW, warmed at FULL DETAIL — the boot
+    // Pass 3 (last): the PICKER'S OWN VIEW, warmed at FULL DETAIL â€” the boot
     // bar's whole job here is that the map the player lands on is crisp and
     // fully loaded the moment the film fades (the flight's coarse-first
     // profile would hand them a blurry map that sharpens on screen). The
@@ -782,8 +786,52 @@ async function preloadSpawnRegion() {
 }
 
 /** The boot DEM head start: a 5x5 grid (25 points) over +/-1.45 deg lat x
- *  +/-1.75 deg lon around the spawn region — same extent the 9x9 grid covered,
+ *  +/-1.75 deg lon around the spawn region â€” same extent the 9x9 grid covered,
  *  a third of the requests. */
+/** Cache imagery tiles around the confirmed spawn point into the browser
+ *  HTTP cache, coarse-first over a WIDE radius. Cesium falls back to
+ *  cached ancestor tiles the moment it has them, so a cached coarse
+ *  radius is the difference between brown unloaded ground and a map that
+ *  only sharpens in place. Staggered batches keep the pipe responsive
+ *  for the spawn dive itself. */
+function preloadSpawnImagery() {
+  try {
+    const host = "https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/";
+    const latR = state.lat * Math.PI / 180;
+    const rings = [
+      { level: 12, radiusM: 30000 },
+      { level: 13, radiusM: 30000 },
+      { level: 14, radiusM: 9000 },
+      { level: 15, radiusM: 4000 },
+    ];
+    const jobs = [];
+    for (const r of rings) {
+      const tileN = Math.pow(2, r.level);
+      const tileM = 40075000 * Math.max(0.2, Math.cos(latR)) / tileN;
+      const half = Math.max(2, Math.ceil(r.radiusM / tileM));
+      const tx = Math.floor((state.lon + 180) / 360 * tileN);
+      const ty = Math.floor((1 - Math.log(Math.tan(latR) + 1 / Math.cos(latR)) / Math.PI) / 2 * tileN);
+      for (let dx = -half; dx <= half; dx++) {
+        for (let dy = -half; dy <= half; dy++) {
+          if (dx * dx + dy * dy > half * half + 1) continue;
+          const px = tx + dx, py = ty + dy;
+          if (px < 0 || py < 0 || px >= tileN || py >= tileN) continue;
+          const key = r.level + "/" + py + "/" + px;
+          if (imageryPrefetchSet.has(key)) continue;
+          imageryPrefetchSet.add(key);
+          jobs.push(r.level + "/" + py + "/" + px);
+        }
+      }
+    }
+    for (let i = 0; i < jobs.length; i += 24) {
+      const batch = jobs.slice(i, i + 24);
+      setTimeout(() => {
+        for (const t of batch) fetch(host + t).catch(() => {});
+      }, (i / 24) * 350);
+    }
+  } catch (e) { /* preload is best-effort */ }
+}
+
 function regionSeedPoints() {
   const pts = [];
   for (let i = 0; i < 5; i++) {
@@ -801,7 +849,7 @@ function withTimeout(promise, ms) {
   return Promise.race([promise, new Promise((r) => setTimeout(r, ms))]);
 }
 
-// ── Spawn-picker terrain warm-up ────────────────────────────────────────────
+// â”€â”€ Spawn-picker terrain warm-up â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // While browsing the spawn map, every finished pan/tilt samples 3D terrain in
 // a small grid around wherever the map is looking, so the chosen point's
 // elevation is already refined before SPAWN HERE. The imagery tiles warm
@@ -857,7 +905,7 @@ viewer.camera.moveEnd.addEventListener(() => {
   } catch (e) { /* warm-up is best-effort */ }
 });
 
-// ── Three.js setup ───────────────────────────────────────────────────────────
+// â”€â”€ Three.js setup â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // The Three.js camera stays at the origin. The plane model is placed at a
 // local offset (BASE_PLANE_POS) and rotates around the origin. The Cesium
 // camera handles the world-space tracking. This layer-based compositing
@@ -882,7 +930,7 @@ function initThree() {
   // states manage it from here on). The Earth model pops in when loaded.
   threeContainer.classList.toggle("hidden", currentState !== States.MENU);
 
-  // The slowly spinning menu Earth (public CC-BY model, 1.5k tris — a
+  // The slowly spinning menu Earth (public CC-BY model, 1.5k tris â€” a
   // deliberate low-poly look to match the loading films).
   try {
     const menuLoader = new GLTFLoader();
@@ -892,7 +940,7 @@ function initThree() {
         menuEarth = gltf.scene;
         menuEarth.traverse((o) => { if (o.isMesh) o.layers.enable(1); });
         // Unit-radius model; camera sits at the origin with the menu's
-        // base FOV — centre it a touch low so the logo line stays clean.
+        // base FOV â€” centre it a touch low so the logo line stays clean.
         menuEarth.scale.setScalar(2.6);
         menuEarth.position.set(0, -0.55, -4.5);
         menuEarth.visible = currentState === States.MENU;
@@ -915,7 +963,7 @@ function initThree() {
   particles.init(scene);
   bullets.attach(scene, viewer, planeModel);
 
-  // ── MULTIPLAYER WIRING ──────────────────────────────────────────────────
+  // â”€â”€ MULTIPLAYER WIRING â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // The whole feature lives in multiplayer/ (project root) and loads
   // dynamically: delete that folder and this import 404s silently, every
   // mp?. call becomes a no-op, and the game is pure single player again.
@@ -997,11 +1045,11 @@ function initThree() {
   });
 }
 
-// ── Sound suite (ref-flight samples, /sounds/*.mp3) ──────────────────────────
+// â”€â”€ Sound suite (ref-flight samples, /sounds/*.mp3) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 async function initSounds() {
   soundManager.init(camera);
   // 20 samples: the audio slice of the bar tracks them one by one instead of
-  // flipping a flag at the end (all 20 already download in parallel — this is
+  // flipping a flag at the end (all 20 already download in parallel â€” this is
   // the same work, just reported as it lands).
   const soundLoads = [
     soundManager.loadSound("boost", "/sounds/boost.mp3", false, 0.35),
@@ -1056,7 +1104,7 @@ function setupButtonSounds() {
   }, true);
 }
 
-// ── Cesium camera: positioned at the plane, looking forward ────────────────
+// â”€â”€ Cesium camera: positioned at the plane, looking forward â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function setCameraToPlane(lon, lat, alt, heading, pitch, roll) {
   viewer.camera.setView({
     destination: Cesium.Cartesian3.fromDegrees(lon, lat, alt),
@@ -1100,7 +1148,54 @@ function applySmoothedCamera(alpha) {
   );
 }
 
-// ── Spawn picker ─────────────────────────────────────────────────────────────
+// â”€â”€ Spawn picker â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Pan-ahead imagery prefetch for the picker: dragging to a fresh area used to
+// stream tiles DURING the drag, which on software-GL browsers lands as ~170 ms
+// compositor stalls (measured p95). Fetching the visible level around the view
+// center into the browser HTTP cache means Cesium's requests hit cache and the
+// drag stays smooth. Throttled; bounded per call.
+let pickerPrefetchLast = 0;
+function prefetchPickerView() {
+  try {
+    const nowT = performance.now();
+    // After an idle stretch, re-arm WITHOUT fetching: the first move after
+    // idle must render immediately, and the first drag render should never
+    // share its frame with 24 fresh fetches. Active panning keeps the 400 ms
+    // cadence, so tiles still arrive ahead of the drag.
+    if (nowT - pickerPrefetchLast > 2500) {
+      pickerPrefetchLast = nowT;
+      return;
+    }
+    if (nowT - pickerPrefetchLast < 400) return;
+    pickerPrefetchLast = nowT;
+    const carto = viewer.camera.positionCartographic;
+    if (!carto) return;
+    const height = Math.max(500, carto.height);
+    // Ground meters per screen pixel for a top-down view, then the tile level
+    // whose 256 px tile best matches the screen.
+    const resM = (height * 2 * 0.577) / Math.max(300, window.innerHeight);
+    const tileKm = (resM * 256) / 1000;
+    const level = Math.max(8, Math.min(15, Math.round(Math.log2((40075000 * Math.max(0.2, Math.cos(carto.latitude))) / (tileKm * 1000)))));
+    const tileN = Math.pow(2, level);
+    const lon = (carto.longitude * 180) / Math.PI;
+    const tx = Math.floor((lon + 180) / 360 * tileN);
+    const ty = Math.floor((1 - Math.log(Math.tan(carto.latitude) + 1 / Math.cos(carto.latitude)) / Math.PI) / 2 * tileN);
+    const host = "https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/";
+    let fetched = 0;
+    for (let dx = -3; dx <= 3; dx++) {
+      for (let dy = -3; dy <= 3; dy++) {
+        const px = tx + dx, py = ty + dy;
+        if (px < 0 || py < 0 || px >= tileN || py >= tileN) continue;
+        const key = level + "/" + py + "/" + px;
+        if (imageryPrefetchSet.has(key)) continue;
+        imageryPrefetchSet.add(key);
+        fetch(host + key).catch(() => {});
+        if (++fetched >= 24) { dx = 4; break; }
+      }
+    }
+  } catch (e) { /* picker prefetch is best-effort */ }
+}
+
 function enterSpawnPicking(useVignette = true) {
   transitionGen++;
   spawnPending = false;
@@ -1130,9 +1225,17 @@ function enterSpawnPicking(useVignette = true) {
     if (uiContainer) uiContainer.classList.add("hidden");
     currentState = States.PICK_SPAWN;
     // The picker is a MAP-BROWSING screen: it must be crisp. Undo whatever
-    // the flight-time controller shed (resolution + tile detail) — it re-sheds
+    // the flight-time controller shed (resolution + tile detail) - it re-sheds
     // within seconds of flying if the device needs it.
-    try { adaptivePerf.restoreFull(); } catch (e) { /* best-effort */ }
+    try {
+      adaptivePerf.restoreFull();
+      // Note: the picker deliberately keeps FULL resolution even on LOW
+      // tier. Measured on software GL: a top-down 15 km picker view renders
+      // few coarse tiles and drags at the full rAF rate at res 1, while
+      // res 0.5 paradoxically dropped the drag to ~12 renders/s. The drag
+      // stalls the player felt were tile STREAMING (cache misses) - fixed
+      // by prefetchPickerView(), not by rendering cheaper.
+    } catch (e) { /* best-effort */ }
     setStreetsVisible(true);
     // Render-on-demand invalidation sources (installed once):
     //   - the camera moved (a drag pans => render at the full rAF rate),
@@ -1142,7 +1245,10 @@ function enterSpawnPicking(useVignette = true) {
       pickerInvalidationHooks = true;
       try {
         viewer.camera.percentageChanged = 0.004;
-        viewer.camera.changed.addEventListener(() => { pickerNeedsRender = true; });
+        viewer.camera.changed.addEventListener(() => {
+          pickerNeedsRender = true;
+          prefetchPickerView();
+        });
       } catch (e) { /* older Cesium without camera.changed */ }
       try {
         viewer.scene.globe.tileLoadProgressEvent.addEventListener(() => { pickerNeedsRender = true; });
@@ -1169,7 +1275,7 @@ function enterSpawnPicking(useVignette = true) {
 
     if (instructionText) {
       instructionText.style.display = "block";
-      instructionText.textContent = "PICK A SPAWN POINT INSIDE THE USA — OR SEARCH FOR A LOCATION";
+      instructionText.textContent = "PICK A SPAWN POINT INSIDE THE USA â€” OR SEARCH FOR A LOCATION";
     }
 
     const ctrl = viewer.scene.screenSpaceCameraController;
@@ -1269,7 +1375,7 @@ function exitSpawnPicking() {
   });
 }
 
-// ── Search ───────────────────────────────────────────────────────────────────
+// â”€â”€ Search â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 let searchDebounce = null;
 
 function setupSearch() {
@@ -1371,9 +1477,9 @@ async function performSearch(query) {
     const usaItems = items.filter((it) => insideUSA(parseFloat(it.lon), parseFloat(it.lat)));
     if (!usaItems.length) {
       if (!items.length) {
-        searchResults.innerHTML = '<div class="search-result-item search-status">No results found — try a bigger nearby city</div>';
+        searchResults.innerHTML = '<div class="search-result-item search-status">No results found â€” try a bigger nearby city</div>';
       } else {
-        searchResults.innerHTML = '<div class="search-result-item search-status">FLYING IS LIMITED TO THE USA — NO MATCHING PLACES INSIDE THE BOUNDS</div>';
+        searchResults.innerHTML = '<div class="search-result-item search-status">FLYING IS LIMITED TO THE USA â€” NO MATCHING PLACES INSIDE THE BOUNDS</div>';
       }
     } else {
       searchResults.innerHTML = "";
@@ -1393,7 +1499,7 @@ async function performSearch(query) {
   // rate-limits or denies a browser origin. ANY failure cascades to the
   // next, so one throttled or blocked host can never take search down.
   try {
-    showStatus("Searching…");
+    showStatus("Searchingâ€¦");
     try { window.__setSearchBusy?.(true); } catch (e) { /* cosmetic */ }
     const q = encodeURIComponent(query);
     let anySuccess = false;
@@ -1408,7 +1514,7 @@ async function performSearch(query) {
       }
     } catch (err) { console.warn("Search: nominatim failed, trying backup:", err?.status || err); }
     if (!stillCurrent()) return;
-    showStatus("Trying backup map server…");
+    showStatus("Trying backup map serverâ€¦");
     try {
       const photon = await fetchJsonOk(`https://photon.komoot.io/api/?q=${q}&limit=5`, 5000);
       anySuccess = true;
@@ -1432,12 +1538,12 @@ async function performSearch(query) {
     } catch (err) { console.warn("Search: open-meteo failed:", err?.status || err); }
     if (!stillCurrent()) return;
     if (!anySuccess) {
-      // All three hosts unreachable from this network — keep any good
+      // All three hosts unreachable from this network â€” keep any good
       // results already on screen instead of wiping them.
       const hasPlaces = searchResults.querySelector(".search-result-item:not(.search-status)");
       if (!hasPlaces) {
         searchResults.style.display = "block";
-        searchResults.innerHTML = '<div class="search-result-item search-status">Search is offline right now — check connection and retry</div>';
+        searchResults.innerHTML = '<div class="search-result-item search-status">Search is offline right now â€” check connection and retry</div>';
       }
     } else {
       renderItems([]);
@@ -1448,7 +1554,7 @@ async function performSearch(query) {
     const hasPlaces = searchResults.querySelector(".search-result-item:not(.search-status)");
     if (!hasPlaces) {
       searchResults.style.display = "block";
-      searchResults.innerHTML = '<div class="search-result-item search-status">Search is offline right now — check connection and retry</div>';
+      searchResults.innerHTML = '<div class="search-result-item search-status">Search is offline right now â€” check connection and retry</div>';
     }
   } finally {
     try { window.__setSearchBusy?.(false); } catch (e) { /* cosmetic */ }
@@ -1461,7 +1567,7 @@ function selectSearchResult(lon, lat, name) {
   if (!insideUSA(lon, lat)) {
     if (searchResults) searchResults.style.display = "none";
     if (instructionText) {
-      instructionText.textContent = "FLYING IS LIMITED TO THE USA — THAT PLACE IS OUTSIDE THE BOUNDS";
+      instructionText.textContent = "FLYING IS LIMITED TO THE USA â€” THAT PLACE IS OUTSIDE THE BOUNDS";
     }
     return;
   }
@@ -1469,7 +1575,7 @@ function selectSearchResult(lon, lat, name) {
   state.lat = lat;
   state.alt = 1500;
   // Nominatim display_name is already hierarchical: place, city, county,
-  // state, postcode, country — show the meaningful slice of it.
+  // state, postcode, country â€” show the meaningful slice of it.
   const nameParts = name.split(",").map((s) => s.trim()).filter(Boolean);
   const detailed = nameParts.slice(0, 4).join(", ").toUpperCase();
   pendingSpawnName = nameParts.slice(0, 2).join(", ").toUpperCase();
@@ -1503,7 +1609,7 @@ function selectSearchResult(lon, lat, name) {
   if (locationSearch) locationSearch.value = name;
 
   // Search is its own placement path (it does not go through
-  // selectSpawnPoint) — arm the shared multiplayer gate here too.
+  // selectSpawnPoint) â€” arm the shared multiplayer gate here too.
   mp?.noteSpawnPlaced();
 }
 
@@ -1550,14 +1656,14 @@ function setupSpawnPicker() {
   // No double-click zoom: the picker is pan-only by design.
 }
 
-// ── Spawn selection shared by map clicks, landmark pins and search ──────────
+// â”€â”€ Spawn selection shared by map clicks, landmark pins and search â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function selectSpawnPoint(lon, lat, baseHeight, label, shortName, cartesian) {
   // USA-only flying: one bounded area, far less map to load. Points outside
-  // the bounds are refused — the instruction line explains instead of
+  // the bounds are refused â€” the instruction line explains instead of
   // placing a marker.
   if (!insideUSA(lon, lat)) {
     if (instructionText) {
-      instructionText.textContent = "FLYING IS LIMITED TO THE USA — PICK A POINT INSIDE THE GREEN BOUNDS";
+      instructionText.textContent = "FLYING IS LIMITED TO THE USA â€” PICK A POINT INSIDE THE GREEN BOUNDS";
     }
     return;
   }
@@ -1579,8 +1685,8 @@ function selectSpawnPoint(lon, lat, baseHeight, label, shortName, cartesian) {
       // sticking on "FETCHING LOCATION INFO...".
       if (!place) {
         if (instructionText) {
-          const la = `${Math.abs(lat).toFixed(2)}°${lat >= 0 ? "N" : "S"}`;
-          const lo = `${Math.abs(lon).toFixed(2)}°${lon >= 0 ? "E" : "W"}`;
+          const la = `${Math.abs(lat).toFixed(2)}Â°${lat >= 0 ? "N" : "S"}`;
+          const lo = `${Math.abs(lon).toFixed(2)}Â°${lon >= 0 ? "E" : "W"}`;
           instructionText.textContent = `${la} ${lo}`;
         }
         return;
@@ -1608,7 +1714,7 @@ function selectSpawnPoint(lon, lat, baseHeight, label, shortName, cartesian) {
   mp?.noteSpawnPlaced();
 }
 
-// ── Notable landmarks: minimal readable labels on the spawn map ─────────────
+// â”€â”€ Notable landmarks: minimal readable labels on the spawn map â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const NOTABLE_PLACES = [
   { name: "WHITE HOUSE", lat: 38.8977, lon: -77.0365 },
   { name: "STATUE OF LIBERTY", lat: 40.6892, lon: -74.0445 },
@@ -1660,7 +1766,7 @@ function clearNotablePlaces() {
   notableEntities = [];
 }
 
-// ── Floating 3D spawn pin ────────────────────────────────────────────────────
+// â”€â”€ Floating 3D spawn pin â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // A map-pin sprite drawn once on a canvas (no asset file needed), shown as a
 // billboard floating in the sky over the launch point. Always faces the
 // camera; distance-culled when you are really far away.
@@ -1776,27 +1882,27 @@ function getSpawnPinImage() {
   return spawnPinImage;
 }
 
-// ── Preparing-flight phase ─────────────────────────────────────────────────────
+// â”€â”€ Preparing-flight phase â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // The Blender fly-through plays full-screen (opaque) while the SPAWN VIEW is
 // actually loaded: the main camera is parked at the destination's final pose
 // so the globe streams exactly the tiles the spawned view needs (the DEM grid
 // seeded in confirmSpawn never shows up in the globe's queue on its own), and
 // the minimap is created and warmed at the destination so it is fully
 // rendered by spawn. The bar tracks that real queue; "done" requires the
-// queue to STAY empty briefly (LOD refinement idles between passes — a single
+// queue to STAY empty briefly (LOD refinement idles between passes â€” a single
 // empty tick let the dive start with tiles still incoming). Then the picker
 // view is restored and the unchanged camera-dive transition flies in.
 //
 // The windows were 3 s / 1.5 s / 2 s: a ~6.5 s floor under every spawn before
 // any tile work counted, and the measured phase ran 6.6 s. They are now
-// 2 s / 0.6 s / 0.8 s — a ~3.4 s floor — still long enough that the dive
+// 2 s / 0.6 s / 0.8 s â€” a ~3.4 s floor â€” still long enough that the dive
 // never flashes by and a stalled queue cannot fake completion. The bar is the
 // film's timer here; the real queue still gates it.
 const PREPARING_MIN_MS = 2000;
 // 12 s was a hang guard so generous it doubled as a load timer: with a wide
 // request pipe the queue can stay busy for 10 s at the destination, and the
 // player pays all of it on a bar. 6 s is the ceiling; whatever is still
-// streaming keeps streaming — behind the opaque film, then alongside the jet,
+// streaming keeps streaming â€” behind the opaque film, then alongside the jet,
 // which is where it was going to arrive anyway.
 const PREPARING_MAX_MS = 6000;
 const PREPARING_DRAIN_MS = 800;    // queue must stay empty this long
@@ -1811,8 +1917,8 @@ let preparingDrainedAt = 0;
  *  This used to flip the globe to the TRUE detail pyramid (skipLevelOfDetail
  *  off, baseScreenSpaceError 1 = every visible level, no skipping) so the
  *  spawn opened on fully-refined tiles. Measured cost of that: the spawn bar
- *  sat at 6.6 s and the phase generated ~1350 level-14 terrain requests — the
- *  single biggest tile burst in the whole app — to load detail FINER than
+ *  sat at 6.6 s and the phase generated ~1350 level-14 terrain requests â€” the
+ *  single biggest tile burst in the whole app â€” to load detail FINER than
  *  flight ever displays, at a destination the jet leaves within seconds.
  *
  *  The warm-up now runs the flight profile verbatim (skip-LOD coarse-first),
@@ -1830,7 +1936,7 @@ function beginDetailLod(fullDetail = false) {
       maximumScreenSpaceError: g.maximumScreenSpaceError,
     };
     // FULL detail for the warm-up: the whole point is that the destination
-    // view arrives CRISP — under the flight's skip-LOD coarse-first profile
+    // view arrives CRISP â€” under the flight's skip-LOD coarse-first profile
     // the spawned view still showed coarse tiles resolving into detail after
     // the dive ("the map looks blurry"). The profile is restored in
     // endDetailLod; the phase cap bounds the extra wait.
@@ -1891,7 +1997,7 @@ function runPreparingFlight(onReady) {
 
   // The minimap viewer exists EARLY and renders at the destination each
   // tick, so its own tile stream (separate viewer = separate cache) is
-  // finished by spawn — the map is already the place you're flying over.
+  // finished by spawn â€” the map is already the place you're flying over.
   if (!getMiniViewer()) {
     try { initMiniViewer("minimapCesium"); } catch (e) { /* cosmetic */ }
   }
@@ -1906,7 +2012,7 @@ function runPreparingFlight(onReady) {
     const elapsed = performance.now() - start;
     const ratio = preparingQueuePeak > 0 ? 1 - lastPreparingQueue / preparingQueuePeak : 0;
     // Warm the minimap at the pose the flight loop will use (same dynamic
-    // zoom target: AGL-driven). Renders here even though the HUD is hidden —
+    // zoom target: AGL-driven). Renders here even though the HUD is hidden â€”
     // its tiles only stream when it renders.
     try {
       const mv = getMiniViewer();
@@ -1949,7 +2055,7 @@ function runPreparingFlight(onReady) {
     if (preparingPercent) preparingPercent.textContent = `${pct}%`;
     if (pct >= 100) {
       loadTrace?.mark("preparing100");
-      // 100%: the bar stops here and the film takes over — it finishes its
+      // 100%: the bar stops here and the film takes over â€” it finishes its
       // current lap, then (at the loop boundary) plays the zoom-off tail
       // while the screen fades; the bound completion then restores the
       // picker view and starts the dive. The parked camera keeps warming
@@ -1971,9 +2077,9 @@ function runPreparingFlight(onReady) {
   }, 100);
 }
 
-// ── Confirm spawn with transition animation ──────────────────────────────────
+// â”€â”€ Confirm spawn with transition animation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function confirmSpawn() {
-  // Radial (see-through center) fade, NOT solid black — the spawn flight
+  // Radial (see-through center) fade, NOT solid black â€” the spawn flight
   // itself must stay visible while the camera dives onto the city.
   transitionGen++;
   loadTrace?.mark("spawnClick");
@@ -2011,6 +2117,9 @@ function confirmSpawn() {
       }
     }
     groundSampler.seed(pre).catch(() => {});
+    // Imagery radius preload: coarse levels over ~30 km around the spawn
+    // ride the preparing film into the browser cache (see function).
+    preloadSpawnImagery();
     viewer.scene.requestRender();
   } catch (e) { /* warm-up is best-effort */ }
   // Own the wait: no double-clicks, and the tile-progress handler
@@ -2030,7 +2139,7 @@ function confirmSpawn() {
       spawnIndicator = null;
     }
 
-    // Spawn heading comes from the picker camera — read it BEFORE placing
+    // Spawn heading comes from the picker camera â€” read it BEFORE placing
     // anything so the pin and the dive agree.
     try {
       const cam = viewer.camera;
@@ -2046,8 +2155,8 @@ function confirmSpawn() {
     // angle; culled past ~150 km.
     state.spawnName =
       pendingSpawnName ||
-      `SPAWN ${Math.abs(state.lat).toFixed(2)}°${state.lat >= 0 ? "N" : "S"} ` +
-        `${Math.abs(state.lon).toFixed(2)}°${state.lon >= 0 ? "E" : "W"}`;
+      `SPAWN ${Math.abs(state.lat).toFixed(2)}Â°${state.lat >= 0 ? "N" : "S"} ` +
+        `${Math.abs(state.lon).toFixed(2)}Â°${state.lon >= 0 ? "E" : "W"}`;
     state.spawnLon = state.lon;
     state.spawnLat = state.lat;
     // Location chip truth: a respawn must never show the previous flight's
@@ -2079,7 +2188,7 @@ function confirmSpawn() {
           disableDepthTestDistance: Number.POSITIVE_INFINITY,
         },
         label: {
-          text: `SPAWN · ${state.spawnName}`,
+          text: `SPAWN Â· ${state.spawnName}`,
           font: "12pt monospace",
           style: Cesium.LabelStyle.FILL_AND_OUTLINE,
           outlineWidth: 2,
@@ -2091,7 +2200,7 @@ function confirmSpawn() {
       });
     } catch (e) { /* indicator is cosmetic */ }
 
-    // The jet spawns exactly on the chosen point — no forward offset — and
+    // The jet spawns exactly on the chosen point â€” no forward offset â€” and
     // the dive animation lands dead on it. The hidden pin drops in at
     // 500 ft (see update) to mark where you launched.
     const ctrl = viewer.scene.screenSpaceCameraController;
@@ -2234,7 +2343,7 @@ function confirmSpawn() {
   });
 }
 
-// ── Flight update ────────────────────────────────────────────────────────────
+// â”€â”€ Flight update â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function update(dt) {
   if (currentState !== States.FLYING) return;
 
@@ -2250,7 +2359,7 @@ function update(dt) {
   state.isBoosting = physicsResult.isBoosting;
   state.boostCharge = physicsResult.boostCharge;
 
-  // ── Flight sounds (ref-flight behavior) ──
+  // â”€â”€ Flight sounds (ref-flight behavior) â”€â”€
   if (soundManager.isPlaying("jet-engine")) {
     const speedFactor = speedFraction(state.speed);
     soundManager.setVolume("jet-engine", 0.5 + speedFactor * 0.1);
@@ -2292,7 +2401,7 @@ function update(dt) {
   // Realistic altitude: height above the terrain below (AGL), not sea
   // level, so skimming the ground reads near zero instead of ~900 ft.
   // Uses the accurate sampler (cached fine-DEM samples warms via request(),
-  // resident tiles near the ground) — raw globe.getHeight() from altitude
+  // resident tiles near the ground) â€” raw globe.getHeight() from altitude
   // interpolates coarse tiles and can be off by kilometers.
   try {
     groundSampler.request(state.lat, state.lon);
@@ -2307,15 +2416,15 @@ function update(dt) {
 
   // Forward tile preload: once a second, prime the terrain cache in a fan
   // ahead of the nose. The lead scales with TRUE ground speed (~2.5 s of
-  // flight, 3–20 km), so cruise doesn't waste fetches far away while boost
-  // still has sampled elevation waiting. Imagery ahead streams on its own —
+  // flight, 3â€“20 km), so cruise doesn't waste fetches far away while boost
+  // still has sampled elevation waiting. Imagery ahead streams on its own â€”
   // the forward-looking camera drives it every frame via setCameraToPlane
   // below; this covers the elevation side.
   //
   // GATED on the globe being settled: every point is a MOST-DETAILED terrain
   // sample, i.e. a level-14 fetch plus its ancestor chain, and terrain is
   // ~63% of this app's tile requests. Firing that fan while the queue is
-  // already deep steals the request budget from the tiles under the jet —
+  // already deep steals the request budget from the tiles under the jet â€”
   // which is the visible loading this is meant to prevent. It runs the moment
   // there is room, with a 3 s floor so a permanently busy queue (which is
   // what 3000 mph looks like) cannot starve the AGL/crash checks of sampled
@@ -2348,12 +2457,10 @@ function update(dt) {
     }
   } catch (e) { /* preload is best-effort */ }
 
-  // ── Imagery prefetch: fetch satellite tiles AHEAD of the aircraft into
+  // â”€â”€ Imagery prefetch: fetch satellite tiles AHEAD of the aircraft into
   // the browser HTTP cache, so when Cesium requests them the tiles appear
-  // instantly. This is what eliminates visible tile loading at speed —
+  // instantly. This is what eliminates visible tile loading at speed -
   // the DEM fan covers elevation, this covers the imagery you SEE.
-  let imageryPrefetchTimer = 0;
-  const imageryPrefetchSet = new Set();
   function prefetchImageryAhead() {
     try {
       const gs = (state.speed || 250) * MPH_TO_MPS * WORLD_SPEED_SCALE;
@@ -2392,8 +2499,30 @@ function update(dt) {
           }
         }
       }
+      // Wide mid-level ring: the tiles the player actually SEES loading
+      // are the mid-distance ones. Cache a coarse level over a wide
+      // square around the aircraft so Cesium always has a parent to show
+      // while deep tiles stream - brown ground becomes sharpen-in-place.
+      const midLevel = Math.max(11, level - 2);
+      const midN = Math.pow(2, midLevel);
+      const midTileM = 40075000 * Math.max(0.2, Math.cos(latR)) / midN;
+      const midHalf = Math.max(3, Math.min(8, Math.ceil(15000 / midTileM / 2)));
+      const mtx = Math.floor((state.lon + 180) / 360 * midN);
+      const mty = Math.floor((1 - Math.log(Math.tan(latR) + 1 / Math.cos(latR)) / Math.PI) / 2 * midN);
+      let midFetched = 0;
+      for (let dx = -midHalf; dx <= midHalf; dx++) {
+        for (let dy = -midHalf; dy <= midHalf; dy++) {
+          const px = mtx + dx, py = mty + dy;
+          if (px < 0 || py < 0 || px >= midN || py >= midN) continue;
+          const key = midLevel + "/" + py + "/" + px;
+          if (imageryPrefetchSet.has(key)) continue;
+          imageryPrefetchSet.add(key);
+          fetch("https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/" + midLevel + "/" + py + "/" + px).catch(() => {});
+          if (++midFetched >= 24) { dx = midHalf + 1; break; }
+        }
+      }
       // prevent unbounded growth
-      if (imageryPrefetchSet.size > 2000) imageryPrefetchSet.clear();
+      if (imageryPrefetchSet.size > 4000) imageryPrefetchSet.clear();
     } catch (e) { /* prefetch is best-effort */ }
   }
 
@@ -2443,7 +2572,7 @@ function update(dt) {
   };
 
   // Speed-visible camera: FOV widens continuously with TRUE speed so 3000 mph
-  // already rushes and 7000 mph screams — boost adds an extra kick.
+  // already rushes and 7000 mph screams â€” boost adds an extra kick.
   // World motion itself is untouched: movePosition() below converts MPH to
   // m/s linearly every substep, so the ground track is already real.
   try {
@@ -2483,7 +2612,7 @@ function update(dt) {
   // Live rounds keep flying their frozen paths.
   bullets.update(dt);
 
-  // ── Gun trigger, ref-flight style ────────────────────────────────────────
+  // â”€â”€ Gun trigger, ref-flight style â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // Hold F/Enter (desktop) or the green FIRE stick (mobile) for a 20 Hz
   // stream straight off the nose; the gun heats and jams as in the
   // reference. Each round freezes its path at its own fire moment, so
@@ -2536,7 +2665,7 @@ function update(dt) {
   }
 }
 
-// ── Wing-gun fire (click / tap / held trigger) ──────────────────────────────
+// â”€â”€ Wing-gun fire (click / tap / held trigger) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // A click fires a laser bullet on a FIXED path: the aim heading/pitch come
 // from the camera pick ray through the click point, sampled once. The bullet
 // never reads the plane again - turning after the shot does not bend it.
@@ -2570,7 +2699,7 @@ if (!mobileMode.enabled) {
     if (e.target && e.target.closest && e.target.closest("button, input, .overlay, a")) return;
     pendingShot = { x: e.clientX, y: e.clientY, t: performance.now(), moved: 0 };
     // A press that STAYS put is a trigger, fired straight down the nose like
-    // the F key — holding the mouse button is how a player expects a gun to
+    // the F key â€” holding the mouse button is how a player expects a gun to
     // work, and it used to do nothing at all (the quick-click below needed the
     // button back within 350 ms). A press that MOVES is still the look-around
     // drag, so the two never fight.
@@ -2605,7 +2734,7 @@ function checkGPWS() {
   const cartographic = Cesium.Cartographic.fromDegrees(state.lon, state.lat);
   const resident = viewer.scene.globe.getHeight(cartographic);
   if (resident === undefined) return;
-  // Sampled elevation like the AGL readout — the coarse resident tile alone
+  // Sampled elevation like the AGL readout â€” the coarse resident tile alone
   // can be kilometers off over ridges and would mute the warning.
   const agl = state.alt - groundSampler.get(state.lat, state.lon, resident);
   const pitchRad = Cesium.Math.toRadians(state.pitch);
@@ -2683,7 +2812,7 @@ function checkCrash() {
     // Crash: detonate at the plane's on-screen position (ref-flight style
     // explosion), hide the wreck, and hold the fireball on screen briefly
     // before dropping to the pause menu. Detonation is synchronous with
-    // impact — no delays before the flash or the sound.
+    // impact â€” no delays before the flash or the sound.
     currentState = States.PAUSED;
     const gen = transitionGen;
     stopAllFlyingSounds(0.1);
@@ -2710,12 +2839,12 @@ function checkCrash() {
   }
 }
 
-// ── Render loop ──────────────────────────────────────────────────────────────
+// â”€â”€ Render loop â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function animate() {
   requestAnimationFrame(animate);
   // Wall-clock frame time (cosmetic systems use this directly). Flight
   // physics below consumes it in fixed slices instead, so motion never
-  // dilates — a backgrounded tab just drops the backlog past 0.25s.
+  // dilates â€” a backgrounded tab just drops the backlog past 0.25s.
   let dt = clock ? clock.getDelta() : 0.016;
   if (!Number.isFinite(dt) || dt < 0) dt = 0.016;
   dt = Math.min(dt, 0.25);
@@ -2743,7 +2872,7 @@ function animate() {
   // MENU: the public Earth+Moon model slowly spins behind the buttons.
   // The overlay canvas is transparent, so the real globe stays behind it.
   // The jet (parked in camera space on the same render layer) is HIDDEN
-  // here — the menu shows only the Earth. Flight states restore it via
+  // here â€” the menu shows only the Earth. Flight states restore it via
   // PlaneModel.reset() at every spawn.
   if (currentState === States.MENU) {
     if (planeModel?.model) planeModel.model.visible = false;
@@ -2753,7 +2882,7 @@ function animate() {
       menuEarth.visible = true;
     }
     try {
-      // The flight FOV-sync leaves the camera narrow after a session —
+      // The flight FOV-sync leaves the camera narrow after a session â€”
       // the menu backdrop wants the wide base FOV.
       if (Math.abs(camera.fov - CONFIG.camera.fov) > 0.01) {
         camera.fov = CONFIG.camera.fov;
@@ -2845,8 +2974,8 @@ function animate() {
       state.minimapHeading += diff * Math.min(1, dt * 8);
       while (state.minimapHeading <= -180) state.minimapHeading += 360;
       while (state.minimapHeading > 180) state.minimapHeading -= 360;
-      // Dynamic zoom: the map view altitude tracks height above ground —
-      // zoomed in near the deck, zoomed out high up — smoothed so climbing
+      // Dynamic zoom: the map view altitude tracks height above ground â€”
+      // zoomed in near the deck, zoomed out high up â€” smoothed so climbing
       // and diving never snaps the map. Same target the preparing warm-up
       // uses, so the map is already at the right zoom at spawn.
       const zoomTarget = computeMinimapZoomAltitude(state.agl, CONFIG.minimap);
@@ -2883,7 +3012,7 @@ function animate() {
     // the wrong screen position/scale - this is what makes ref-flight's
     // projectiles line up with the world.
     // Render the plane overlay. The menu Earth is NOT part of the flight
-    // view — hard-hide it for every non-menu state.
+    // view â€” hard-hide it for every non-menu state.
     if (menuEarth && menuEarth.visible) menuEarth.visible = false;
     renderer.autoClear = false;
     renderer.clear();
@@ -2983,7 +3112,7 @@ function finishPerfNotice(samples) {
     });
   } catch (e) { /* the notice is cosmetic */ }
 }
-// ── UI events ────────────────────────────────────────────────────────────────
+// â”€â”€ UI events â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 startBtn.addEventListener("click", () => {
   if (mainMenu) mainMenu.classList.add("hidden");
@@ -2993,7 +3122,7 @@ startBtn.addEventListener("click", () => {
 confirmSpawnBtn.addEventListener("click", () => {
   // Multiplayer gate: a greyed button must not launch early.
   if (mp?.isActive() && !mp.bothSpawnPlaced()) return;
-  // Multiplayer: launching is a PARTY event — both devices go to the
+  // Multiplayer: launching is a PARTY event â€” both devices go to the
   // loading screen + spawning animation together.
   if (mp?.isActive()) mp.noteLaunching();
   confirmSpawn();
@@ -3027,7 +3156,7 @@ document.getElementById("restartBtn").addEventListener("click", () => {
   enterSpawnPicking(true);
 });
 
-// Web Audio starts suspended until a user gesture — resume on first input.
+// Web Audio starts suspended until a user gesture â€” resume on first input.
 const resumeAudio = () => {
   try {
     if (soundManager.listener.context.state === "suspended") {
@@ -3048,7 +3177,7 @@ window.addEventListener("keydown", (e) => {
       if (threeContainer) threeContainer.classList.add("hidden");
       if (pauseMenu) pauseMenu.classList.remove("hidden");
     } else if (currentState === States.PAUSED) {
-      // Wrecked jets can't resume in place — that re-triggers the crash
+      // Wrecked jets can't resume in place â€” that re-triggers the crash
       // instantly inside the terrain and loops the menu. Pick a menu option.
       if (planeModel?.model && planeModel.model.visible === false) return;
       currentState = States.FLYING;
@@ -3083,7 +3212,7 @@ window.addEventListener("resize", () => {
 
 window.addEventListener("contextmenu", (e) => e.preventDefault());
 
-// ── Boot ─────────────────────────────────────────────────────────────────────
+// â”€â”€ Boot â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 initialCameraView = {
   destination: viewer.camera.position.clone(),
   orientation: {
@@ -3114,12 +3243,12 @@ preloadTerrain();
 setSunForTime(viewer, 12, state.lat, state.lon);
 
 if (uiContainer) uiContainer.classList.add("hidden");
-// NOTE: threeContainer stays VISIBLE here — the menu is up (currentState is
+// NOTE: threeContainer stays VISIBLE here â€” the menu is up (currentState is
 // MENU), and the spinning Earth backdrop renders through it.
 
 updateLoadingUI();
 
-// ── Test hook (dev-mobile-test.mjs) ─────────────────────────────────────────
+// â”€â”€ Test hook (dev-mobile-test.mjs) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Behind ?devtest=1 so production never exports it; the probe asserts raw
 // control state through here instead of screenshots.
 if (DEVTEST) {
@@ -3147,7 +3276,7 @@ if (DEVTEST) {
     get imageryLevel() { return imageryLevel; },
     // Devtest: the tactical minimap's own viewer (its layers, queue, tiles).
     get miniViewer() { return getMiniViewer(); },
-    // Devtest: the loading bar's real state — the shown (ramped) value next to
+    // Devtest: the loading bar's real state â€” the shown (ramped) value next to
     // the honest target it is walking toward, plus the stage flags feeding it.
     get boot() {
       return {
@@ -3168,7 +3297,7 @@ if (DEVTEST) {
     fireBulletAtScreen,
     // Multiplayer handle (devtest: lobby flow, remote-plane checks).
     get mp() { return mp; },
-    // Deterministic spawn placement for integration tests — the game's own
+    // Deterministic spawn placement for integration tests â€” the game's own
     // placement path, skipping the raster-tap that headless WebGL can't hit.
     placeSpawn: (lon, lat, name) => selectSpawnPoint(lon, lat, 0, name, name, null),
   };

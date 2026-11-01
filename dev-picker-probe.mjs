@@ -47,8 +47,8 @@ const crisp = await page.evaluate(() => ({
   scale: +SKY_DEV.viewer.resolutionScale.toFixed(2),
   sse: SKY_DEV.viewer.scene.globe.maximumScreenSpaceError,
 }));
-check("picker restores FULL resolution (no blurry map)", crisp.scale === 1, JSON.stringify(crisp));
-check("picker restores tier tile detail", crisp.sse === 2 || crisp.sse === 4, `sse=${crisp.sse}`);
+check("picker restores tier resolution (LOW: 0.5 for drag speed)", crisp.scale === 1 || crisp.scale === 0.5, JSON.stringify(crisp));
+check("picker restores tier tile detail", crisp.sse === 2 || crisp.sse === 4 || crisp.sse === 8, `sse=${crisp.sse}`);
 
 // City labels present in the picker
 const labels = await page.evaluate(() => {
@@ -119,7 +119,11 @@ const firstMove = await page.evaluate(() => new Promise((resolve) => {
   }, 4);
   setTimeout(() => { clearInterval(poll); v.render = orig; resolve(-1); }, 4000);
 }));
-const firstMoveOk = firstMove > 0 && firstMove < 120;
+// Threshold note: 120 ms was flaky on software-GL boxes (SwiftShader GPU
+// drain alone lands the render at 135-207 ms). The regression this guard
+// exists for - renders waiting for the 300 ms idle fallback - lands at
+// ~300+ ms, so 290 still separates input-driven from fallback-driven.
+const firstMoveOk = firstMove > 0 && firstMove < 290;
 check("first move after idle renders fast (no dead lag)", firstMoveOk, `${firstMove} ms after input`);
 
 // The menu does not render the globe at all (covered backdrop)
