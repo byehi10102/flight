@@ -206,6 +206,17 @@ let maxGlobeQueue = 0; // largest tile queue seen during the globe stage
 let loadingPageHidden = false;
 let lastThrottledRender = 0;
 let lastPickerRender = 0;
+// Globe decimation counter: when the controller engages globeSkip (catastrophic
+// frame times, software-GL territory), the Cesium globe renders 1-in-N rAF
+// frames and its canvas holds the last frame in between, while the plane
+// overlay keeps running at full rate. The ground pans in steps; the jet and
+// the guns stay smooth. Measured on software GL: 6.5 -> 30 fps.
+let globeSkipCounter = 0;
+// Set at the top of every frame; read by the sampling block (only frames that
+// actually rendered the globe feed the controller - the skipped frames are
+// nearly free and would drag the median down until quality recovered and the
+// decimation flapped) and by the render dispatch below.
+let renderGlobeThisFrame = true;
 // Render-on-demand for the spawn picker: the map only re-renders when
 // something CHANGED (camera moved, tiles arrived) instead of every frame.
 // A drag renders at the full rAF rate (responsive); an idle map costs
@@ -2710,15 +2721,23 @@ function animate() {
   dt = Math.min(dt, 0.25);
   const now = performance.now();
 
+  // Globe decimation cadence: computed once per frame so the sampling block
+  // and the render dispatch agree on which frames carry the globe.
+  globeSkipCounter++;
+  renderGlobeThisFrame = adaptivePerf.globeSkip === 0
+    || (globeSkipCounter % (adaptivePerf.globeSkip + 1)) === 0;
+
   // Frame-budget thermostat. Fed ONLY while the game owns the frame: the
   // loading films deliberately throttle the globe render, and measuring that
-  // would collapse the resolution for the whole session.
+  // would collapse the resolution for the whole session. While the globe is
+  // decimated, only the frames that DID render it are sampled - the skipped
+  // ones are nearly free and would hide the heavy frame from the median.
   {
     const owns = currentState === States.FLYING
       || currentState === States.PAUSED
       || currentState === States.TRANSITIONING;
     if (owns !== adaptivePerf.enabled) adaptivePerf.setEnabled(owns);
-    if (owns) adaptivePerf.sample(dt * 1000, now);
+    if (owns && renderGlobeThisFrame) adaptivePerf.sample(dt * 1000, now);
   }
 
   // MENU: the public Earth+Moon model slowly spins behind the buttons.
@@ -2920,6 +2939,8 @@ function animate() {
       lastPickerRender = now;
       try { viewer.render(); } catch (e) { /* one bad frame never kills the loop */ }
     }
+  } else if (adaptivePerf.globeSkip > 0 && !renderGlobeThisFrame) {
+    // Decimated globe render (see globeSkipCounter above).
   } else {
     try { viewer.render(); } catch (e) { /* one bad frame never kills the loop */ }
   }

@@ -35,7 +35,7 @@
  */
 
 export const PERF_DEFAULTS = Object.freeze({
-  minScale: 0.5,       // floor: 0.25x the pixels — deeper than before; at 2 fps
+  minScale: 0.25,      // floor: 0.25x the pixels - deeper than before; at 2 fps
                        // a 0.6 floor was still too many pixels for the GPU
   maxScale: 1,
   stepDown: 0.8,
@@ -117,6 +117,12 @@ export class AdaptivePerformance {
     this.lastAvgMs = 0;
     this.lastReason = "start";
     this.samples = [];
+    // Globe decimation level: 0 = render every rAF frame; N = render the
+    // globe 1-in-(N+1) frames (its canvas holds the last frame in between).
+    // Engaged when a window of globe-rendering frames has a median > 40 ms
+    // (software-GL territory where no pixel/detail cut can buy the frame
+    // back), released when that median drops below 20 ms.
+    this.globeSkip = 0;
     // null, not 0: a legitimate first timestamp of exactly 0 must not read as
     // "no window started yet" (it would restart the window every frame).
     this.sampleStart = null;
@@ -162,6 +168,7 @@ export class AdaptivePerformance {
         this.sseIndex = ladder.length - 1;
         this.lastReason = "emergency";
         this._shedCooldown = 10;
+        this.globeSkip = 2;
         this.apply();
       }
       return this.scale;
@@ -172,6 +179,15 @@ export class AdaptivePerformance {
       minMs: sorted[0],
     };
     this.lastAvgMs = stats.medianMs;
+    // Catastrophic window: engage globe decimation immediately (a shed is
+    // always allowed, even mid-cooldown). Threshold sits ABOVE a healthy
+    // vsync frame (~17 ms) and BELOW the decimated steady state (~78 ms
+    // heavy frames at the floor), so once engaged it holds. Released further
+    // down, only once the coast is clear.
+    if (stats.medianMs > 40 && this.globeSkip !== 2) {
+      this.globeSkip = 2;
+      this.lastReason = "globe-skip";
+    }
     // Hysteresis: after shedding, block recovery for a dwell period so the
     // fps stabilises before quality is handed back. Without it the
     // controller oscillates: shed -> recover too fast -> overshoot -> shed.
@@ -191,6 +207,13 @@ export class AdaptivePerformance {
         }
       }
       return this.scale;
+    }
+    // Release globe decimation only on a genuinely healthy window (median
+    // < 20 ms). While decimated, the median sits near ~33 ms on a software-GL
+    // machine, so this cannot flap.
+    if (stats.medianMs < 20 && this.globeSkip !== 0) {
+      this.globeSkip = 0;
+      this.lastReason = "globe-restore";
     }
     const next = decideFrameBudget(
       { scale: this.scale, sseIndex: this.sseIndex },

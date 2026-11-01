@@ -65,7 +65,7 @@ const LOW_PROFILE = Object.freeze({
   explosionScale: 0.7,
   resolutionScale: 1,
   maximumScreenSpaceError: 4,
-  sseLadder: [4, 6, 8],
+  sseLadder: [4, 8, 16, 32],
   shadows: false,
   shadowMapSize: 0,
   minimapHz: 5,

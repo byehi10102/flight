@@ -2258,3 +2258,42 @@ hysteresis: after any shed, recovery is blocked for 5 seconds (10 seconds
 after an emergency shed). During cooldown, only further shedding is allowed.
 This lets the fps stabilise at the shed quality before any quality is
 handed back, eliminating the oscillation.
+
+## 53. Diagnosis: the real lag source + globe decimation fix
+
+The user still saw 2-30 fps oscillation on their software-composited Chrome.
+A new dev-perf-probe.mjs instrumented the flight loop and CHROME TRACING
+found the truth:
+
+- The game's JS was only 5.6% of frame time (5.6 ms of a 116 ms frame).
+- Cesium scene.render *submission* was 2 ms, Three.js 0.4 ms, minimap 1 ms.
+- The GPU process (CrGpuMain) was SATURATED at 100% wall time: with
+  software GL (SwiftShader), the actual raster of the Cesium globe happens
+  asynchronously in the GPU process, invisible to JS-side timers.
+- Differential tests: a blank page, one GL canvas, even TWO layered
+  full-screen canvases all ran 60 fps in the same browser. The game's
+  canvas layout was NOT the cost. HUD hidden: no change. Videos paused:
+  no change.
+- Cutting triangles (fog sseFactor 8, 255k -> 138k) barely helped.
+- Resolution DID matter (152 ms -> 97 ms at 0.25) but the controller
+  overwrote manual settings - earlier "resolution doesn't matter" results
+  were invalid.
+
+The fix (all adaptive, hardware-GL devices never see any of it):
+
+- sseLadder LOW extended to [4, 8, 16, 32]: a deep-coarse step for
+  catastrophic machines (measured 97 -> 78 ms heavy frame at res 0.25).
+- Controller floor minScale 0.5 -> 0.25 (measured 152 -> 97 ms).
+- NEW: globe decimation (adaptivePerf.globeSkip). When a window of
+  globe-rendering frames has a median > 40 ms, the Cesium globe renders
+  1-in-3 rAF frames and its canvas holds the last frame in between; the
+  Three.js plane overlay + HUD keep full rate. Released below 20 ms.
+  Only frames that rendered the globe feed the controller (skipped frames
+  are nearly free and would hide the heavy frame from the median, causing
+  a shed/recover flap).
+
+Measured on software GL, full boot to 30 s of flight:
+BEFORE: 8.6 fps, browser gap 111.6 ms/frame.
+AFTER:  37 fps sustained (in-game FPS readout 27), gap 34.9 ms,
+        controller trail stable 36-40 fps, no oscillation.
+Probes: perf GREEN, flight 6/6, picker 6/6, tests 137/137.
