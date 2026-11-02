@@ -18,15 +18,16 @@
  */
 
 export const DETAIL_POLICY = Object.freeze({
-  // Below the "slow" speed: full detail, every tile.
+  // Below the "slow" speed: full detail, every tile. Level 22 = Esri's
+  // ~3.7 cm/px tier - the "razor sharp when low and slow" setting.
   slowMph: 800,
-  fullLevel: 19,
+  fullLevel: 22,
   // At the W ceiling: city-level detail that a 64-request pipe can hold.
   ceilingMph: 3000,
-  ceilingLevel: 16,
-  // In boost: coarser still — the ground is a blur at 7000 anyway.
+  ceilingLevel: 17,
+  // In boost: coarser still - the ground is a blur at 7000 anyway.
   boostMph: 7000,
-  boostLevel: 15,
+  boostLevel: 16,
   minLevel: 14, // never coarser than the DEM, or imagery and terrain fight
 });
 

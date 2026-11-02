@@ -2337,3 +2337,38 @@ have been a runtime ReferenceError for the new module-level callers):
 Verified (dev-prefetch-verify.mjs): picker drag1 fetched 38-62 tiles,
 warm re-drag 0-6 (cache hit); 411 tiles during spawn preparing; 105-249
 during 15 s cruise. Picker probe 6/6, flight 6/6, 137/137 tests.
+
+## 55. Phases 1+2: deeper imagery everywhere (Esri 19 -> 22)
+
+Research findings (deep dive into the game's tile APIs):
+- Esri World_Imagery serves LODs 0-23 keyless (level 22 = ~3.7 cm/px in
+  urban US; verified live). The game capped at 19 - 16x coarser than
+  available.
+- Google Photorealistic 3D Tiles: unlimited tile rendering, only root
+  sessions bill ($6/1000, ~33k/month free under the $200 credit); own
+  3D objects overlay explicitly allowed. Needs user's Google Cloud key.
+  NOT implemented yet (Phase 3, awaiting API key).
+- Terrain (Re:Earth/Mapterhorn, maxzoom 14) already carries USGS 3DEP
+  lidar for the USA - no terrain upgrade needed.
+- USGS NAIP overlaps what Esri already blends; kept as-is.
+
+Changes:
+- config.js: imagery maximumLevel 19 -> 22.
+- detailPolicy.js: full 22 (slow), ceiling 17 (3000 mph), boost 16,
+  floor 14. quality.js: HIGH full 22, LOW 20; test contract updated.
+- Flight ahead-fan now bounds its level by AGL (empirical anchor ~17.5
+  at 2000 m AGL): fetching the policy cap at altitude would be 16x more
+  tiles than the screen can show.
+- Spawn confirm preload adds a level-16 (0.5 m/px) ring at 2.5 km.
+- NEW preloadSpawnPreview(): selecting any spawn point (map click,
+  landmark, search) immediately fetches level 15 @ 3 km + 16 @ 1.5 km
+  around it, so the spot being decided on is sharp before confirm.
+- Picker entry resets the imagery depth cap (a post-boost session used
+  to leave it at 16, blinding the picker) and its pan prefetch now
+  reaches level 17 when zoomed in.
+
+Verification: 137/137 tests; flight 6/6; picker 6/6; perf GREEN 38 fps
+on software GL; network trace over San Francisco: 1140 tile fetches,
+0 failures, globe tilesLoaded; visual screenshot shows crisp satellite
+imagery. An earlier SF blackout was a stale 2-day-old vite process,
+reproduced clean on a fresh server.

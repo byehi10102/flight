@@ -794,22 +794,22 @@ async function preloadSpawnRegion() {
  *  radius is the difference between brown unloaded ground and a map that
  *  only sharpens in place. Staggered batches keep the pipe responsive
  *  for the spawn dive itself. */
-function preloadSpawnImagery() {
+/**
+ * Fetch imagery tiles around a point into the browser HTTP cache, coarse
+ * rings first. Cesium falls back to cached ancestor tiles the moment it has
+ * them, so cached coarse levels are the difference between brown ground and
+ * sharpen-in-place. Staggered batches keep the pipe responsive.
+ */
+function preloadImageryRings(lat, lon, rings) {
   try {
     const host = "https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/";
-    const latR = state.lat * Math.PI / 180;
-    const rings = [
-      { level: 12, radiusM: 30000 },
-      { level: 13, radiusM: 30000 },
-      { level: 14, radiusM: 9000 },
-      { level: 15, radiusM: 4000 },
-    ];
+    const latR = lat * Math.PI / 180;
     const jobs = [];
     for (const r of rings) {
       const tileN = Math.pow(2, r.level);
       const tileM = 40075000 * Math.max(0.2, Math.cos(latR)) / tileN;
       const half = Math.max(2, Math.ceil(r.radiusM / tileM));
-      const tx = Math.floor((state.lon + 180) / 360 * tileN);
+      const tx = Math.floor((lon + 180) / 360 * tileN);
       const ty = Math.floor((1 - Math.log(Math.tan(latR) + 1 / Math.cos(latR)) / Math.PI) / 2 * tileN);
       for (let dx = -half; dx <= half; dx++) {
         for (let dy = -half; dy <= half; dy++) {
@@ -830,6 +830,30 @@ function preloadSpawnImagery() {
       }, (i / 24) * 350);
     }
   } catch (e) { /* preload is best-effort */ }
+}
+
+/** Confirm-time preload: the wide spawn radius (parent chain) plus the
+ *  near-field detail the dive will show. */
+function preloadSpawnImagery() {
+  preloadImageryRings(state.lat, state.lon, [
+    { level: 12, radiusM: 30000 },
+    { level: 13, radiusM: 30000 },
+    { level: 14, radiusM: 9000 },
+    { level: 15, radiusM: 4000 },
+    // Level 16 = ~0.5 m/px over the spawn zone itself - the ground the
+    // player actually looks at through the dive.
+    { level: 16, radiusM: 2500 },
+  ]);
+}
+
+/** Preview preload: a small deep ring the moment a spawn point is SELECTED
+ *  (map click, landmark pin, search hit) so the spot the player is deciding
+ *  about is already sharp before they confirm. */
+function preloadSpawnPreview(lat, lon) {
+  preloadImageryRings(lat, lon, [
+    { level: 15, radiusM: 3000 },
+    { level: 16, radiusM: 1500 },
+  ]);
 }
 
 function regionSeedPoints() {
@@ -1175,7 +1199,7 @@ function prefetchPickerView() {
     // whose 256 px tile best matches the screen.
     const resM = (height * 2 * 0.577) / Math.max(300, window.innerHeight);
     const tileKm = (resM * 256) / 1000;
-    const level = Math.max(8, Math.min(15, Math.round(Math.log2((40075000 * Math.max(0.2, Math.cos(carto.latitude))) / (tileKm * 1000)))));
+    const level = Math.max(8, Math.min(17, Math.round(Math.log2((40075000 * Math.max(0.2, Math.cos(carto.latitude))) / (tileKm * 1000)))));
     const tileN = Math.pow(2, level);
     const lon = (carto.longitude * 180) / Math.PI;
     const tx = Math.floor((lon + 180) / 360 * tileN);
@@ -1229,6 +1253,10 @@ function enterSpawnPicking(useVignette = true) {
     // within seconds of flying if the device needs it.
     try {
       adaptivePerf.restoreFull();
+      // Reset the imagery depth cap the flight loop left behind: after a
+      // fast session the cap sat at the boost level (16), which would blind
+      // the picker to deeper tiles when zooming into a spawn point.
+      setImageryLevelCap(getQualityProfile().imageryFullLevel);
       // Note: the picker deliberately keeps FULL resolution even on LOW
       // tier. Measured on software GL: a top-down 15 km picker view renders
       // few coarse tiles and drags at the full rAF rate at res 1, while
@@ -1667,6 +1695,9 @@ function selectSpawnPoint(lon, lat, baseHeight, label, shortName, cartesian) {
     }
     return;
   }
+  // Preview preload: sharp tiles under the pin the moment it drops, so the
+  // spot the player is deciding about is loaded before they confirm.
+  preloadSpawnPreview(lat, lon);
   state.lon = lon;
   state.lat = lat;
   state.alt = Math.max(0, baseHeight) + 1500;
@@ -2464,7 +2495,14 @@ function update(dt) {
   function prefetchImageryAhead() {
     try {
       const gs = (state.speed || 250) * MPH_TO_MPS * WORLD_SPEED_SCALE;
-      const level = imageryLevelForSpeed(state.speed, { fullLevel: getQualityProfile().imageryFullLevel });
+      // The POLICY cap allows deep detail when slow, but Cesium only DISPLAYS
+      // what the screen-space error demands: roughly one level sharper per
+      // halving of altitude (empirical anchor: ~17.5 at 2000 m AGL). Fetching
+      // the policy cap at altitude would be 16x more tiles than the screen
+      // can show - bound the fan by AGL.
+      const policyLevel = imageryLevelForSpeed(state.speed, { fullLevel: getQualityProfile().imageryFullLevel });
+      const aglM = Math.max(60, state.agl || 0);
+      const level = Math.min(policyLevel, Math.max(14, Math.round(28.5 - Math.log2(aglM))));
       const n = Math.pow(2, level);
       const lead = Math.min(40000, Math.max(8000, gs * 4));
       const latR = state.lat * Math.PI / 180;

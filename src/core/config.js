@@ -23,7 +23,10 @@ export const CONFIG = {
     url:
       "https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
     attribution: "Imagery &copy; Esri, Maxar, Earthstar Geographics",
-    maximumLevel: 19,
+    // Esri World_Imagery serves levels 0-23 (level 22 = ~3.7 cm/px in urban
+    // US). 22 is the sweet spot: 16x the detail of the old 19 cap while
+    // Cesium's SSE only asks for deep tiles when the camera is close.
+    maximumLevel: 22,
     // Base map under the satellite layer: fills oceans, poles and any tile
     // the satellite service has no data for, so gaps never read as void.
     // Esri World Street Map — keyless like the satellite layer, so the game

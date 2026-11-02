@@ -43,7 +43,7 @@ const HIGH_PROFILE = Object.freeze({
   // Minimap render rate (a second globe render per frame is real money).
   minimapHz: 10,
   // Deepest imagery level the speed policy may ask for at low speed.
-  imageryFullLevel: 19,
+  imageryFullLevel: 22,
   atmosphere: true,
   fxaa: true,
 });
@@ -69,7 +69,7 @@ const LOW_PROFILE = Object.freeze({
   shadows: false,
   shadowMapSize: 0,
   minimapHz: 5,
-  imageryFullLevel: 17,
+  imageryFullLevel: 20,
 });
 
 // Integrated / mobile / software GPUs: not enough VRAM headroom for the

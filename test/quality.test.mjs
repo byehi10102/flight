@@ -43,7 +43,7 @@ test("integrated GPU lands on low tier with the smoothness trade-offs", () => {
   assert.equal(p.pixelRatioCap, 1.5);
   assert.equal(p.explosionScale, 0.7);
   assert.equal(p.minimapHz, 5);
-  assert.equal(p.imageryFullLevel, 17);
+  assert.equal(p.imageryFullLevel, 20);
 });
 
 test("low deviceMemory forces low tier even on a named GPU", () => {
