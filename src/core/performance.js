@@ -121,8 +121,11 @@ export class AdaptivePerformance {
     // globe 1-in-(N+1) frames (its canvas holds the last frame in between).
     // Engaged when a window of globe-rendering frames has a median > 40 ms
     // (software-GL territory where no pixel/detail cut can buy the frame
-    // back), released when that median drops below 20 ms.
+    // back), released when fully-sharp settings hold an effective cadence
+    // budget. While engaged the controller hill-climbs on the EFFECTIVE
+    // frame cost, so capable machines settle sharp instead of blurry.
     this.globeSkip = 0;
+    this._skipDwell = 0;
     // null, not 0: a legitimate first timestamp of exactly 0 must not read as
     // "no window started yet" (it would restart the window every frame).
     this.sampleStart = null;
@@ -186,6 +189,7 @@ export class AdaptivePerformance {
     // down, only once the coast is clear.
     if (stats.medianMs > 40 && this.globeSkip !== 2) {
       this.globeSkip = 2;
+      this._skipDwell = 10; // no release for 10 s: kills engage/release flapping
       this.lastReason = "globe-skip";
     }
     // Hysteresis: after shedding, block recovery for a dwell period so the
@@ -204,6 +208,44 @@ export class AdaptivePerformance {
           this.sseIndex = next2.sseIndex;
           this.lastReason = next2.reason;
           this.apply();
+        }
+      }
+      return this.scale;
+    }
+    // While decimated, the player feels the AVERAGE cadence, not the heavy
+    // frame - so shed/climb on the effective frame cost and hill-climb toward
+    // the SHARPEST settings the machine affords. The plain ladder gets stuck
+    // here: its recovery needs a fast heavy-frame median, which never happens
+    // on a shed machine, leaving players at the blurry floor forever even
+    // when decimation left throughput to spare. Skipped frames cost ~8 ms
+    // (overlay-only). Release requires FULL quality: at scale 1.0 with the
+    // base SSE, handing the globe back is safe - if it was premature, the
+    // engage rule (>40 ms) picks decimation back up after the dwell.
+    if (this.globeSkip > 0) {
+      if (this._skipDwell > 0) this._skipDwell -= this.opts.windowMs / 1000;
+      const effective = (stats.medianMs + this.globeSkip * 8) / (this.globeSkip + 1);
+      const maxIdx = (this.opts.sseLadder || PERF_DEFAULTS.sseLadder).length - 1;
+      if (effective > 30) {
+        // Too slow even decimated: shed one step, detail first.
+        if (this.sseIndex < maxIdx) this.sseIndex++;
+        else this.scale = Math.max(this.opts.minScale, this.scale * this.opts.stepDown);
+        this.lastReason = "decimated-shed";
+        this._shedCooldown = 5;
+        this.apply();
+      } else if (effective < 25) {
+        // Headroom: climb one step toward sharpness (pixels first, then detail).
+        if (this.scale < this.opts.maxScale - 0.005) {
+          this.scale = Math.min(this.opts.maxScale, this.scale * this.opts.stepUp);
+          this.lastReason = "decimated-climb";
+          this.apply();
+        } else if (this.sseIndex > 0) {
+          this.sseIndex--;
+          this.lastReason = "decimated-climb-detail";
+          this.apply();
+        } else if (this._skipDwell <= 0) {
+          // Fully sharp and still cheap: hand the globe back to full rate.
+          this.globeSkip = 0;
+          this.lastReason = "globe-restore";
         }
       }
       return this.scale;

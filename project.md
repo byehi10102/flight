@@ -2372,3 +2372,43 @@ on software GL; network trace over San Francisco: 1140 tile fetches,
 0 failures, globe tilesLoaded; visual screenshot shows crisp satellite
 imagery. An earlier SF blackout was a stale 2-day-old vite process,
 reproduced clean on a fresh server.
+
+## 56. Freeze + blur + slow-tiles round: decimation-aware controller, contention guards
+
+User report: random freezes, tiles still blurry, tiles not loading fast
+enough.
+
+Findings:
+- Freeze hunt (60 s instrumented flight, per-frame deltas + longtask
+  observer): ZERO freezes > 250 ms and ZERO long tasks in the controlled
+  environment - game code does not stall the main thread. The freeze the
+  player feels traces to two REAL mechanisms fixed here + their browser's
+  software compositing (the known environment multiplier).
+- FREEZE CAUSE 1 (fixed): setImageryLevelCap makes Cesium re-evaluate the
+  WHOLE LOD on every assignment, and speed jitter around a policy boundary
+  (2990 <-> 3010 mph) flipped the level every frame = full LOD rebuilds
+  every frame. Now debounced: the new level must hold 750 ms before the
+  cap moves.
+- FREEZE/STALL CAUSE 2 (fixed): the imagery prefetch fired up to 54
+  fetches/2 s with no regard for Cesium's own tile queue - on a constrained
+  connection our bursts starved the globe's requests (reads as "tiles load
+  slowly" and stall-ish freezes). Now: flight fan + picker prefetch gate on
+  the globe's tile queue (only prefetch when <= 4 pending; Cesium always
+  wins the connection), batch caps cut (30->16 fan, 24->12 ring/picker),
+  fan interval 2 -> 2.5 s. Measured effect: flight-window fetches dropped
+  121 -> 46 while the (uncontended, behind the loading screen) spawn
+  preload stays full strength.
+- BLUR CAUSE (fixed): the controller got STUCK at the blurry floor. Recovery
+  compared only heavy-frame medians, which never pass on a shed machine -
+  so even a machine with spare throughput (hardware WebGL behind a software
+  compositor) sat at scale 0.25 / SSE 32 forever. While decimated the
+  controller now hill-climbs on the EFFECTIVE frame cost
+  ((heavy + skip*8) / (skip+1)): sheds one step above 30 ms effective,
+  climbs one step below 25 (pixels first, then detail), and hands the globe
+  back to full rate once FULL quality holds the budget (with a 10 s dwell
+  against engage/release flapping). Software-GL boxes correctly stay at the
+  floor; capable machines settle at the sharpest sustainable settings.
+
+Verification: 137/137 tests; freeze hunt GREEN (no freezes, no longtasks,
+med 26.7 ms); perf probe GREEN 37 fps; flight 6/6; picker 6/6; prefetch
+verify GREEN with the contention-shaped numbers above.

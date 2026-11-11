@@ -216,6 +216,9 @@ const imageryPrefetchSet = new Set();
 // overlay keeps running at full rate. The ground pans in steps; the jet and
 // the guns stay smooth. Measured on software GL: 6.5 -> 30 fps.
 let globeSkipCounter = 0;
+// Pending imagery-level debounce (see the flight loop's cap assignment).
+let imageryLevelPending = -1;
+let imageryLevelPendingSince = 0;
 // Set at the top of every frame; read by the sampling block (only frames that
 // actually rendered the globe feed the controller - the skipped frames are
 // nearly free and would drag the median down until quality recovered and the
@@ -922,9 +925,13 @@ viewer.camera.moveEnd.addEventListener(() => {
     }
     groundSampler.seed(pts).catch(() => {});
     imageryPrefetchTimer += dt;
-    if (imageryPrefetchTimer >= 2) {
+    if (imageryPrefetchTimer >= 2.5) {
       imageryPrefetchTimer = 0;
-      prefetchImageryAhead();
+      // Contention guard: our prefetch competes with CESIUM'S OWN TILES for
+      // the same connection. When the globe still has work queued, let it
+      // win - starving it is what reads as "tiles load slowly" and stall-ish
+      // freezes. Prefetch only when the globe is nearly caught up.
+      if (globeTileQueue <= 4) prefetchImageryAhead();
     }
   } catch (e) { /* warm-up is best-effort */ }
 });
@@ -1182,6 +1189,8 @@ let pickerPrefetchLast = 0;
 function prefetchPickerView() {
   try {
     const nowT = performance.now();
+    // Same contention rule as the flight fan: the globe's own tiles win.
+    if (globeTileQueue > 4) return;
     // After an idle stretch, re-arm WITHOUT fetching: the first move after
     // idle must render immediately, and the first drag render should never
     // share its frame with 24 fresh fetches. Active panning keeps the 400 ms
@@ -1214,7 +1223,7 @@ function prefetchPickerView() {
         if (imageryPrefetchSet.has(key)) continue;
         imageryPrefetchSet.add(key);
         fetch(host + key).catch(() => {});
-        if (++fetched >= 24) { dx = 4; break; }
+        if (++fetched >= 12) { dx = 4; break; }
       }
     }
   } catch (e) { /* picker prefetch is best-effort */ }
@@ -2533,7 +2542,7 @@ function update(dt) {
             const url = host + level + "/" + py + "/" + px;
             fetch(url).catch(() => {});
             fetched++;
-            if (fetched > 30) return; // cap per call
+            if (fetched > 16) return; // cap per call: never starve Cesium's own tiles
           }
         }
       }
@@ -2556,7 +2565,7 @@ function update(dt) {
           if (imageryPrefetchSet.has(key)) continue;
           imageryPrefetchSet.add(key);
           fetch("https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/" + midLevel + "/" + py + "/" + px).catch(() => {});
-          if (++midFetched >= 24) { dx = midHalf + 1; break; }
+          if (++midFetched >= 12) { dx = midHalf + 1; break; }
         }
       }
       // prevent unbounded growth
@@ -2976,12 +2985,23 @@ function animate() {
     // in time (see core/detailPolicy.js), and asking for them is exactly what
     // makes detail pop in late under the jet. Cruising still gets every tile.
     // The quality tier caps the "every tile" ceiling (LOW tier tops out at a
-    // level the pipe can serve). Only assigned when the level changes.
+    // level the pipe can serve). Only assigned when the level changes - and
+    // DEBOUNCED: each assignment makes Cesium re-evaluate the whole LOD, and
+    // speed jitter around a policy boundary (e.g. 2990 <-> 3010 mph) would
+    // flip the level every frame and rebuild the LOD tree every frame. That
+    // was the random mid-flight freeze. The level must hold ~0.75 s first.
     try {
       const level = imageryLevelForSpeed(state.speed, { fullLevel: getQualityProfile().imageryFullLevel });
       if (level !== imageryLevel) {
-        imageryLevel = level;
-        setImageryLevelCap(level);
+        if (imageryLevelPending !== level) {
+          imageryLevelPending = level;
+          imageryLevelPendingSince = now;
+        } else if (now - imageryLevelPendingSince > 750) {
+          imageryLevel = level;
+          setImageryLevelCap(level);
+        }
+      } else {
+        imageryLevelPending = -1;
       }
     } catch (e) { /* streaming detail is best-effort */ }
 
@@ -3273,6 +3293,14 @@ const adaptivePerf = new AdaptivePerformance({
   opts: { sseLadder: getQualityProfile().sseLadder },
 });
 adaptivePerf.apply();
+// Globe tile-queue depth, updated by Cesium's progress event. The imagery
+// prefetches gate on this: Cesium's own tiles always win the connection.
+let globeTileQueue = -1;
+try {
+  viewer.scene.globe.tileLoadProgressEvent.addEventListener((n) => {
+    globeTileQueue = n;
+  });
+} catch (e) { /* queue tracking is best-effort */ }
 setupSpawnPicker();
 setupSearch();
 // (Minimap viewer init moved to the spawn beat - see the confirmSpawn
