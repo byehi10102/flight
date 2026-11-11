@@ -103,7 +103,7 @@ test("convergeStep: a post-stall jump converges smoothly, never snaps", () => {
 test("adaptiveDelay sizes the buffer from interval and jitter, clamped", () => {
   assert.equal(adaptiveDelay(33, 0), 66); // 2x send interval floor
   assert.equal(adaptiveDelay(33, 20), 86);
-  assert.equal(adaptiveDelay(150, 300), 250); // clamped high
+  assert.equal(adaptiveDelay(150, 300), 400); // clamped high
   assert.equal(adaptiveDelay(33, 0), 66);
 });
 

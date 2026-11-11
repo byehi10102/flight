@@ -152,11 +152,21 @@ export class WsNet {
         this._setStatus("error", "socket error");
         reject(new Error("ws error"));
       };
-      ws.onclose = () => {
+      ws.onclose = (ev) => {
         clearTimeout(timeout);
         this.active = false;
         if (!settled) {
           settled = true;
+          // The relay answers a bad party code with an error frame then a
+          // close (4000 bad code / 4002 party not found). The close can beat
+          // the error frame on the wire - read the CODE, or makeNet would
+          // mistake "party not found" for "no server" and waste ~20 s
+          // falling back to a P2P network that cannot have the party either.
+          if (ev && (ev.code === 4000 || ev.code === 4002)) {
+            this._setStatus("error", "party not found");
+            reject(new Error("party not found"));
+            return;
+          }
           this._setStatus("error", "closed before join");
           reject(new Error("ws closed"));
           return;

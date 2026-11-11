@@ -2412,3 +2412,49 @@ Findings:
 Verification: 137/137 tests; freeze hunt GREEN (no freezes, no longtasks,
 med 26.7 ms); perf probe GREEN 37 fps; flight 6/6; picker 6/6; prefetch
 verify GREEN with the contention-shaped numbers above.
+
+## 57. Multiplayer bug check: remote-plane glitch fix + relay hardening
+
+Full E2E built (dev-mp-e2e.mjs): real relay server + two browser sessions
+(host creates party, joiner joins by code, host starts, both spawn and fly
+30 s) measuring roster, sync, WS frame counts, fps, page errors; plus a
+raw-Node relay loss test (dev-relay-loss.mjs) and the party-not-found path.
+
+Bugs found and fixed:
+- REMOTE-PLANE GLITCH (the user-visible one): the interpolation buffer
+  starved 553x in 30 s and corrections snapped up to 1003 m. Root cause:
+  the render point ran on wall-clock past the newest snapshot whenever the
+  relay stalled (a Node relay sharing a CPU with the game starves
+  routinely), the plane dead-reckoned up to 2 s into the void, then
+  rubber-banded back when the burst landed. FIX: a drift-clock render point
+  (buffer health) - it never advances past the newest snapshot (the plane
+  HOLDS on a stall, with a 20 ms coast), catches up at max 1.5x when data
+  resumes, and does ONE bounded reposition if the gap exceeds 2.5 s
+  (convergeStep smooths the slide). Measured: underruns 553 -> 0,
+  corrections 1003 m -> 69 m on the same session shape.
+- adaptiveDelay high clamp 250 -> 400 ms: a jittery link needs a deeper
+  buffer, and the drift clock absorbs stalls. A remote plane that renders
+  300 ms late and smooth beats one that stutters and teleports. Unit
+  contract updated (test asserted the old clamp).
+- SILENT MP DEATH (server): the ping/reap terminated sockets after 2
+  missed protocol pongs (30 s) - a renderer blocked during spawn warm-up
+  misses pongs while still streaming frames, so the relay killed LIVE
+  connections; the client never learned and MP half-died (inbound frozen,
+  outbound flowing). FIX: ANY inbound frame resets liveness, and a failed
+  room send now terminates the dead socket so the room hears "left"
+  instead of coasting a ghost plane forever.
+- BOGUS-CODE P2P WASTE (client): the relay answers a bad party code with
+  an error frame + close (4000/4002); the close sometimes beat the error
+  frame on the wire, wsNet rejected with "ws closed", and makeNet mistook
+  it for "no server" and wasted ~20 s falling back to a P2P network that
+  cannot have the party either. FIX: wsNet reads the close code and
+  reports party-not-found directly.
+
+Also found during the round: a stale 44-hour-old vite dev server owned
+port 5173 and served the probes - two MP test failures traced to it, not
+to game code. Kill stale dev servers before believing a regression.
+
+Verification: 137/137 tests; E2E 11/12 (the one fail is the third browser
+boot racing on a thrashed test box - its mechanism, fast bogus-code
+rejection, is now code-fixed and passed in earlier runs); relay loss test
+0% over 183 frames both directions; flight 6/6; freeze hunt GREEN.

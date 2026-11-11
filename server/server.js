@@ -335,6 +335,10 @@ wss.on("connection", (ws, query) => {
   let recent = [];
   ws.on("message", (raw) => {
     const now = Date.now();
+    // ANY inbound frame is proof of life: a renderer blocked by spawn
+    // warm-up misses protocol pongs but still streams frames from its IO
+    // path. Liveness by pong alone reaped live connections mid-session.
+    ws.isAlive = true;
     recent = recent.filter((t) => now - t < 1000);
     if (recent.length >= WS_MSG_CAP_PER_SEC) return; // dropped, not queued
     recent.push(now);
@@ -357,7 +361,14 @@ wss.on("connection", (ws, query) => {
 
     for (const other of room.players.values()) {
       if (other.id !== id) {
-        try { other.ws.send(JSON.stringify({ t: frame.t, from: id, d: frame.d })); } catch (e) { /* dead socket */ }
+        try {
+          other.ws.send(JSON.stringify({ t: frame.t, from: id, d: frame.d }));
+        } catch (e) {
+          // A dead room socket must not fail silently: if the send threw,
+          // the peer's connection is gone - tear it down so the room hears
+          // "left" instead of a ghost plane coasting forever.
+          try { other.ws.terminate(); } catch (e2) { /* already gone */ }
+        }
       }
     }
   });

@@ -161,6 +161,10 @@ export function adaptiveDelay(intervalMs, jitterMs) {
   // Floor lowered 66 -> 20: the WS transport on a LAN has < 5 ms RTT and
   // negligible jitter. A 66 ms buffer was adding a perceptible lag to every
   // remote-plane movement, making the other plane feel frozen. 20 ms is
-  // still enough to always have a bracketing snapshot pair at 30 Hz.
-  return Math.max(20, Math.min(250, 2 * interval + jitter));
+  // still enough to always have a bracketing snapshot pair at 30 Hz. The
+  // high clamp is 400: a jittery link (a relay sharing a CPU with the game)
+  // needs a deeper buffer, and the receiver's drift-clock absorbs stalls -
+  // a remote plane that renders 300 ms late and smooth beats one that
+  // stutters and teleports.
+  return Math.max(20, Math.min(400, 2 * interval + jitter));
 }

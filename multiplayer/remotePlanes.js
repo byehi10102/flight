@@ -168,6 +168,8 @@ export class RemotePlanes {
       intervalEwma: null,
       jitterEwma: null,
       interpDelayMs: 100,
+      /** Drift-clock render point (sender timeline); null until first snap. */
+      renderT: null,
       /** Diagnostics (?devtest): what the netcode is actually doing. */
       stats: { packets: 0, underruns: 0, lastCorrectionM: 0, jitterMs: 0, delayMs: 100 },
       leaving: false,
@@ -404,9 +406,31 @@ export class RemotePlanes {
       // the sender's timeline (so network jitter cannot distort the path);
       // peers without a timestamp fall back to the local arrival timeline.
       const base = plane.clocked && plane.offset != null ? atMs - plane.offset : atMs;
-      const sampleT = base - (plane.interpDelayMs || 100);
-      const lastSnap = plane.snaps[plane.snaps.length - 1];
-      if (sampleT >= lastSnap.t) plane.stats.underruns++; // coasting past the data
+      const targetT = base - (plane.interpDelayMs || 100);
+      // Drift-clock render point (buffer health): the render time follows
+      // the target but NEVER runs past the newest snapshot - coasting past
+      // the data accumulated dead-reckoning error for seconds and then
+      // teleported hundreds of metres when the stalled stream resumed (the
+      // "remote plane glitches" bug). On a stall the plane HOLDS (with a
+      // tiny 20 ms coast); when data lands it catches up at up to 1.5x -
+      // a brief speed-up, never a teleport. Backward moves (a deeper
+      // adaptive delay) ride convergeStep's smoothing.
+      const newestT = plane.snaps.length ? plane.snaps[plane.snaps.length - 1].t : targetT;
+      const cappedTarget = Math.min(targetT, newestT - 20);
+      if (plane.renderT == null) plane.renderT = cappedTarget;
+      const diff = cappedTarget - plane.renderT;
+      if (diff > 2500) {
+        // Stall longer than the buffer can meaningfully replay: reposition
+        // near the target in one bounded step (convergeStep smooths the
+        // slide) instead of freezing for seconds of catch-up.
+        plane.renderT = cappedTarget - 250;
+      } else if (diff > 0) {
+        plane.renderT += Math.min(diff, dt * 1000 * 1.5);
+      } else {
+        plane.renderT += Math.max(diff, -(dt * 1000));
+      }
+      if (plane.renderT >= newestT) plane.stats.underruns++; // at the data edge
+      const sampleT = plane.renderT;
       const pose = this._sample(plane, sampleT);
       if (!pose) continue;
       // Smooth corrections (DIS "lie gently"): tiny per-frame steps apply
