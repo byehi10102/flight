@@ -97,6 +97,13 @@ export function createViewer(container) {
     RequestScheduler.maximumRequests = 96;
   } catch (e) { /* defaults still work */ }
 
+  // Render on demand (ref-flight): moving the camera, arriving tiles and
+  // explicit requestRender() calls still invalidate the scene, while a static
+  // pause/loading frame costs no globe GPU work. Our clock is pinned, so time
+  // alone must never force a redraw.
+  viewer.scene.requestRenderMode = true;
+  viewer.scene.maximumRenderTimeChange = Infinity;
+
   applyBaseWorld(viewer);
   // Freeze the simulation clock: we pin the time ourselves for permanent
   // daylight, so a ticking clock must never drag the sun into night.

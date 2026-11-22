@@ -2458,3 +2458,15 @@ Verification: 137/137 tests; E2E 11/12 (the one fail is the third browser
 boot racing on a thrashed test box - its mechanism, fast bogus-code
 rejection, is now code-fixed and passed in earlier runs); relay loss test
 0% over 183 frames both directions; flight 6/6; freeze hunt GREEN.
+
+## 57. Reference render-on-demand parity
+
+REA inspection of flight.tarmizi.id's deployed bundle confirmed its frame
+strategy: manual rAF rendering, quality-scaled resolution and terrain SSE,
+coarse-first skip-LOD tile streaming, FXAA, and Cesium request-render mode.
+Skyward already had the first four (with adaptive quality and fixed-step camera
+interpolation), so only the missing piece was ported: `requestRenderMode` with
+an infinite render-time change. Camera movement, arriving tiles and explicit
+invalidations still render; static pause/loading scenes no longer spend globe
+GPU time. The deliberately tighter low-tier and request-budget settings remain
+unchanged.
