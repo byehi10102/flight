@@ -95,3 +95,15 @@ test("profiles are frozen objects (no mid-flight mutation)", () => {
   const p = deriveQualityProfile({ gpuRenderer: "Intel UHD", deviceMemoryGB: 2, isMobile: false });
   assert.throws(() => { p.msaaSamples = 8; });
 });
+
+test("LOW-tier emergency terrain stays at the reference's SSE 8 ceiling", () => {
+  const p = deriveQualityProfile({ gpuRenderer: "Intel UHD", deviceMemoryGB: 2, isMobile: false });
+  assert.deepEqual(p.sseLadder, [4, 8]);
+});
+
+test("resolution floors preserve reference quality on both tiers", () => {
+  const low = deriveQualityProfile({ gpuRenderer: "Intel UHD", deviceMemoryGB: 2, isMobile: false });
+  const high = deriveQualityProfile({ gpuRenderer: "RTX", deviceMemoryGB: 16, isMobile: false });
+  assert.equal(low.minimumScale, 0.5);
+  assert.equal(high.minimumScale, 0.75);
+});

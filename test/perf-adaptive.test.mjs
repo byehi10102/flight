@@ -178,3 +178,33 @@ test("report exposes the levers and measured frame rate", () => {
   assert.ok(r.scale <= 1 && r.scale >= PERF_DEFAULTS.minScale);
   assert.equal(r.sse, PERF_DEFAULTS.sseLadder[r.sseIndex]);
 });
+
+test("emergency shedding never drops below reference-quality resolution", () => {
+  assert.equal(PERF_DEFAULTS.minScale, 0.75);
+});
+
+test("sibling prefetch pauses only while the globe is decimated", () => {
+  const { perf, viewer } = makeSurfaces();
+  viewer.scene.globe.preloadSiblings = true;
+  perf.globeSkip = 2;
+  perf.apply();
+  assert.equal(viewer.scene.globe.preloadSiblings, false);
+  perf.globeSkip = 0;
+  perf.apply();
+  assert.equal(viewer.scene.globe.preloadSiblings, true);
+});
+
+test("fixed-quality flight config decimates without ever blurring the image", () => {
+  const viewer = { resolutionScale: 1, scene: { globe: { maximumScreenSpaceError: 4 } } };
+  const perf = new AdaptivePerformance({
+    viewer,
+    renderer: { setPixelRatio() {} },
+    opts: { minScale: 1, sseLadder: [4] },
+  });
+  perf.sample(300, 0);
+  perf.sample(300, 800);
+  perf.sample(300, 1600);
+  assert.equal(viewer.resolutionScale, 1);
+  assert.equal(viewer.scene.globe.maximumScreenSpaceError, 4);
+  assert.equal(perf.globeSkip, 2);
+});

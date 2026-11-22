@@ -32,6 +32,7 @@ const HIGH_PROFILE = Object.freeze({
   pixelRatioCap: Infinity,
   explosionScale: 1,
   resolutionScale: 1,
+  minimumScale: 0.75,
   maximumScreenSpaceError: 2,
   // Coarse-terrain ladder the thermostat walks down under load: index 0 is
   // the shipped detail, the rest are the sacrifice steps (detail before
@@ -64,8 +65,9 @@ const LOW_PROFILE = Object.freeze({
   pixelRatioCap: 1.5,
   explosionScale: 0.7,
   resolutionScale: 1,
+  minimumScale: 0.5,
   maximumScreenSpaceError: 4,
-  sseLadder: [4, 8, 16, 32],
+  sseLadder: [4, 8],
   shadows: false,
   shadowMapSize: 0,
   minimapHz: 5,

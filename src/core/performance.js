@@ -35,8 +35,8 @@
  */
 
 export const PERF_DEFAULTS = Object.freeze({
-  minScale: 0.25,      // floor: 0.25x the pixels - deeper than before; at 2 fps
-                       // a 0.6 floor was still too many pixels for the GPU
+  minScale: 0.75,     // reference default: never turn the globe into
+                       // unreadable 0.25x pixel soup; trade detail/frames instead
   maxScale: 1,
   stepDown: 0.8,
   stepUp: 1.1,
@@ -191,6 +191,7 @@ export class AdaptivePerformance {
       this.globeSkip = 2;
       this._skipDwell = 10; // no release for 10 s: kills engage/release flapping
       this.lastReason = "globe-skip";
+      this.apply();
     }
     // Hysteresis: after shedding, block recovery for a dwell period so the
     // fps stabilises before quality is handed back. Without it the
@@ -246,6 +247,7 @@ export class AdaptivePerformance {
           // Fully sharp and still cheap: hand the globe back to full rate.
           this.globeSkip = 0;
           this.lastReason = "globe-restore";
+          this.apply();
         }
       }
       return this.scale;
@@ -286,6 +288,12 @@ export class AdaptivePerformance {
       const globe = this.viewer?.scene?.globe;
       // Only assign on change: each assignment makes Cesium re-evaluate LOD.
       if (globe && globe.maximumScreenSpaceError !== sse) globe.maximumScreenSpaceError = sse;
+      // Sibling prefetch hides tile arrivals while there is GPU headroom. Once
+      // the globe needs decimation, its extra decode/upload work makes stutter
+      // worse, so pause it and let the existing ahead-fan use idle capacity.
+      if (globe && globe.preloadSiblings !== (this.globeSkip === 0)) {
+        globe.preloadSiblings = this.globeSkip === 0;
+      }
     } catch (e) { /* detail ladder is best-effort */ }
     try {
       const mv = this.getMiniViewer();

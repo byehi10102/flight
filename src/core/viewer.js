@@ -169,12 +169,11 @@ export function applyBaseWorld(viewer) {
   // Ancestors STAY on: with skip-LOD they are what draws something at every
   // level immediately, which is the whole coarse-first strategy.
   viewer.scene.globe.preloadAncestors = true;
-  // Siblings OFF: it fetches the neighbours of every visible tile — roughly
-  // doubling requests — and skip-LOD already guarantees a coarse parent is on
-  // screen while a tile's detail arrives, which is what siblings were buying.
-  // Measured context: terrain alone is ~63% of this app's tile requests, so
-  // halving the per-tile fan-out matters more here than the seam smoothness.
-  viewer.scene.globe.preloadSiblings = false;
+  // Preload adjacent tiles as flight.tarmizi.id does: the next ground area is
+  // already resident when the jet reaches it, instead of visibly sharpening
+  // after arrival. AdaptivePerformance pauses this extra work during globe
+  // decimation; ancestors remain the immediate coarse fallback.
+  viewer.scene.globe.preloadSiblings = true;
   // Raised concurrent tile-fetch budget: at 1.8x arcade speed (up to
   // ~8 km/s in boost) the camera outruns the default fetch queue, so more
   // descendants load per frame instead of arriving soft behind the jet.

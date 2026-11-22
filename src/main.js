@@ -3281,16 +3281,19 @@ initialCameraView = {
 };
 
 initThree();
-// Frame-budget controller: trades tile detail and pixels for smoothness when
-// the GPU can't hold the frame time (see core/performance.js). The detail
-// ladder starts at this quality tier's shipped value. Built here so the
-// overlay renderer and the globe both exist; it starts at full detail.
+// Keep the visible image sharp: the frame-budget controller may decimate the
+// globe under overload, but it must never reduce resolution or terrain detail.
+// A one-rung ladder and full-resolution floor make every quality-shed path a
+// no-op; adaptive quality previously held the main view blurry even at 43 fps.
 const adaptivePerf = new AdaptivePerformance({
   viewer,
   renderer,
   getMiniViewer,
   getPixelRatioCap: () => getQualityProfile().pixelRatioCap,
-  opts: { sseLadder: getQualityProfile().sseLadder },
+  opts: {
+    sseLadder: [getQualityProfile().maximumScreenSpaceError],
+    minScale: getQualityProfile().resolutionScale,
+  },
 });
 adaptivePerf.apply();
 // Globe tile-queue depth, updated by Cesium's progress event. The imagery

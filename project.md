@@ -2470,3 +2470,36 @@ an infinite render-time change. Camera movement, arriving tiles and explicit
 invalidations still render; static pause/loading scenes no longer spend globe
 GPU time. The deliberately tighter low-tier and request-budget settings remain
 unchanged.
+
+## 58. Readable adaptive quality + reference sibling tile loading
+
+User report: flight imagery was pixelated/blurry, unlike flight.tarmizi.id.
+REA's deployed-bundle capture showed the reference presets (LOW 0.5 / SSE 8,
+MEDIUM 0.75 / SSE 2, HIGH 1.0 / SSE 1.3) and `preloadAncestors` +
+`preloadSiblings` alongside the skip-LOD values already present here.
+
+The blur's direct cause was the emergency controller reaching 0.25 / SSE 32.
+Resolution now bottoms out at 0.75 on HIGH and the reference LOW value of 0.5
+on LOW; LOW's terrain ladder is capped at SSE 8 instead of 32. Sibling tile
+preload is enabled like the reference, but AdaptivePerformance suspends it
+while globe decimation is active: a same-session A/B at 0.75 / SSE 8 measured
+9.76 fps and 10.2 s of long tasks with siblings forced on, versus 12.65 fps and
+1.7 s with them off. The existing ahead-fan and ancestor fallback still cover
+new ground during overload.
+
+Final 4x-CPU/SwiftShader check: tilesLoaded true, no page errors, 0.5 / SSE 8,
+15.35 fps (previous extreme settings: 21.48 fps at 0.25 / SSE 32). This is an
+emulated stress floor, not a physical-device frame-rate claim; visual quality
+no longer collapses to pixel soup.
+
+## 59. Fixed-quality flight rendering (43 fps blurry-screenshot regression)
+
+The 0.5 / SSE 8 floor was still visibly blurry in the player's flight screenshot
+even though the HUD reported 43 fps and the independent minimap was sharp. The
+problem is the adaptive visual-quality mechanism itself, not tile availability.
+Flight now passes a one-rung SSE ladder and a full-resolution floor to the same
+controller, so every resolution/detail shed is a no-op on both HIGH and LOW.
+Cesium stays at full resolution and the tier's base SSE (HIGH 2, LOW 4); only
+globe decimation and sibling-prefetch suspension remain adaptive. This follows
+the reference's fixed-preset model instead of allowing a slow-window feedback
+loop to hold the main canvas at reduced quality.
